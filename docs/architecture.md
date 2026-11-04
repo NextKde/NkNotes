@@ -47,7 +47,7 @@ EditorSession 包装 QQuickTextDocument 的 QTextDocument；同一纯文本 Mark
 | undo / redo | Qt StandardKey.Undo / Redo | 同一文档撤销栈 |
 | sidebar | Ctrl+Shift+B | 侧栏偏好；窄窗口仍自动收起 |
 
-编辑快捷键只在正文焦点且非组合输入时启用。ApplicationWindow 不引入 KosApplicationWindow 的 Ctrl+B 侧栏行为。新建、保存、查找、链接、模式切换按后续阶段接入此命令表，M0 不放置无法工作的业务按钮。跨平台标准修饰键与 TextArea 内置快捷键优先级必须在 VM 验证。
+编辑快捷键只在正文焦点且非组合输入时启用。撤销/重做通过 Shortcut.sequences 绑定 StandardKey，包含平台提供的全部标准组合。ApplicationWindow 不引入 KosApplicationWindow 的 Ctrl+B 侧栏行为。新建、保存、查找、链接、模式切换按后续阶段接入此命令表，M0 不放置无法工作的业务按钮。跨平台标准修饰键与 TextArea 内置快捷键优先级必须在 VM 验证。
 
 ## 最小文件约定（M1 实现目标，尚无文件 IO）
 
@@ -62,11 +62,11 @@ EditorSession 包装 QQuickTextDocument 的 QTextDocument；同一纯文本 Mark
 
 ## 三栏与关键浮层设计
 
-主窗口建议 1120×740，侧栏 208、列表 276，正文占余宽；680 最小宽下收起侧栏，保留列表与可编辑正文。尺寸属于应用初始令牌，集中在 NotesTokens；不是 Apple 官方数值。当前是静态单会话布局，无假笔记库、无持久化状态。可拖动分栏、窗口布局恢复与关联检查器由 M1/后续阶段补充。
+主窗口建议 1120×740，侧栏 208、列表 276，正文区域占余宽；SourceEditor 使用 NotesTokens.readingWidth 将正文阅读栏上限设为 720，并以对称内边距居中，窄窗口保持两侧至少 28 的留白后随可用宽度收缩。680 最小宽下收起侧栏，保留列表与可编辑正文。尺寸属于应用初始令牌，集中在 NotesTokens；不是 Apple 官方数值。当前是静态单会话布局，无假笔记库、无持久化状态。可拖动分栏、窗口布局恢复与关联检查器由 M1/后续阶段补充。
 
-主窗口使用 ApplicationWindow + KosWindowControls + KosWindowResizeHandles。动作声明为 maximize/minimize/close，真实位置由组件布局产生；未接入平台适配器，保持客户端回退。顶部无额外圆角悬浮卡片。正文与列表为普通材质；侧栏贴边普通背景单独 0.95 不透明度，前景不变。
+主窗口使用 ApplicationWindow + KosWindowControls + KosWindowResizeHandles。动作声明为 maximize/minimize/close，真实位置由组件布局产生；未接入平台适配器，保持客户端回退。顶部无额外圆角悬浮卡片。正文与列表为普通材质；侧栏当前未接入有效下层采样，按共享规范使用 100% 不透明的贴边普通背景，无模糊采样，减少透明度和软件渲染时同样保持实心，前景不变。
 
-顶部命令在当前原型中与滚动正文没有重叠，无需切换成覆盖式玻璃标题栏。轻档液态操作按钮与格式 LiquidPopover 采样 readingScene（正文与普通背景），消费者、采样器和 Overlay 弹层均不在源树内。弹层使用一层共享液态外壳和普通 LiquidPopoverItem，Esc/菜单键盘导航沿用共享控件。缺失纹理和减少透明度由共享组件回退。没有壁纸复制、桌面采样或 KWin 请求。
+顶部命令在当前原型中与滚动正文没有重叠，无需切换成覆盖式玻璃标题栏。轻档液态操作按钮与格式 LiquidPopover 采样 readingScene（正文与普通背景），两个 KosToolTip 显式绑定同源 readingBackdrop；消费者、采样器和 Overlay 弹层均不在源树内。弹层使用一层共享液态外壳和普通 LiquidPopoverItem，Esc/菜单键盘导航沿用共享控件。缺失纹理和减少透明度由共享组件回退。没有壁纸复制、桌面采样或 KWin 请求。
 
 后续选区工具条锚定 selectionRect，若与输入法候选或选区相交则调整到选区上/下方；无法获得候选几何时组合输入阶段隐藏。链接/重命名使用 LiquidContentPopover 的独立草稿与提交；破坏性确认用 LiquidDialog。当前仅格式选择器已实现，其余是设计计划。
 

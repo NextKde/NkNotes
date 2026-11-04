@@ -7,6 +7,7 @@ ScrollView {
     required property var session
     property alias editor: input
     property int bodySize: 16
+    property real readingWidth: availableWidth
     clip: true
     contentWidth: availableWidth
     function rememberSelection() {
@@ -25,7 +26,9 @@ ScrollView {
         selectedTextColor: AppTheme.accentText
         font.pixelSize: root.bodySize
         font.family: "monospace"
-        leftPadding: 28; rightPadding: 28; topPadding: 18; bottomPadding: 60
+        leftPadding: Math.max(28, (width - root.readingWidth) / 2)
+        rightPadding: leftPadding
+        topPadding: 18; bottomPadding: 60
         background: null
         Accessible.name: "Markdown 源码编辑器"
         onCursorPositionChanged: root.rememberSelection()

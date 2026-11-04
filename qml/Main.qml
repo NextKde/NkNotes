@@ -61,6 +61,7 @@ ApplicationWindow {
             anchors.leftMargin: (root.showSidebar ? tokens.sidebarWidth : 0) + tokens.listWidth
             anchors.right: parent.right
             bodySize: tokens.bodySize
+            readingWidth: tokens.readingWidth
         }
     }
     LiquidBackdrop { id: readingBackdrop; sourceItem: readingScene; registerAsDefault: false }
@@ -71,7 +72,8 @@ ApplicationWindow {
             floating: false; surfaceColor: "transparent"
             Rectangle {
                 anchors.fill: parent; color: AppTheme.contentSecondaryBackground
-                opacity: AppTheme.reduceTransparency ? 1 : 0.95
+                // No sidebar underlay is sampled in this layout: use the opaque fallback.
+                opacity: 1
             }
             ColumnLayout {
                 anchors.fill: parent; anchors.margins: 14; spacing: 6
@@ -122,7 +124,7 @@ ApplicationWindow {
                     materialForm: false; liquidIntensity: "light"; backdrop: readingBackdrop
                     onClicked: root.sidebarRequested = !root.sidebarRequested
                     Accessible.name: "切换侧栏"
-                    KosToolTip { target: sidebarButton; text: "切换侧栏 · Ctrl+Shift+B" }
+                    KosToolTip { target: sidebarButton; backdrop: readingBackdrop; text: "切换侧栏 · Ctrl+Shift+B" }
                 }
                 LiquidActionButton {
                     text: "撤销"; implicitWidth: 48; implicitHeight: 26
@@ -145,7 +147,7 @@ ApplicationWindow {
                     enabled: !root.session.composing
                     onClicked: formatMenu.openAtAnchor()
                     Accessible.name: "Markdown 格式"
-                    KosToolTip { target: formatButton; text: "选择 Markdown 格式" }
+                    KosToolTip { target: formatButton; backdrop: readingBackdrop; text: "选择 Markdown 格式" }
                 }
             }
             RowLayout {

@@ -10,8 +10,8 @@ QtObject {
         Shortcut { sequence: "Ctrl+I"; enabled: editable; onActivated: run("italic") },
         Shortcut { sequence: "Ctrl+Shift+X"; enabled: editable; onActivated: run("strike") },
         Shortcut { sequence: "Ctrl+E"; enabled: editable; onActivated: run("code") },
-        Shortcut { sequence: StandardKey.Undo; enabled: editable; onActivated: session.undo() },
-        Shortcut { sequence: StandardKey.Redo; enabled: editable; onActivated: session.redo() },
+        Shortcut { sequences: [StandardKey.Undo]; enabled: editable; onActivated: session.undo() },
+        Shortcut { sequences: [StandardKey.Redo]; enabled: editable; onActivated: session.redo() },
         Shortcut { sequence: "Ctrl+Shift+B"; onActivated: sidebarRequested() }
     ]
 }
