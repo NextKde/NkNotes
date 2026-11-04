@@ -1,0 +1,16 @@
+{
+  "name": "nextnotes-m2a-editor-comparison",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {"build": "esbuild editor.js --bundle --format=iife --outfile=dist/editor.js"},
+  "dependencies": {
+    "@codemirror/state": "6.5.2",
+    "@codemirror/view": "6.38.1",
+    "@codemirror/commands": "6.8.1",
+    "@codemirror/language": "6.11.3",
+    "@codemirror/lang-markdown": "6.3.3",
+    "@lezer/markdown": "1.4.3"
+  },
+  "devDependencies": {"esbuild": "0.25.9"}
+}
