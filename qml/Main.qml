@@ -58,7 +58,8 @@ ApplicationWindow {
             anchors.top: parent.top; anchors.topMargin: tokens.toolbarHeight + 52
             anchors.bottom: parent.bottom; anchors.bottomMargin: 36
             anchors.left: parent.left
-            anchors.leftMargin: (root.showSidebar ? tokens.sidebarWidth : 0) + tokens.listWidth
+            // Follow the layout's actual geometry throughout the sidebar animation.
+            anchors.leftMargin: editorColumn.x
             anchors.right: parent.right
             bodySize: tokens.bodySize
             readingWidth: tokens.readingWidth
@@ -113,6 +114,7 @@ ApplicationWindow {
             Rectangle { anchors.right: parent.right; height: parent.height; width: 1; color: AppTheme.withAlpha(AppTheme.text, 0.07) }
         }
         Item {
+            id: editorColumn
             Layout.fillWidth: true; Layout.fillHeight: true
             RowLayout {
                 id: toolbar
