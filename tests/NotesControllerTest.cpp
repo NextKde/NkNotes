@@ -1,6 +1,8 @@
 #include <QtTest>
 #include <QTextDocument>
 #include <QTextCursor>
+#include <QSettings>
+#include <QTemporaryDir>
 #include "EditorSession.h"
 #include "NotesController.h"
 
@@ -33,6 +35,52 @@ class NotesControllerTest : public QObject {
         int count(const QString &op) { int n = 0; for (const auto &r : requests) if (r[1] == op) ++n; return n; }
     };
 private slots:
+    void restartRestoresStableIdentityAfterRecovery() {
+        QTemporaryDir settings;
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settings.path());
+        Fixture first;
+        first.controller.setPreference("lastNote", QVariantMap{{"library", "/virtual/library"}, {"id", "A"}, {"path", "old.md"}});
+        QTextDocument doc; EditorSession session; session.attachDocument(&doc);
+        NotesController controller(&session, nullptr);
+        QSignalSpy requests(&controller, &NotesController::requestSent);
+        controller.restoreWorkspace();
+        QCOMPARE(requests.size(), 1);
+        auto selection = requests.takeFirst();
+        controller.receive(selection[0].toULongLong(), "selectLibrary", {{"ok", true}, {"library", "/virtual/library"}, {"generation", 1}, {"notes", QVariantList{QVariantMap{{"id", "A"}, {"path", "moved.md"}}}}});
+        QList<QVariant> recovery;
+        for (const auto &r : requests) { QVERIFY(r[1] != "read"); if (r[1] == "recovery") recovery = r; }
+        QVERIFY(!recovery.isEmpty()); requests.clear();
+        controller.receive(recovery[0].toULongLong(), "recovery", {{"ok", true}, {"library", "/virtual/library"}, {"generation", 1}, {"drafts", QVariantList{QVariantMap{{"path", "moved.md"}, {"text", "草稿"}}}}});
+        QCOMPARE(requests.size(), 1); auto read = requests.takeFirst();
+        QCOMPARE(read[2].toMap().value("path").toString(), QString("moved.md"));
+        controller.receive(read[0].toULongLong(), "read", {{"ok", true}, {"library", "/virtual/library"}, {"generation", 1}, {"id", "A"}, {"path", "moved.md"}, {"text", "磁盘"}});
+        QVERIFY(controller.readOnly()); QCOMPARE(session.source(), QString("磁盘"));
+        QSettings().clear();
+    }
+    void missingRestoredLibraryReturnsToPicker() {
+        QTextDocument doc; EditorSession session; session.attachDocument(&doc);
+        NotesController controller(&session, nullptr);
+        controller.setPreference("lastLibrary", "/missing/previous-library");
+        QSignalSpy requests(&controller, &NotesController::requestSent);
+        controller.restoreWorkspace(); QCOMPARE(requests.size(), 1);
+        const auto request = requests.takeFirst();
+        controller.receive(request[0].toULongLong(), "selectLibrary", {{"ok", false}, {"error", "invalidLibrary"}});
+        QVERIFY(controller.property("library").toString().isEmpty());
+        QVERIFY(!controller.busy());
+        QVERIFY(controller.property("error").toString().contains("重新选择"));
+        controller.selectLibrary(QUrl::fromLocalFile("/valid"));
+        QCOMPARE(requests.size(), 1);
+        QSettings().clear();
+    }
+    void failedSwitchStillAllowsSaveAndClose() {
+        Fixture f; f.controller.selectLibrary(QUrl::fromLocalFile("/missing"));
+        f.answer("selectLibrary", {{"ok", false}, {"error", "invalidLibrary"}});
+        QCOMPARE(f.controller.property("library").toString(), QString("/virtual/library"));
+        f.type("继续"); f.controller.save(); f.answer("save", {{"baseHash", "new"}});
+        QSignalSpy closed(&f.controller, &NotesController::closeReady);
+        f.controller.requestClose(); QCOMPARE(closed.size(), 1);
+    }
     void automaticSaveDebounce() {
         Fixture f; f.type("中文自动保存");
         QCOMPARE(f.count("save"), 0);

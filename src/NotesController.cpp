@@ -57,6 +57,13 @@ void NotesController::advance() {
     if (action) action();
     emit changed();
 }
+void NotesController::restoreWorkspace() {
+    if (!m_library.isEmpty() || busy()) return;
+    const QString last = preference("lastLibrary").toString();
+    if (last.isEmpty()) return;
+    m_restoreWorkspace = true;
+    selectLibrary(QUrl::fromLocalFile(last));
+}
 void NotesController::selectLibrary(const QUrl &url) {
     if (!url.isLocalFile()) return;
     drain([this, url] { m_loading = true; send("selectLibrary", {{"path", url.toLocalFile()}}); });
@@ -150,11 +157,32 @@ void NotesController::applyListing(const QVariantMap &r) {
 void NotesController::report(const QVariantMap &r) {
     const QString code = r.value("error").toString();
     m_conflict = m_conflict || code == "conflict" || code == "unknownBase";
-    m_status = m_conflict ? "冲突 · 未覆盖本地输入" : "操作失败";
-    m_error = "操作未完成（" + code + "）。当前编辑内容仍在窗口中。";
+    m_status = m_conflict ? "冲突 · 未覆盖本地输入" : r.contains("recoveryDurable") ? "保存失败 · 输入仍保留" : "操作失败";
+    static const QHash<QString, QString> messages{
+        {"invalidLibrary", "笔记库目录不可用"}, {"libraryLocked", "笔记库正被其他应用实例使用"},
+        {"metadataCorrupt", "工作区记录损坏，原记录未覆盖"}, {"metadataUnavailable", "无法创建库管理目录"},
+        {"metadataReadFailed", "无法读取库管理记录"}, {"metadataWriteFailed", "无法保存库管理记录"},
+        {"readFailed", "无法读取文件"}, {"writeFailed", "文件保存失败，请检查空间和写入权限"},
+        {"recoveryWriteFailed", "无法写入恢复草稿"}, {"recoveryReadFailed", "无法读取恢复草稿"},
+        {"recoveryCorrupt", "恢复记录损坏"}, {"conflict", "外部文件已改变，双方版本保留"},
+        {"unknownBase", "无法确认原文件版本"}, {"unsafePath", "路径不安全或包含符号链接"},
+        {"duplicateId", "笔记标识重复，请另存为新身份副本"}, {"ambiguousId", "笔记标识无法唯一定位"},
+        {"alreadyExists", "目标文件已存在，请换一个名称"}, {"missingFolder", "目标文件夹不存在"},
+        {"notFound", "文件不存在"}, {"noLibrary", "请先选择笔记库"},
+        {"pendingDrafts", "请先保存或明确处理当前恢复草稿"}, {"staleGeneration", "工作区已改变，请重试"},
+        {"readOnly", "此文件暂时只读"}, {"unsupportedFormat", "文件格式无法安全编辑，请转换副本后打开"},
+        {"invalidUtf8", "文件不是有效的 UTF-8 编码，请转换副本后打开"},
+        {"mixedNewlines", "文件混用换行格式，请在其他编辑器中统一副本的换行"},
+        {"unsupportedSeparator", "文件包含不支持的分隔符，请转换副本后打开"},
+        {"createFolderFailed", "创建文件夹失败"}, {"moveFailed", "移动文件失败"},
+        {"discardFailed", "未能移除恢复记录"}, {"restoreFailed", "恢复文件失败"},
+        {"trashChanged", "回收记录已改变，请刷新"}, {"scanFailed", "扫描笔记库失败"},
+        {"unknownOperation", "此操作暂不受支持"}
+    };
+    m_error = messages.value(code, "操作未完成，请检查文件和目录权限") + "。当前编辑输入仍保留；不支持的格式不会覆盖原文。";
     if (r.contains("recoveryDurable")) m_error += r.value("recoveryDurable").toBool()
         ? "恢复草稿已写入磁盘。" : "恢复草稿未能写入磁盘，请保持窗口打开并另存或重试。";
-    m_error += "可重试、另存副本或打开恢复中心。\n" + r.value("detail").toString();
+    m_error += "可重试、另存副本或打开恢复中心。";
 }
 void NotesController::receive(quint64 id, const QString &op, const QVariantMap &r) {
     if (!m_pending.contains(id)) return;
@@ -167,7 +195,7 @@ void NotesController::receive(quint64 id, const QString &op, const QVariantMap &
     if (op == "save") m_saving = 0;
     if ((documentOp && !p.args.value("recoveryCopy").toBool()) || op == "selectLibrary") m_loading = false;
     if (!r.value("ok").toBool()) {
-        report(r); m_transition = false; m_afterSave = {}; emit changed(); return;
+        report(r); if (m_restoreWorkspace) { m_restoreWorkspace = false; m_error.prepend("上次工作区无法恢复，请重新选择笔记库。"); } m_transition = false; m_afterSave = {}; emit changed(); return;
     }
     if (op == "saveAs" && p.args.value("recoveryCopy").toBool()) {
         m_status = "恢复副本已创建：" + r.value("path").toString(); refresh(); inspectRecovery(); emit changed(); return;
@@ -217,7 +245,13 @@ void NotesController::receive(quint64 id, const QString &op, const QVariantMap &
         m_applying = true; m_session->loadPrototype(p.args.contains("recoverText") ? p.args.value("recoverText").toString() : r.value("text").toString()); m_applying = false;
         m_revision = m_savedRevision = 0;
         if (p.args.contains("recoverText")) { ++m_revision; m_conflict = p.args.value("recoverBase").toString() != m_base; }
-        m_status = m_readOnly ? "只读 · " + r.value("readOnlyReason").toString() : m_conflict ? "恢复草稿与磁盘不同 · 请另存" : dirty() ? "已恢复草稿 · 待保存" : "已保存";
+        const QString reason = r.value("readOnlyReason").toString();
+        const QHash<QString, QString> readOnlyMessages{
+            {"invalidUtf8", "文件含无效 UTF-8 字节；请在其他编辑器中将副本转换为 UTF-8"},
+            {"mixedNewlines", "文件混用了换行格式或含孤立回车；请统一副本的换行格式"},
+            {"unsupportedSeparator", "文件含不支持的 Unicode 行或段分隔符；请将副本转换为普通换行"}
+        };
+        m_status = m_readOnly ? "只读 · 原文未被覆盖。" + readOnlyMessages.value(reason, "文件格式不能安全编辑；请使用支持该格式的编辑器转换副本后打开") : m_conflict ? "恢复草稿与磁盘不同 · 请另存" : dirty() ? "已恢复草稿 · 待保存" : "已保存";
         if (!p.args.contains("recoverText") && !p.args.value("discardAfterRead").toBool()) {
             for (const auto &draft : m_recovery.value("drafts").toList()) {
                 if (draft.toMap().value("path").toString() == m_path) {
@@ -229,6 +263,7 @@ void NotesController::receive(quint64 id, const QString &op, const QVariantMap &
             }
         }
         if (p.args.value("discardAfterRead").toBool()) send("discardDraft", {{"path", m_path}});
+        setPreference("lastNote", QVariantMap{{"library", m_library}, {"id", m_selectedId}, {"path", m_path}});
         const auto position = QSettings().value(positionKey()).toMap();
         const int match = p.args.value("match", -1).toInt();
         emit documentLoaded(match >= 0 ? match : position.value("cursor", op == "create" ? m_session->source().size() : 0).toInt(), match >= 0 ? -1 : position.value("scroll", 0).toDouble(), match >= 0 ? m_query.size() : 0);
@@ -263,6 +298,15 @@ void NotesController::receive(quint64 id, const QString &op, const QVariantMap &
             if (!found) { d.insert("durable", false); drafts.append(d); }
         }
         m_recovery.insert("drafts", drafts);
+        if (m_restoreWorkspace) {
+            m_restoreWorkspace = false;
+            const auto last = preference("lastNote").toMap();
+            if (last.value("library").toString() == m_library)
+                for (const auto &v : m_notes) {
+                    const auto n = v.toMap();
+                    if (n.value("id") == last.value("id") && (!m_duplicateIds.contains(n.value("id").toString()) || n.value("path") == last.value("path"))) { load(n.value("path").toString()); break; }
+                }
+        }
     }
     else if (op == "checkpoint") { if (m_conflict) m_error = "外部版本已改变；本地恢复草稿已保存。请另存副本，或在恢复中心保留双方版本。"; }
     else if (op == "favorite" || op == "createFolder" || op == "restore" || op == "discardDraft") { if (op == "favorite" && p.path == m_path) m_favorite = p.args.value("favorite").toBool(); refresh(); inspectRecovery(); }

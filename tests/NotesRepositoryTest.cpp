@@ -31,6 +31,52 @@ class NotesRepositoryTest : public QObject {
         return {{"ok", false}, {"error", "missingRequest"}};
     }
 private slots:
+    void selectionPreparationFailures() {
+        QTemporaryDir oldDir, blockedDir, scanDir;
+        NotesRepository r;
+        auto selected = call(r, "selectLibrary", {{"path", oldDir.path()}});
+        QVERIFY(selected.value("ok").toBool());
+        QVERIFY(call(r, "create", {{"path", "keep.md"}, {"text", "原文"}}).value("ok").toBool());
+        // A regular file at the required directory is deterministic even as root.
+        QVERIFY(write(blockedDir.filePath(".nextnotes"), "blocked"));
+        auto failed = call(r, "selectLibrary", {{"path", blockedDir.path()}});
+        QVERIFY(!failed.value("ok").toBool());
+        QCOMPARE(failed.value("generation"), selected.value("generation"));
+        QVERIFY(write(scanDir.filePath("bad.md"), "scan"));
+        RepositoryTestHooks::beforeScan = [&](bool) {
+            QFile::remove(scanDir.filePath("bad.md"));
+            QDir().mkpath(scanDir.filePath("bad.md"));
+            // Make metadata persistence after scan fail deterministically.
+            QFile::remove(scanDir.filePath(".nextnotes/state.json"));
+            QDir().mkpath(scanDir.filePath(".nextnotes/state.json"));
+            write(scanDir.filePath("new.md"), "new");
+        };
+        failed = call(r, "selectLibrary", {{"path", scanDir.path()}});
+        RepositoryTestHooks::beforeScan = {};
+        QVERIFY(!failed.value("ok").toBool());
+        QCOMPARE(failed.value("library"), selected.value("library"));
+        QCOMPARE(failed.value("generation"), selected.value("generation"));
+        auto loaded = call(r, "read", {{"path", "keep.md"}});
+        QVERIFY(loaded.value("ok").toBool());
+        QVERIFY(call(r, "save", {{"path", "keep.md"}, {"text", "仍可保存"}, {"baseHash", loaded.value("baseHash")}}).value("ok").toBool());
+    }
+    void failedSelectionRetainsOldLibrary() {
+        QTemporaryDir oldDir, brokenDir;
+        NotesRepository r;
+        const auto selected = call(r, "selectLibrary", {{"path", oldDir.path()}});
+        QVERIFY(selected.value("ok").toBool());
+        auto created = call(r, "create", {{"path", "keep.md"}, {"text", "# 保留\n"}});
+        QVERIFY(created.value("ok").toBool());
+        QVERIFY(QDir().mkpath(brokenDir.filePath(".nextnotes/state.json")));
+        const auto failed = call(r, "selectLibrary", {{"path", brokenDir.path()}});
+        QVERIFY(!failed.value("ok").toBool());
+        QCOMPARE(failed.value("library"), selected.value("library"));
+        QCOMPARE(failed.value("generation"), selected.value("generation"));
+        auto loaded = call(r, "read", {{"path", "keep.md"}});
+        QVERIFY(loaded.value("ok").toBool());
+        QVERIFY(call(r, "save", {{"path", "keep.md"}, {"text", "# 仍可保存\n"}, {"baseHash", loaded.value("baseHash")}}).value("ok").toBool());
+    }
+
     void foldersSearchMoveAndReopen() {
         QTemporaryDir dir;
         QString id;

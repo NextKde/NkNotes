@@ -9,8 +9,9 @@ ScrollView {
     required property var controller
     property bool restoring: false
     function rememberPosition() { if (!restoring) controller.rememberPosition(input.cursorPosition, contentItem.contentY) }
-    property int bodySize: 16
-    property real readingWidth: availableWidth
+    required property int bodySize
+    required property real readingWidth
+    required property int inset
     clip: true
     contentWidth: availableWidth
     function rememberSelection() {
@@ -30,7 +31,7 @@ ScrollView {
         selectedTextColor: AppTheme.accentText
         font.pixelSize: root.bodySize
         font.family: "monospace"
-        leftPadding: Math.max(28, (width - root.readingWidth) / 2)
+        leftPadding: Math.max(root.inset, (width - root.readingWidth) / 2)
         rightPadding: leftPadding
         topPadding: 18; bottomPadding: 60
         background: null
@@ -41,6 +42,7 @@ ScrollView {
         onInputMethodComposingChanged: root.session.composing = inputMethodComposing
         Component.onCompleted: {
             root.session.attach(textDocument)
+            Qt.callLater(root.controller.restoreWorkspace)
 
         }
     }

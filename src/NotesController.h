@@ -36,6 +36,7 @@ public:
     QString filter() const { return m_filter; }
     void setQuery(const QString &);
     void setFilter(const QString &);
+    Q_INVOKABLE void restoreWorkspace();
     Q_INVOKABLE void selectLibrary(const QUrl &);
     Q_INVOKABLE void openNote(const QString &path, int match = -1);
     Q_INVOKABLE void createNote();
@@ -81,6 +82,7 @@ private:
     QHash<quint64, Pending> m_pending;
     quint64 m_next = 0, m_generation = 0, m_epoch = 0, m_revision = 0, m_savedRevision = 0, m_searchSerial = 0;
     quint64 m_saving = 0;
+    bool m_restoreWorkspace = false;
     bool m_favorite = false;
     bool m_loading = false, m_transition = false, m_applying = false, m_readOnly = false, m_conflict = false;
     QString m_library, m_path, m_selectedId, m_base, m_status = QStringLiteral("请选择笔记库"), m_error, m_query, m_filter = "all";

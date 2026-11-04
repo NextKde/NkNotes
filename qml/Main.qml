@@ -9,8 +9,8 @@ ApplicationWindow {
     id: root
     required property var session
     required property var controller
-    width: controller.preference("width", 1120)
-    height: controller.preference("height", 740)
+    width: controller.preference("width", tokens.windowWidth)
+    height: controller.preference("height", tokens.windowHeight)
     minimumWidth: 540; minimumHeight: 480
     visible: true
     title: controller.path ? controller.path + " — NextNotes" : "NextNotes"
@@ -19,13 +19,13 @@ ApplicationWindow {
     property bool allowClose: false
     property bool sidebarRequested: controller.preference("sidebar", true)
     property bool listRequested: false
-    property real sidebarWidth: controller.preference("sidebarWidth", 208)
-    property real listWidth: controller.preference("listWidth", 276)
+    property real sidebarWidth: controller.preference("sidebarWidth", tokens.sidebarWidth)
+    property real listWidth: controller.preference("listWidth", tokens.listWidth)
     readonly property bool hasLibrary: controller.library.length > 0
     readonly property bool showSidebar: hasLibrary && sidebarRequested && width >= 1000
     readonly property bool showList: hasLibrary && (width >= 800 || listRequested || !controller.path)
     readonly property real editorX: (showSidebar ? sidebarWidth : 0) + (showList ? (width < 800 ? width : listWidth) : 0)
-    readonly property bool popupsOpen: actionMenu.opened || formatMenu.opened || namePanel.opened || recoveryDialog.opened || discardDialog.opened || deleteDialog.opened || folderPanel.opened || appearancePanel.opened || discardRecoveryDialog.opened || libraryPicker.visible
+    readonly property bool popupsOpen: actionMenu.visible || formatMenu.visible || namePanel.visible || recoveryDialog.visible || discardDialog.visible || deleteDialog.visible || folderPanel.visible || appearancePanel.visible || discardRecoveryDialog.visible || libraryPicker.visible
     onClosing: function(close) {
         controller.setPreference("width", width); controller.setPreference("height", height)
         if (!allowClose) { close.accepted = false; controller.requestClose() }
@@ -50,8 +50,55 @@ ApplicationWindow {
         session: root.session; editor: source.editor; controller: root.controller
         blocked: root.popupsOpen || search.inputMethodComposing || localFind.inputMethodComposing
         onSidebarRequested: root.sidebarRequested = !root.sidebarRequested
-        onSearchRequested: { root.listRequested = true; search.forceActiveFocus() }
+        onSearchRequested: { root.listRequested = true; Qt.callLater(function() { search.forceActiveFocus(Qt.ShortcutFocusReason) }) }
         onFindRequested: { findBar.visible = true; localFind.forceActiveFocus() }
+    }
+    // One Tab stop per list; arrows move the keyboard cursor without opening a
+    // document. Activation still goes through the controller's save/drain path.
+    component KeyboardList: ListView {
+        activeFocusOnTab: count > 0
+        keyNavigationEnabled: false
+        property string cursorKey: ""
+        function keyAt(row) {
+            if (!model || row < 0 || row >= count) return ""
+            const entry = model[row]
+            return typeof entry === "string" ? entry : entry.id + "\n" + entry.path
+        }
+        function focusCurrent() {
+            if (!count) return
+            if (currentIndex < 0) currentIndex = 0
+            positionViewAtIndex(currentIndex, ListView.Contain)
+            if (currentItem) currentItem.forceActiveFocus(Qt.TabFocusReason)
+        }
+        function restoreCursor() {
+            let row = -1
+            for (let i = 0; i < count; ++i) {
+                if (keyAt(i) === cursorKey) { row = i; break }
+            }
+            currentIndex = row >= 0 ? row : count ? 0 : -1
+            cursorKey = keyAt(currentIndex)
+            if (activeFocus) focusCurrent()
+        }
+        function handleKey(event) {
+            if (event.modifiers !== Qt.NoModifier) return
+            let row = currentIndex
+            if (event.key === Qt.Key_Down) row = Math.min(count - 1, row + 1)
+            else if (event.key === Qt.Key_Up) row = Math.max(0, row - 1)
+            else if (event.key === Qt.Key_Home) row = 0
+            else if (event.key === Qt.Key_End) row = count - 1
+            else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Space) {
+                if (currentItem && !event.isAutoRepeat) currentItem.activate()
+                event.accepted = true
+                return
+            } else return
+            currentIndex = row
+            cursorKey = keyAt(row)
+            focusCurrent()
+            event.accepted = true
+        }
+        onActiveFocusChanged: if (activeFocus) focusCurrent()
+        onModelChanged: Qt.callLater(restoreCursor)
+        Keys.onPressed: function(event) { handleKey(event) }
     }
     FolderDialog {
         id: libraryPicker
@@ -86,9 +133,9 @@ ApplicationWindow {
             id: source
             session: root.session; controller: root.controller
             visible: root.hasLibrary && !!controller.path && root.editorX < root.width
-            x: root.editorX; y: 96 + (findBar.visible ? 36 : 0)
+            x: root.editorX; y: tokens.toolbarHeight * 2 + (findBar.visible ? 36 : 0)
             width: Math.max(0, parent.width - x); height: Math.max(0, parent.height - y - statusArea.height)
-            bodySize: bodySizeSlider.value; readingWidth: tokens.readingWidth
+            bodySize: bodySizeSlider.value; readingWidth: tokens.readingWidth; inset: tokens.inset
         }
     }
     LiquidBackdrop { id: readingBackdrop; sourceItem: readingScene; registerAsDefault: false }
@@ -119,16 +166,26 @@ ApplicationWindow {
                 Label { text: "文件夹"; color: AppTheme.mutedText; font.pixelSize: 11; Layout.fillWidth: true }
                 LiquidActionButton { id: folderButton; text: "新建"; implicitHeight: 26; materialForm: false; liquidIntensity: "light"; backdrop: readingBackdrop; onClicked: root.askName("folder", folderButton) }
             }
-            ListView {
+            KeyboardList {
                 Layout.fillWidth: true; Layout.fillHeight: true; clip: true
                 model: controller.folders; spacing: 2
                 delegate: LiquidNavigationButton {
                     required property var modelData
+                    required property int index
+                    focusPolicy: Qt.StrongFocus
+                    activeFocusOnTab: false
+                    Keys.onPressed: function(event) { ListView.view.handleKey(event) }
+                    onActiveFocusChanged: if (activeFocus) { ListView.view.currentIndex = index; ListView.view.cursorKey = ListView.view.keyAt(index) }
+                    function activate() { controller.filter = "folder:" + modelData; root.listRequested = true }
                     width: ListView.view.width; text: modelData; specificationForm: true
                     checked: controller.filter === "folder:" + modelData
-                    onClicked: { controller.filter = "folder:" + modelData; root.listRequested = true }
+                    onClicked: activate()
+                    Accessible.role: Accessible.ListItem
+                    Accessible.focusable: true
+                    Accessible.selected: checked
+                    Accessible.onPressAction: activate()
                     Accessible.name: "文件夹 " + modelData
-                    KosToolTip { target: parent; backdrop: readingBackdrop; text: modelData }
+                    KosToolTip { target: parent; backdrop: readingBackdrop; text: "打开此文件夹中的笔记" }
                 }
             }
             Label { Layout.fillWidth: true; text: controller.library; elide: Text.ElideMiddle; font.pixelSize: 10; color: AppTheme.mutedText }
@@ -166,24 +223,39 @@ ApplicationWindow {
                 LiquidActionButton { id: smallFolderButton; text: "文件夹"; materialForm: true; onClicked: { folderPanel.anchorItem = smallFolderButton; folderPanel.open() } }
             }
             Label { text: controller.notes.length + " 篇笔记 · 最近修改"; color: AppTheme.mutedText; font.pixelSize: 11 }
-            ListView {
+            KeyboardList {
                 id: noteList
                 Layout.fillWidth: true; Layout.fillHeight: true; clip: true; spacing: 4
                 model: controller.notes
                 delegate: ItemDelegate {
                     id: noteRow
                     required property var modelData
+                    required property int index
+                    readonly property string rowStatus: [modelData.favorite ? "收藏" : "", modelData.id === controller.selectedId && modelData.path === controller.path ? controller.status : modelData.readOnlyReason ? "只读" : ""].filter(Boolean).join(" · ")
+                    focusPolicy: Qt.StrongFocus
+                    activeFocusOnTab: false
+                    Keys.onPressed: function(event) { ListView.view.handleKey(event) }
+                    onActiveFocusChanged: if (activeFocus) { ListView.view.currentIndex = index; ListView.view.cursorKey = ListView.view.keyAt(index) }
+                    function activate() { controller.openNote(modelData.path, modelData.match === undefined ? -1 : modelData.match) }
                     width: ListView.view.width; height: 104
                     highlighted: modelData.id === controller.selectedId && modelData.path === controller.path
-                    background: Rectangle { radius: 9; color: noteRow.highlighted || noteRow.hovered ? AppTheme.controlBackground : "transparent" }
+                    background: Rectangle {
+                        radius: 9; color: noteRow.highlighted || noteRow.hovered ? AppTheme.controlBackground : "transparent"
+                        border.width: noteRow.activeFocus ? 2 : 0
+                        border.color: AppTheme.focusRing
+                    }
                     contentItem: Column {
                         spacing: 6
-                        Label { width: parent.width; text: (noteRow.modelData.favorite ? "收藏 · " : "") + noteRow.modelData.title; elide: Text.ElideRight; font.pixelSize: 14; font.weight: Font.DemiBold; color: AppTheme.text }
+                        Label { width: parent.width; text: (noteRow.rowStatus ? noteRow.rowStatus + " · " : "") + noteRow.modelData.title; elide: Text.ElideRight; font.pixelSize: 14; font.weight: Font.DemiBold; color: AppTheme.text }
                         Label { width: parent.width; text: noteRow.modelData.summary || "空白笔记"; maximumLineCount: 2; wrapMode: Text.Wrap; elide: Text.ElideRight; font.pixelSize: 12; color: AppTheme.mutedText }
-                        Label { width: parent.width; text: noteRow.modelData.path + " · " + new Date(noteRow.modelData.fileModifiedUtc).toLocaleDateString(Qt.locale(), "MM/dd"); elide: Text.ElideMiddle; font.pixelSize: 10; color: AppTheme.mutedText }
+                        Label { width: parent.width; text: noteRow.modelData.path + " · " + noteRow.modelData.timeSource + " " + new Date(noteRow.modelData.displayModifiedUtc).toLocaleDateString(Qt.locale(), "MM/dd"); elide: Text.ElideMiddle; font.pixelSize: 10; color: AppTheme.mutedText }
                     }
-                    onClicked: controller.openNote(modelData.path, modelData.match === undefined ? -1 : modelData.match)
-                    Accessible.name: modelData.title + ", " + modelData.path
+                    onClicked: activate()
+                    Accessible.role: Accessible.ListItem
+                    Accessible.focusable: true
+                    Accessible.selected: highlighted
+                    Accessible.onPressAction: activate()
+                    Accessible.name: modelData.title + ", " + modelData.path + (rowStatus ? ", " + rowStatus : "")
                 }
                 Label { anchors.centerIn: parent; visible: noteList.count === 0; text: controller.query ? "没有匹配的笔记" : "从第一篇笔记开始"; color: AppTheme.mutedText; font.pixelSize: 13 }
             }
@@ -218,15 +290,15 @@ ApplicationWindow {
             Item { Layout.fillWidth: true }
             LiquidActionButton { text: "撤销"; visible: editorChrome.width > 470; implicitHeight: 26; materialForm: true; focusPolicy: Qt.TabFocus; enabled: session.canUndo && !controller.readOnly && !session.composing; onClicked: { session.undo(); source.editor.forceActiveFocus() } }
             LiquidActionButton { id: formatButton; text: "格式"; implicitHeight: 26; materialForm: false; liquidIntensity: "light"; backdrop: readingBackdrop; focusPolicy: Qt.TabFocus; enabled: !controller.readOnly && !session.composing; onClicked: formatMenu.openAtAnchor() }
-            LiquidActionButton { id: moreButton; text: "更多"; implicitHeight: 26; materialForm: false; liquidIntensity: "light"; backdrop: readingBackdrop; onClicked: actionMenu.openAtAnchor() }
+            LiquidActionButton { id: moreButton; focusPolicy: Qt.StrongFocus; text: "更多"; implicitHeight: 26; materialForm: false; liquidIntensity: "light"; backdrop: readingBackdrop; onClicked: actionMenu.openAtAnchor() }
         }
         RowLayout {
-            anchors.top: parent.top; anchors.topMargin: 64; anchors.left: parent.left; anchors.right: parent.right; anchors.leftMargin: 28; anchors.rightMargin: 24
+            anchors.top: parent.top; anchors.topMargin: tokens.toolbarHeight + 16; anchors.left: parent.left; anchors.right: parent.right; anchors.leftMargin: tokens.inset; anchors.rightMargin: tokens.inset
             Label { Layout.fillWidth: true; text: controller.path || "选择一篇笔记"; elide: Text.ElideMiddle; font.pixelSize: 11; color: AppTheme.mutedText }
             Label { text: "MARKDOWN"; color: AppTheme.mutedText; font.pixelSize: 10; font.letterSpacing: 1.2 }
         }
         RowLayout {
-            id: findBar; visible: false; x: 28; y: 92; width: parent.width - 56
+            id: findBar; visible: false; x: tokens.inset; y: tokens.toolbarHeight * 2 - 4; width: parent.width - tokens.inset * 2
             LiquidTextField { id: localFind; Layout.fillWidth: true; materialForm: true; placeholderText: "查找当前正文"; onAccepted: root.findNext() }
             LiquidActionButton { text: "下一个"; materialForm: true; onClicked: root.findNext() }
             LiquidActionButton { text: "关闭"; materialForm: true; onClicked: { findBar.visible = false; source.editor.forceActiveFocus() } }
@@ -253,6 +325,19 @@ ApplicationWindow {
             }
         }
     }
+    function revealRecoveryControl(item) {
+        if (!item.activeFocus) return
+        const flick = recoveryScroll.contentItem
+        const top = item.mapToItem(flick.contentItem, 0, 0).y
+        if (top < flick.contentY) flick.contentY = top
+        else if (top + item.height > flick.contentY + flick.height)
+            flick.contentY = top + item.height - flick.height
+    }
+    function restoreEditorFocus() {
+        // A menu action may open another panel or the local search field.
+        if (!root.popupsOpen && !localFind.activeFocus && source.visible)
+            source.editor.forceActiveFocus(Qt.OtherFocusReason)
+    }
     function findNext() {
         if (!localFind.text) return
         let p = session.source.toLowerCase().indexOf(localFind.text.toLowerCase(), source.editor.selectionEnd)
@@ -267,22 +352,25 @@ ApplicationWindow {
     }
     LiquidPopover {
         id: formatMenu; anchorItem: formatButton; sourceItem: readingScene
-        function apply(command) { commands.run(command); source.editor.forceActiveFocus() }
+        onClosed: Qt.callLater(root.restoreEditorFocus)
+        function apply(command) { commands.run(command) }
         LiquidPopoverItem { text: "加粗                         Ctrl+B"; onTriggered: formatMenu.apply("bold") }
         LiquidPopoverItem { text: "斜体                         Ctrl+I"; onTriggered: formatMenu.apply("italic") }
         LiquidPopoverItem { text: "删除线                Ctrl+Shift+X"; onTriggered: formatMenu.apply("strike") }
         LiquidPopoverItem { text: "行内代码                    Ctrl+E"; onTriggered: formatMenu.apply("code") }
-        LiquidPopoverItem { text: "重做"; enabled: session.canRedo; onTriggered: session.redo() }
+        LiquidPopoverItem { text: "撤销"; enabled: session.canUndo && !controller.readOnly && !session.composing; onTriggered: { session.undo(); source.editor.forceActiveFocus() } }
+        LiquidPopoverItem { text: "重做"; enabled: session.canRedo && !controller.readOnly && !session.composing; onTriggered: { session.redo(); source.editor.forceActiveFocus() } }
     }
     LiquidPopover {
         id: actionMenu; anchorItem: moreButton; sourceItem: readingScene
+        onClosed: Qt.callLater(root.restoreEditorFocus)
         LiquidPopoverItem { text: "保存                           Ctrl+S"; enabled: controller.dirty; onTriggered: controller.save() }
         LiquidPopoverItem { text: "切换收藏"; enabled: !!controller.path; onTriggered: controller.favorite() }
         LiquidPopoverItem { text: "移动 / 重命名文件…"; enabled: !!controller.path; onTriggered: root.askName("move", moreButton) }
         LiquidPopoverItem { text: "另存为新身份副本…"; enabled: !!controller.path; onTriggered: root.askName("copy", moreButton) }
         LiquidPopoverItem { text: "移到最近删除…"; enabled: !!controller.path; onTriggered: deleteDialog.open() }
         LiquidPopoverItem { text: "放弃本地修改，读取磁盘…"; enabled: !!controller.path; onTriggered: discardDialog.open() }
-        LiquidPopoverItem { text: "查找当前正文…"; enabled: !!controller.path; onTriggered: { findBar.visible = true; localFind.forceActiveFocus() } }
+        LiquidPopoverItem { text: "查找当前正文…"; enabled: !!controller.path; onTriggered: { findBar.visible = true; Qt.callLater(function() { localFind.forceActiveFocus(Qt.ShortcutFocusReason) }) } }
         LiquidPopoverItem { text: "刷新笔记库"; onTriggered: controller.refresh() }
         LiquidPopoverItem { text: "恢复中心 / 最近删除…"; onTriggered: root.showRecovery() }
         LiquidPopoverItem { text: "切换笔记库…"; onTriggered: libraryPicker.open() }
@@ -309,10 +397,26 @@ ApplicationWindow {
         id: folderPanel; sourceItem: readingScene; preferredSide: "bottom"; width: 300
         contentItem: ColumnLayout {
             Label { text: "文件夹"; color: AppTheme.text; font.weight: Font.DemiBold }
-            ListView {
+            KeyboardList {
                 Layout.fillWidth: true; Layout.preferredHeight: Math.min(260, contentHeight); clip: true
                 model: controller.folders
-                delegate: LiquidNavigationButton { required property var modelData; width: ListView.view.width; text: modelData; specificationForm: true; onClicked: { controller.filter = "folder:" + modelData; folderPanel.close() } }
+                delegate: LiquidNavigationButton {
+                    required property var modelData
+                    required property int index
+                    width: ListView.view.width; text: modelData; specificationForm: true
+                    checked: controller.filter === "folder:" + modelData
+                    focusPolicy: Qt.StrongFocus
+                    activeFocusOnTab: false
+                    Keys.onPressed: function(event) { ListView.view.handleKey(event) }
+                    onActiveFocusChanged: if (activeFocus) { ListView.view.currentIndex = index; ListView.view.cursorKey = ListView.view.keyAt(index) }
+                    function activate() { controller.filter = "folder:" + modelData; folderPanel.close() }
+                    onClicked: activate()
+                    Accessible.role: Accessible.ListItem
+                    Accessible.focusable: true
+                    Accessible.selected: checked
+                    Accessible.name: "文件夹 " + modelData
+                    Accessible.onPressAction: activate()
+                }
             }
             LiquidActionButton { text: "新建文件夹…"; materialForm: true; onClicked: { folderPanel.close(); root.askName("folder", smallFolderButton) } }
         }
@@ -329,7 +433,7 @@ ApplicationWindow {
             }
             SettingsItem {
                 title: "正文字号"; minimumLabelWidth: 70
-                Slider { id: bodySizeSlider; implicitWidth: 120; from: 12; to: 24; stepSize: 1; value: controller.preference("bodySize", 16); onMoved: controller.setPreference("bodySize", value) }
+                Slider { id: bodySizeSlider; implicitWidth: 120; from: 12; to: 24; stepSize: 1; value: controller.preference("bodySize", tokens.bodySize); onMoved: controller.setPreference("bodySize", value) }
             }
             SettingsItem {
                 title: "减少透明效果"; minimumLabelWidth: 140
@@ -374,11 +478,11 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         Label { Layout.fillWidth: true; text: modelData.path + (modelData.durable === false ? " · 仅内存，勿关闭" : "") + (modelData.matchesBase ? " · 基线一致" : " · 磁盘已改变"); wrapMode: Text.Wrap; color: AppTheme.text }
                         RowLayout {
-                            LiquidActionButton { text: "载入草稿"; materialForm: true; onClicked: { controller.recoverDraft(modelData.path, modelData.text, modelData.baseHash); recoveryDialog.close() } }
-                            LiquidActionButton { text: "复制草稿到新文件"; materialForm: true; onClicked: controller.copyRecovery(modelData.text) }
-                            LiquidActionButton { text: "丢弃…"; materialForm: true; onClicked: { discardRecoveryDialog.draftPath = modelData.path; discardRecoveryDialog.open() } }
+                            LiquidActionButton { focusPolicy: Qt.StrongFocus; onActiveFocusChanged: root.revealRecoveryControl(this); text: "载入草稿"; Accessible.name: text + " " + modelData.path; materialForm: true; onClicked: { controller.recoverDraft(modelData.path, modelData.text, modelData.baseHash); recoveryDialog.close() } }
+                            LiquidActionButton { focusPolicy: Qt.StrongFocus; onActiveFocusChanged: root.revealRecoveryControl(this); text: "复制草稿到新文件"; Accessible.name: text + " " + modelData.path; materialForm: true; onClicked: controller.copyRecovery(modelData.text) }
+                            LiquidActionButton { focusPolicy: Qt.StrongFocus; onActiveFocusChanged: root.revealRecoveryControl(this); text: "丢弃…"; Accessible.name: "丢弃恢复草稿 " + modelData.path; materialForm: true; onClicked: { discardRecoveryDialog.draftPath = modelData.path; discardRecoveryDialog.open() } }
                         }
-                        TextArea { Layout.fillWidth: true; text: modelData.text; readOnly: true; selectByMouse: true; wrapMode: Text.Wrap; implicitHeight: 80; color: AppTheme.text; background: null }
+                        TextArea { focusPolicy: Qt.StrongFocus; onActiveFocusChanged: root.revealRecoveryControl(this); Accessible.name: "恢复草稿正文 " + modelData.path; Layout.fillWidth: true; text: modelData.text; readOnly: true; selectByMouse: true; wrapMode: Text.Wrap; implicitHeight: 80; color: AppTheme.text; background: null }
                     }
                 }
                 Label { text: "最近删除"; color: AppTheme.text; font.weight: Font.DemiBold }
@@ -388,17 +492,17 @@ ApplicationWindow {
                         required property string modelData
                         Layout.fillWidth: true
                         Label { Layout.fillWidth: true; text: controller.recovery.trash[modelData].source; elide: Text.ElideMiddle; color: AppTheme.text }
-                        LiquidActionButton { text: "恢复"; materialForm: true; onClicked: controller.restore(modelData) }
-                        LiquidActionButton { text: "恢复到根目录副本"; materialForm: true; onClicked: controller.restore(modelData, "还原-" + Date.now() + ".md") }
+                        LiquidActionButton { focusPolicy: Qt.StrongFocus; onActiveFocusChanged: root.revealRecoveryControl(this); text: "恢复"; Accessible.name: text + " " + controller.recovery.trash[modelData].source; materialForm: true; onClicked: controller.restore(modelData) }
+                        LiquidActionButton { focusPolicy: Qt.StrongFocus; onActiveFocusChanged: root.revealRecoveryControl(this); text: "恢复到根目录副本"; Accessible.name: text + " " + controller.recovery.trash[modelData].source; materialForm: true; onClicked: controller.restore(modelData, "还原-" + Date.now() + ".md") }
                     }
                 }
                 Label { text: "保留的提交版本"; color: AppTheme.text; font.weight: Font.DemiBold }
                 Label { Layout.fillWidth: true; text: "每条 intent 含目标路径、基线及新摘要，最后一行是保留文件的绝对路径。交换前它是新版本，交换后是被替换版本；需比较摘要后手动取回，不自动覆盖。"; wrapMode: Text.Wrap; color: AppTheme.mutedText; font.pixelSize: 12 }
                 Repeater {
                     model: controller.recovery.commits || []
-                    delegate: TextArea { required property var modelData; Layout.fillWidth: true; text: modelData.journal + "\n" + modelData.intent; wrapMode: Text.Wrap; readOnly: true; selectByMouse: true; color: AppTheme.text; font.pixelSize: 11; background: null }
+                    delegate: TextArea { required property var modelData; focusPolicy: Qt.StrongFocus; onActiveFocusChanged: root.revealRecoveryControl(this); Accessible.name: "保留的提交版本"; Layout.fillWidth: true; text: modelData.journal + "\n" + modelData.intent; wrapMode: Text.Wrap; readOnly: true; selectByMouse: true; color: AppTheme.text; font.pixelSize: 11; background: null }
                 }
-                LiquidActionButton { text: "在文件管理器定位恢复目录"; materialForm: true; onClicked: controller.openRecoveryDirectory() }
+                LiquidActionButton { focusPolicy: Qt.StrongFocus; onActiveFocusChanged: root.revealRecoveryControl(this); text: "在文件管理器定位恢复目录"; materialForm: true; onClicked: controller.openRecoveryDirectory() }
             }
         }
     }

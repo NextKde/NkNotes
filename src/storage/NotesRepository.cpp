@@ -156,7 +156,7 @@ private:
                 entries.insert(rel, entry);
                 notes.append(QVariantMap{{"path", rel}, {"id", stableId}, {"title", MarkdownFile::title(doc.text, fi.completeBaseName())},
                     {"summary", summary(doc.text)}, {"baseHash", doc.hash}, {"favorite", entry.value("favorite").toBool()}, {"createdUtc", entry.value("createdUtc").toString()},
-                    {"fileModifiedUtc", fi.lastModified().toUTC().toString(Qt::ISODateWithMs)}, {"readOnlyReason", doc.readOnlyReason}});
+                    {"modifiedUtc", entry.value("modifiedUtc").toString()}, {"displayModifiedUtc", entry.value("savedHash").toString() == doc.hash ? entry.value("modifiedUtc").toString() : fi.lastModified().toUTC().toString(Qt::ISODateWithMs)}, {"timeSource", entry.value("savedHash").toString() == doc.hash ? "应用保存" : "文件时间"}, {"fileModifiedUtc", fi.lastModified().toUTC().toString(Qt::ISODateWithMs)}, {"readOnlyReason", doc.readOnlyReason}});
             }
         }
         for (const QString &key : entries.keys()) {
@@ -230,13 +230,24 @@ QVariantMap RepositoryWorker::dispatch(const QString &op, const QVariantMap &a)
             }
             state = json.object();
         } else state = {{"version", 1}, {"entries", QJsonObject()}, {"trash", QJsonObject()}};
-        if (watcher) { delete watcher; watcher = nullptr; delete debounce; debounce = nullptr; }
+        const auto oldMetadata = metadata;
+        const auto oldOpened = opened;
+        const auto oldFingerprints = fingerprints;
+        auto *oldWatcher = watcher;
+        auto *oldDebounce = debounce;
+        watcher = nullptr; debounce = nullptr;
+        metadata = state; opened.clear(); fingerprints.clear();
+        QVariantMap prepared = persist(error) ? scan(false) : failure("metadataWriteFailed", error);
+        if (!prepared.value("ok").toBool()) {
+            delete watcher; delete debounce;
+            watcher = oldWatcher; debounce = oldDebounce;
+            root = oldRoot; metadata = oldMetadata; opened = oldOpened; fingerprints = oldFingerprints;
+            return prepared;
+        }
+        delete oldWatcher; delete oldDebounce;
         lock = std::move(newLock);
-        metadata = state;
-        opened.clear(); fingerprints.clear();
         ++generation;
-        if (!persist(error)) return failure("metadataWriteFailed", error);
-        return scan(false);
+        return prepared;
     }
     if (root.isEmpty()) return failure("noLibrary");
     if (a.contains("generation") && a.value("generation").toULongLong() != generation) return failure("staleGeneration");
@@ -262,7 +273,7 @@ QVariantMap RepositoryWorker::dispatch(const QString &op, const QVariantMap &a)
             matches.append(note);
         }
         std::stable_sort(matches.begin(), matches.end(), [](const QVariant &left, const QVariant &right) {
-            return left.toMap().value("fileModifiedUtc").toString() > right.toMap().value("fileModifiedUtc").toString();
+            return left.toMap().value("displayModifiedUtc").toString() > right.toMap().value("displayModifiedUtc").toString();
         });
         listing.insert("allNotes", listing.value("notes"));
         listing.insert("notes", matches);
@@ -451,7 +462,7 @@ QVariantMap RepositoryWorker::dispatch(const QString &op, const QVariantMap &a)
         }
         fingerprints.insert(rel, MarkdownFile::digest(bytes));
         auto entries = metadata.value("entries").toObject(); auto entry = entries.value(rel).toObject();
-        entry.insert("modifiedUtc", now()); entries.insert(rel, entry); metadata.insert("entries", entries);
+        entry.insert("savedHash", MarkdownFile::digest(bytes)); entry.insert("modifiedUtc", now()); entries.insert(rel, entry); metadata.insert("entries", entries);
         if (!persist(error)) return failSave("metadataWriteFailed", error);
         auto saved = MarkdownFile::decode(bytes); opened.insert(rel, saved); clearDraft(rel);
         auto result = documentResult(rel, saved); result.insert("listing", scan(false)); return result;
