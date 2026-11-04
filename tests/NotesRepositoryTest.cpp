@@ -5,6 +5,14 @@
 #include <QDir>
 #include "NotesRepository.h"
 #include "MarkdownFile.h"
+#include "SafeCommit.h"
+#include "RepositoryTestHooks.h"
+#include <QProcess>
+#include <QProcessEnvironment>
+#include <cstdlib>
+#ifdef Q_OS_LINUX
+#include <sys/statvfs.h>
+#endif
 
 class NotesRepositoryTest : public QObject {
     Q_OBJECT
@@ -23,6 +31,210 @@ class NotesRepositoryTest : public QObject {
         return {{"ok", false}, {"error", "missingRequest"}};
     }
 private slots:
+    void fifoGenerationAndRecovery() {
+        QTemporaryDir dir, second;
+        {
+            NotesRepository r;
+            const auto selected = call(r, "selectLibrary", {{"path", dir.path()}});
+            const auto generation = selected.value("generation");
+            QSignalSpy spy(&r, &NotesRepository::finished);
+            const auto a = r.request("create", {{"path", "a.md"}, {"text", "first"}});
+            const auto b = r.request("read", {{"path", "a.md"}});
+            QTRY_COMPARE_WITH_TIMEOUT(spy.size(), 2, 10000);
+            QCOMPARE(spy[0][0].toULongLong(), a); QCOMPARE(spy[1][0].toULongLong(), b);
+            QVERIFY(spy[1][2].toMap().value("ok").toBool());
+            QVERIFY(call(r, "selectLibrary", {{"path", second.path()}}).value("ok").toBool());
+            QCOMPARE(call(r, "list", {{"generation", generation}}).value("error").toString(), QString("staleGeneration"));
+            QVERIFY(call(r, "selectLibrary", {{"path", dir.path()}}).value("ok").toBool());
+            QVERIFY(call(r, "checkpoint", {{"path", "a.md"}, {"text", "recover"}, {"baseHash", "old"}}).value("ok").toBool());
+        }
+        NotesRepository reopened;
+        QVERIFY(call(reopened, "selectLibrary", {{"path", dir.path()}}).value("ok").toBool());
+        auto recovery = call(reopened, "recovery");
+        QVERIFY(!recovery.value("drafts").toList().isEmpty());
+        QVERIFY(!recovery.value("commits").toList().isEmpty());
+        QVERIFY(!recovery.value("drafts").toList().first().toMap().value("matchesBase").toBool());
+    }
+    void scalarAndHeading() {
+        QCOMPARE(MarkdownFile::field("---\nnextnotes_id: 'abc' # copy\n---\n", "nextnotes_id"), QString("abc"));
+        QCOMPARE(MarkdownFile::field("---\nnextnotes_id: abc # copy\n---\n", "nextnotes_id"), QString("abc"));
+        QVERIFY(!MarkdownFile::decode("---\nnextnotes_id: abc\nnextnotes_id: def\n---\n").readOnlyReason.isEmpty());
+        QVERIFY(!MarkdownFile::decode("---\nnextnotes_id: abc\n").readOnlyReason.isEmpty());
+        QCOMPARE(MarkdownFile::title("```md\n# false\n```\n# Real\n", "fallback"), QString("Real"));
+        QCOMPARE(MarkdownFile::title("---\ntitle: Hello # comment\n---\n", "fallback"), QString("Hello"));
+    }
+    void setextHeadings_data() {
+        QTest::addColumn<QString>("source"); QTest::addColumn<QString>("expected");
+        QTest::newRow("setext-first") << QStringLiteral("Heading\n=======\n# Later\n") << QStringLiteral("Heading");
+        QTest::newRow("atx-first") << QStringLiteral("# First\nHeading\n=======\n") << QStringLiteral("First");
+        QTest::newRow("multiline") << QStringLiteral("First line\nsecond line\n===\n") << QStringLiteral("First line second line");
+        QTest::newRow("front-title") << QStringLiteral("---\ntitle: Chosen\n---\nHeading\n===\n") << QStringLiteral("Chosen");
+        QTest::newRow("excluded") << QStringLiteral("---\nHidden\n===\n---\n```\nHidden\n===\n```\n~~~\n# Hidden\n~~~\nReal\n===\n") << QStringLiteral("Real");
+        QTest::newRow("h2-code") << QStringLiteral("Second\n---\n\n    Code\n    ====\n\n# Real\n") << QStringLiteral("Real");
+        QTest::newRow("fallback") << QStringLiteral("Plain\n\n===\n") << QStringLiteral("fallback");
+    }
+    void setextHeadings() {
+        QFETCH(QString, source); QFETCH(QString, expected);
+        QCOMPARE(MarkdownFile::title(source, "fallback"), expected);
+    }
+    void internalScanKeepsExternalChanges_data() {
+        QTest::addColumn<bool>("failedSave");
+        QTest::newRow("list") << false;
+        QTest::newRow("failed-save") << true;
+    }
+    void internalScanKeepsExternalChanges() {
+        QFETCH(bool, failedSave);
+        QTemporaryDir dir; NotesRepository r;
+        QVERIFY(write(dir.filePath("a.md"), "base\n"));
+        QVERIFY(write(dir.filePath("b.md"), "other\n"));
+        QVERIFY(call(r, "selectLibrary", {{"path", dir.path()}}).value("ok").toBool());
+        const auto d = call(r, "read", {{"path", "a.md"}});
+        QSignalSpy changes(&r, &NotesRepository::libraryChanged);
+        bool injected = false, wrote = false;
+        RepositoryTestHooks::beforeScan = [&](bool notify) {
+            if (!notify && !injected) {
+                injected = true;
+                wrote = write(dir.filePath("b.md"), "external\n");
+                if (failedSave) wrote = write(dir.filePath("a.md"), "conflicting\n") && wrote;
+            }
+        };
+        const auto result = failedSave
+            ? call(r, "save", {{"path", "a.md"}, {"text", "local\n"}, {"baseHash", d.value("baseHash")}})
+            : call(r, "list");
+        RepositoryTestHooks::beforeScan = {};
+        QVERIFY(injected && wrote);
+        if (failedSave) QCOMPARE(result.value("error").toString(), QString("conflict"));
+        else QVERIFY(result.value("ok").toBool());
+        auto reported = [&] {
+            for (const auto &signal : changes)
+                for (const auto &item : signal[0].toMap().value("changes").toList())
+                    if (item.toMap().value("path") == "b.md" && item.toMap().value("hash") == MarkdownFile::digest("external\n")) return true;
+            return false;
+        };
+        QTRY_VERIFY_WITH_TIMEOUT(reported(), 10000);
+    }
+    void corruptMetadataAndRecovery() {
+        QTemporaryDir dir;
+        QVERIFY(write(dir.filePath("a.md"), "original"));
+        QVERIFY(QDir().mkpath(dir.filePath(".nextnotes")));
+        const QByteArray broken("{invalid-json");
+        QVERIFY(write(dir.filePath(".nextnotes/state.json"), broken));
+        {
+            NotesRepository r;
+            QCOMPARE(call(r, "selectLibrary", {{"path", dir.path()}}).value("error").toString(), QString("metadataCorrupt"));
+        }
+        QCOMPARE(read(dir.filePath(".nextnotes/state.json")), broken);
+        QCOMPARE(read(dir.filePath("a.md")), QByteArray("original"));
+        QVERIFY(QFile::remove(dir.filePath(".nextnotes/state.json")));
+        NotesRepository r;
+        QVERIFY(call(r, "selectLibrary", {{"path", dir.path()}}).value("ok").toBool());
+        QVERIFY(write(dir.filePath(".nextnotes/drafts/broken.json"), broken));
+        QCOMPARE(call(r, "recovery").value("error").toString(), QString("recoveryCorrupt"));
+        QCOMPARE(read(dir.filePath(".nextnotes/drafts/broken.json")), broken);
+        QVERIFY(write(dir.filePath(".nextnotes/drafts/broken.json"), "{}"));
+        QCOMPARE(call(r, "recovery").value("error").toString(), QString("recoveryCorrupt"));
+        QVERIFY(QFile::remove(dir.filePath(".nextnotes/drafts/broken.json")));
+        QVERIFY(write(dir.filePath(".nextnotes/commits/broken.intent"), broken));
+        QCOMPARE(call(r, "recovery").value("error").toString(), QString("recoveryCorrupt"));
+        QCOMPARE(read(dir.filePath(".nextnotes/commits/broken.intent")), broken);
+        QCOMPARE(read(dir.filePath("a.md")), QByteArray("original"));
+    }
+    void crashChild() {
+        const QString root = qEnvironmentVariable("NEXTNOTES_CRASH_ROOT");
+        if (root.isEmpty()) QSKIP("Helper slot: invoked only by interruptedCommit parent test.");
+        NotesRepository r;
+        QVERIFY(call(r, "selectLibrary", {{"path", root}}).value("ok").toBool());
+        auto d = call(r, "read", {{"path", "a.md"}});
+        if (qEnvironmentVariable("NEXTNOTES_CRASH_STAGE") == "intent")
+            SafeCommit::beforeCommit = [] { std::_Exit(73); };
+        else SafeCommit::afterExchange = [] { std::_Exit(74); };
+        call(r, "save", {{"path", "a.md"}, {"text", "local\n"}, {"baseHash", d.value("baseHash")}});
+        QFAIL("Commit hook was not reached");
+    }
+    void interruptedCommit_data() {
+        QTest::addColumn<QString>("stage");
+        QTest::newRow("durable-intent") << QStringLiteral("intent");
+        QTest::newRow("after-exchange") << QStringLiteral("exchange");
+    }
+    void interruptedCommit() {
+        QFETCH(QString, stage);
+        QTemporaryDir dir; QVERIFY(write(dir.filePath("a.md"), "base\n"));
+        QProcess child; auto env = QProcessEnvironment::systemEnvironment();
+        env.insert("NEXTNOTES_CRASH_ROOT", dir.path()); env.insert("NEXTNOTES_CRASH_STAGE", stage);
+        child.setProcessEnvironment(env);
+        child.start(QCoreApplication::applicationFilePath(), {"crashChild"});
+        QVERIFY(child.waitForFinished(15000));
+        QCOMPARE(child.exitCode(), stage == "intent" ? 73 : 74);
+        NotesRepository r;
+        QVERIFY(call(r, "selectLibrary", {{"path", dir.path()}}).value("ok").toBool());
+        const auto recovery = call(r, "recovery"); QVERIFY(recovery.value("ok").toBool());
+        QCOMPARE(recovery.value("drafts").toList().size(), 1);
+        QCOMPARE(recovery.value("drafts").toList()[0].toMap().value("text").toString(), QString("local\n"));
+        const auto commits = recovery.value("commits").toList(); QCOMPARE(commits.size(), 1);
+        const QString retained = commits[0].toMap().value("intent").toString().section(u'\n', 1);
+        QCOMPARE(read(dir.filePath("a.md")), stage == "intent" ? QByteArray("base\n") : QByteArray("local\n"));
+        QCOMPARE(read(retained), stage == "intent" ? QByteArray("local\n") : QByteArray("base\n"));
+        QVERIFY(write(dir.filePath("a.md"), "new-external\n"));
+        QVERIFY(call(r, "recovery").value("ok").toBool());
+        QCOMPARE(read(dir.filePath("a.md")), QByteArray("new-external\n"));
+        QVERIFY(QFileInfo::exists(retained));
+    }
+    void realDiskFull() {
+#ifndef Q_OS_LINUX
+        QSKIP("Linux capacity-limited tmpfs required.");
+#else
+        const QString root = qEnvironmentVariable("NEXTNOTES_ENOSPC_DIR");
+        if (root.isEmpty()) QSKIP("Set NEXTNOTES_ENOSPC_DIR to a dedicated capacity-limited tmpfs in the VM; see architecture.md.");
+        struct statvfs fs {};
+        QVERIFY(::statvfs(QFile::encodeName(root).constData(), &fs) == 0);
+        QVERIFY2(quint64(fs.f_blocks) * fs.f_frsize <= 64 * 1024 * 1024, "Refusing to fill a filesystem larger than 64 MiB; use dedicated tmpfs.");
+        QTemporaryDir dir(root + "/nextnotes-enospc-XXXXXX"); QVERIFY(dir.isValid());
+        QVERIFY(write(dir.filePath("a.md"), "base\n"));
+        NotesRepository r; QVERIFY(call(r, "selectLibrary", {{"path", dir.path()}}).value("ok").toBool());
+        auto d = call(r, "read", {{"path", "a.md"}});
+        QFile filler(dir.filePath("filler")); QVERIFY(filler.open(QIODevice::WriteOnly));
+        const QByteArray block(4096, 'x');
+        qint64 count = 0;
+        while (count <= 64 * 1024 * 1024 && filler.write(block) == block.size() && filler.flush()) count += block.size();
+        QVERIFY(count <= 64 * 1024 * 1024);
+        qInfo() << "ENOSPC fixture" << root << "capacity bytes" << quint64(fs.f_blocks) * fs.f_frsize
+                << "filler bytes" << filler.size() << "write error" << filler.errorString();
+        QVERIFY(filler.error() != QFileDevice::NoError);
+        const auto result = call(r, "save", {{"path", "a.md"}, {"text", QString(32768, u'x')}, {"baseHash", d.value("baseHash")}});
+        filler.close(); QVERIFY(filler.remove());
+        QCOMPARE(result.value("error").toString(), QString("recoveryWriteFailed"));
+        QVERIFY(!result.value("recoveryDurable").toBool()); QVERIFY(result.value("draftInMemory").toBool());
+        QCOMPARE(read(dir.filePath("a.md")), QByteArray("base\n"));
+        QCOMPARE(call(r, "recovery").value("memoryDrafts").toList()[0].toMap().value("text").toString(), QString(32768, u'x'));
+        QVERIFY(call(r, "save", {{"path", "a.md"}, {"text", "recovered\n"}, {"baseHash", d.value("baseHash")}}).value("ok").toBool());
+#endif
+    }
+    void commitWindow() {
+        QTemporaryDir dir; NotesRepository r;
+        QVERIFY(call(r, "selectLibrary", {{"path", dir.path()}}).value("ok").toBool());
+        QVERIFY(write(dir.filePath("n.md"), "base\n"));
+        auto d = call(r, "read", {{"path", "n.md"}});
+        SafeCommit::beforeCommit = [&] { write(dir.filePath("n.md"), "external\n"); };
+        const auto result = call(r, "save", {{"path", "n.md"}, {"text", "local\n"}, {"baseHash", d.value("baseHash")}});
+        SafeCommit::beforeCommit = {};
+        QCOMPARE(result.value("error").toString(), QString("conflict"));
+        QCOMPARE(read(result.value("retainedPath").toString()), QByteArray("external\n"));
+        QCOMPARE(read(dir.filePath("n.md")), QByteArray("local\n"));
+        QVERIFY(!call(r, "recovery").value("drafts").toList().isEmpty());
+        SafeCommit::beforeCommit = [&] { write(dir.filePath("race.md"), "other\n"); };
+        const auto created = call(r, "create", {{"path", "race.md"}, {"text", "mine"}});
+        SafeCommit::beforeCommit = {};
+        QVERIFY(!created.value("ok").toBool());
+        QCOMPARE(read(dir.filePath("race.md")), QByteArray("other\n"));
+    }
+    void newFileFormat() {
+        QTemporaryDir dir; NotesRepository r;
+        QVERIFY(call(r, "selectLibrary", {{"path", dir.path()}}).value("ok").toBool());
+        QVERIFY(call(r, "create", {{"path", "ok.md"}, {"text", "a\r\nb\r\n"}}).value("ok").toBool());
+        QVERIFY(!read(dir.filePath("ok.md")).contains('\r'));
+        QVERIFY(!call(r, "create", {{"path", "bad.md"}, {"text", QString(QChar(0x2028))}}).value("ok").toBool());
+    }
+
     void bytePreservation_data() {
         QTest::addColumn<QByteArray>("bytes");
         QTest::newRow("lf") << QByteArray("---\ntitle: 'Unknown'\nextra: [a, b]\n---\n\n<!--x-->\n# Hello\n  \n");

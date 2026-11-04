@@ -23,6 +23,7 @@ Document decode(const QByteArray &bytes)
         d.readOnlyReason = QStringLiteral("unsupportedSeparator");
     d.trailingNewline = d.text.endsWith(u'\n');
     d.text.replace(QStringLiteral("\r\n"), QStringLiteral("\n"));
+    if (d.readOnlyReason.isEmpty()) d.readOnlyReason = formatError(d.text);
     return d;
 }
 QByteArray encode(const Document &base, const QString &text)
@@ -35,26 +36,83 @@ QByteArray encode(const Document &base, const QString &text)
     if (base.crlf) normalized.replace(QStringLiteral("\n"), QStringLiteral("\r\n"));
     return (base.bom ? QByteArray("\xEF\xBB\xBF") : QByteArray()) + normalized.toUtf8();
 }
+static QString scalar(QString v, bool &ok)
+{
+    v = v.trimmed();
+    if (v.startsWith(u'\'') || v.startsWith(u'"')) {
+        const QChar quote = v.front(); QString out; int i = 1;
+        for (; i < v.size(); ++i) {
+            if (v[i] == quote) {
+                if (quote == u'\'' && i + 1 < v.size() && v[i+1] == quote) { out += quote; ++i; continue; }
+                const QString tail = v.mid(i+1).trimmed();
+                ok = tail.isEmpty() || tail.startsWith(u'#'); return out;
+            }
+            if (v[i] == u'\\' && quote == u'"') { ok = false; return {}; }
+            out += v[i];
+        }
+        ok = false; return {};
+    }
+    v.remove(QRegularExpression(QStringLiteral("\\s+#.*$")));
+    if (v.startsWith(u'#')) v.clear();
+    ok = !v.contains(QRegularExpression(QStringLiteral("[\\[\\]{}&*!|>\\\"']|:\\s")));
+    return v.trimmed();
+}
+static QString parseField(const QString &text, const QString &key, bool &ok)
+{
+    const auto lines = text.split(u'\n');
+    if (lines.first() != "---") return {};
+    QString result; bool seen = false, ended = false;
+    for (int i = 1; i < lines.size(); ++i) {
+        if (lines[i] == "---" || lines[i] == "...") { ended = true; break; }
+        const QString line = lines[i].trimmed();
+        if (!line.contains(key)) continue;
+        if (!lines[i].startsWith(key + u':')) { ok = false; continue; }
+        if (seen) ok = false;
+        seen = true; bool valid = true;
+        result = scalar(lines[i].mid(key.size()+1), valid); ok = ok && valid;
+    }
+    ok = ok && ended;
+    return result;
+}
 QString field(const QString &text, const QString &key)
 {
-    // Deliberately conservative scalar subset, never a YAML serialization round trip.
-    const auto lines = text.split(u'\n');
-    if (lines.isEmpty() || lines.first() != QStringLiteral("---")) return {};
-    for (int i = 1; i < lines.size(); ++i) {
-        if (lines[i] == QStringLiteral("---") || lines[i] == QStringLiteral("...")) break;
-        if (!lines[i].startsWith(key + u':')) continue;
-        QString value = lines[i].mid(key.size() + 1).trimmed();
-        if (value.size() >= 2 && ((value.front() == u'"' && value.back() == u'"') || (value.front() == u'\'' && value.back() == u'\'')))
-            value = value.mid(1, value.size() - 2);
-        return value;
-    }
-    return {};
+    bool ok = true; const auto value = parseField(text, key, ok); return ok ? value : QString();
+}
+QString formatError(const QString &text)
+{
+    bool ok = true;
+    parseField(text, "nextnotes_id", ok); parseField(text, "title", ok);
+    return ok ? QString() : QStringLiteral("unsupportedFrontMatter");
 }
 QString title(const QString &text, const QString &fileName)
 {
-    const QString value = field(text, QStringLiteral("title"));
-    if (!value.isEmpty()) return value;
-    const auto match = QRegularExpression(QStringLiteral("^# +([^\n]+)"), QRegularExpression::MultilineOption).match(text);
-    return match.hasMatch() ? match.captured(1).trimmed() : fileName;
+    const auto value = field(text, "title"); if (!value.isEmpty()) return value;
+    QString paragraph;
+    QChar fence; int length = 0; bool front = text.startsWith("---\n"); int n = 0;
+    for (const QString &line : text.split(u'\n')) {
+        if (front) { if (n++ && (line == "---" || line == "...")) front = false; continue; }
+        const auto m = QRegularExpression("^ {0,3}(`{3,}|~{3,})(.*)$").match(line);
+        if (m.hasMatch()) {
+            paragraph.clear();
+            const auto run = m.captured(1);
+            if (fence.isNull()) { fence = run.front(); length = run.size(); }
+            else if (run.front() == fence && run.size() >= length && m.captured(2).trimmed().isEmpty()) fence = QChar();
+            continue;
+        }
+        if (!fence.isNull()) continue;
+        if (!paragraph.isEmpty() && QRegularExpression("^ {0,3}=+[ \\t]*$").match(line).hasMatch())
+            return paragraph;
+        auto h = QRegularExpression("^ {0,3}#(?:[ \\t]+(.*)|$)").match(line);
+        if (h.hasMatch()) { QString t = h.captured(1); t.remove(QRegularExpression("[ \\t]+#+[ \\t]*$")); return t.trimmed(); }
+        // A Setext underline belongs to the preceding paragraph, not an indented
+        // code block, list, quote, thematic break, or another heading.
+        if (line.trimmed().isEmpty() || QRegularExpression("^(?: {4}|\\t| {0,3}(?:#{1,6}(?:[ \\t]|$)|>|[-+*][ \\t]|[0-9]+[.)][ \\t]|(?:[-*_][ \\t]*){3,}$|[-=]+[ \\t]*$))").match(line).hasMatch())
+            paragraph.clear();
+        else {
+            if (!paragraph.isEmpty()) paragraph += u' ' ;
+            paragraph += line.trimmed();
+        }
+    }
+    return fileName;
 }
 }

@@ -99,7 +99,7 @@ kos-vm-dev（已知 Qt 6.10.2，CPU/RAM/GPU/输入法待记录）。先保存源
 
 `src/storage/MarkdownFile` 是字节适配器；`NotesRepository` 是 QObject 异步门面，所有文件读取、递归扫描、JSON、写入、监听和恢复在专属 QThread 中执行。串行请求携带递增 requestId，返回 library/generation；控制器必须忽略旧库 generation 和旧编辑 revision 的响应。服务尚未注册 QML 类型，未修改 main、EditorSession 或 QML。析构等待已接收请求完成；正常退出控制器应先等待保存结果并展示错误，不能靠析构代替关闭流程。
 
-新笔记 front matter 写 UUID `nextnotes_id`。已有无 ID 笔记只在 `.nextnotes/state.json` 建立 ID 映射，不自动改正文；复制出的重复 ID 在列表显式返回，保存拒绝覆盖。外置 ID 在应用重命名、回收恢复和重新打开后保留；无 ID 文件在应用外被重命名目前视为新导入，未做内容相似性身份推断。标题读取支持保守的顶层单行 front matter `title` 标量，然后首个 `# ` 标题，最后文件名；不宣称完整 YAML/Markdown 解析（块标量、复杂转义和围栏上下文待 MarkdownEngine）。重命名仅改路径，不改 title/H1 或跨笔记链接。
+新笔记 front matter 写 UUID `nextnotes_id`。已有无 ID 笔记只在 `.nextnotes/state.json` 建立 ID 映射，不自动改正文；复制出的重复 ID 在列表显式返回，保存拒绝覆盖。外置 ID 在应用重命名、回收恢复和重新打开后保留；无 ID 文件在应用外被重命名目前视为新导入，未做内容相似性身份推断。标题读取支持保守的顶层单行 front matter `title` 标量，然后首个有效 ATX / Setext 一级标题，最后文件名；不宣称完整 YAML/Markdown 解析（块标量、复杂转义等完整语义待 MarkdownEngine；标题扫描排除 front matter 与代码围栏）。重命名仅改路径，不改 title/H1 或跨笔记链接。
 
 `createdUtc` 是首次纳入库元数据的 UTC 时间，`modifiedUtc` 是应用保存时间；列表 `fileModifiedUtc` 单独表示文件系统 UTC 时间，不混称正文创建时间。收藏及回收记录保存在元数据。`.nextnotes` 和 `assets` 在递归进入前被排除；路径拒绝绝对路径、空段、`.`、`..` 和符号链接组件，不清理附件或无关目录。库锁阻止本应用两实例并发写元数据。损坏 state.json 显式报错并保留原文件，不静默重建丢失收藏/身份。
 
@@ -124,14 +124,41 @@ kos-vm-dev（已知 Qt 6.10.2，CPU/RAM/GPU/输入法待记录）。先保存源
 | recovery | 返回 drafts（text/baseHash/diskHash/matchesBase）、memoryDrafts、trash；从不自动应用草稿 |
 | discardDraft | path；显式删除该恢复草稿，供用户放弃或已确认另存后的收尾 |
 
-保存先持久化草稿，再检查基线摘要，再使用同目录 QSaveFile 安全替换且禁用直接写入回退。冲突返回磁盘摘要与文本，保留磁盘版本及本地恢复草稿。草稿写入也失败时返回 recoveryDurable=false，并保留内存；不得宣称此时断电可恢复。新建使用 NewOnly 预留目标避免普通重名覆盖；写入失败可能留下空预留文件，草稿保留且错误明确。重命名与回收先持久化恢复元数据，再移动，崩溃可能留下待处理记录但不会自动删除正文。恢复失败保留回收记录；成功移动但元数据收尾失败会返回错误与说明。
+保存先以 QSaveFile 持久化草稿，再检查基线摘要，再使用下述同目录 staging + renameat2 EXCHANGE 正文提交协议。QSaveFile 仅用于 JSON 元数据与草稿，均禁用直接写入回退。冲突返回磁盘摘要与文本，保留磁盘版本及本地恢复草稿。草稿写入也失败时返回 recoveryDurable=false，并保留内存；不得宣称此时断电可恢复。新建使用 renameat2 NOREPLACE，目标重名时不覆盖；失败可能保留 staging 与 intent，草稿保留且错误明确。重命名与回收先持久化恢复元数据，再移动，崩溃可能留下待处理记录但不会自动删除正文。恢复失败保留回收记录；成功移动但元数据收尾失败会返回错误与说明。
 
-QFileSystemWatcher 监听目录及文件，150ms 单次定时器合并事件并重新扫描；自身操作在工作线程刷新摘要基线。`libraryChanged` 返回变化 path/hash/removed 及新列表，监听资源不足返回 unwatchedPaths；控制器应提示并提供 list 手动刷新。当前实现不主动重载已打开缓冲区：无脏编辑可由控制器 read，有脏编辑必须先 checkpoint 并展示冲突。不存在周期轮询。每次扫描为全库扫描，虽在后台但尚无 1 万篇性能结论。
+QFileSystemWatcher 监听目录及文件，150ms 单次定时器合并事件并重新扫描；首次选库建立摘要基线；内部扫描保留未通知变化并安排去抖扫描，自身成功修改只更新实际路径的已知摘要，移动只处理源与目标路径。`libraryChanged` 返回变化 path/hash/removed 及新列表，监听资源不足返回 unwatchedPaths；控制器应提示并提供 list 手动刷新。当前实现不主动重载已打开缓冲区：无脏编辑可由控制器 read，有脏编辑必须先 checkpoint 并展示冲突。不存在周期轮询。每次扫描为全库扫描，虽在后台但尚无 1 万篇性能结论。
 
 ### 边界、验证与后续工作
 
 QtTest 新增字节保真、只读异常格式、冲突及重启恢复、稳定 ID 与重复 ID、收藏、重命名与回收恢复、同名/路径逃逸/符号链接、草稿写失败、权限失败、外部监听样例。测试仅编写，未在本机编译、运行或验证；VM 应以非 root 用户运行权限用例。磁盘满的真实文件系统注入、断电窗口和同步盘并发压力仍待 VM 专项验证。
 
-当前哈希检查与 QSaveFile commit 之间存在系统级竞态窗口：任意外部编辑器不遵守库锁，仍可能在检查之后写入。这里不承诺跨进程原子 compare-and-swap 或同步协议。路径逐组件检查同样不等于抵御攻击者同时替换目录的 openat 沙箱。正常文件更改、预先存在的符号链接和重名均走显式拒绝路径；高对抗并发目录替换不在本轮可移植 Qt 文件 API 的保证内。
+哈希检查后任意外部编辑器仍可能写入；EXCHANGE 保留实际被替换 inode 并复核其摘要，发现竞态返回冲突且不自动回滚。这里不承诺跨进程原子 compare-and-swap 或同步协议。路径逐组件检查同样不等于抵御攻击者同时替换目录的 openat 沙箱。正常文件更改、预先存在的符号链接和重名均走显式拒绝路径；高对抗并发目录替换不在本轮可移植 Qt 文件 API 的保证内。
 
 700ms 自动保存、切换/关闭时处理脏状态、QML 模型/错误文案、工作区布局与最近打开、搜索、附件导入、历史版本（不同于草稿）及 M4 跨笔记引用更新尚未实现。单行 front matter 解析器应由后续 MarkdownEngine 共享语法契约替换；不可将本层简化标题读取声称为完整 Markdown 语义分析。
+
+### M1a 提交协议修订
+正文提交在 Linux 使用 renameat2：新建使用 NOREPLACE；保存使用 EXCHANGE。
+提交前同目录持久化 `.nextnotes-UUID.swap` 和 `.nextnotes/commits/UUID.intent`。
+intent 第一行 JSON 包含目标相对路径、基线摘要和新摘要，第二行为 staging 绝对路径。
+交换前 staging 是本地新版本，交换后是实际被替换 inode；两种状态均不自动删除。
+恢复 API 返回 intents，人工根据目标及 staging 摘要判定阶段，不自动覆盖正文。
+交换后旧 inode 摘要与基线不符时返回 conflict，保留草稿、旧 inode 和当前本地正文。
+缺少 syscall 或文件系统不支持标志时明确 writeFailed，无普通 rename 降级。
+保留文件目前不自动清理，尚无历史版本管理 UI；异常后的恢复操作仍需后续控制器呈现。
+
+### M1a 第三轮回归与故障注入（仅供 VM 执行）
+
+新增 `setextHeadings`（标题顺序、front matter、围栏、缩进代码）、`internalScanKeepsExternalChanges`（在工作线程内部扫描入口确定性写入外部内容，覆盖 list 和失败 save，之后等待真实去抖通知）、`corruptMetadataAndRecovery`（state、草稿与 intent 损坏保留原文件并显式失败）。权限测试原样保留，须非 root 运行。
+
+`interruptedCommit` 启动当前测试程序的独立 `crashChild` 子进程。子进程在 intent 文件和目录 fsync 后或 EXCHANGE 返回后、目标目录 fsync 前调用 `_Exit`，父进程重开库，验证目标、staging、草稿与 intent 均可定位，并验证 recovery 不覆盖更新的外部正文。这是进程终止测试，不是物理断电、内核崩溃或文件系统丢失模拟。`crashChild` 单独普通运行会 skip，仅父测试设置环境调用。测试 seam 仅在工作线程空闲时设置，内部扫描 hook 不用于监听扫描。
+
+VM 构建当前源快照后可运行 `./build/notes-repository-test setextHeadings internalScanKeepsExternalChanges corruptMetadataAndRecovery interruptedCommit permissionFailure`（按实际构建目录替换）。真实磁盘满槽 `realDiskFull` 通过 `NEXTNOTES_ENOSPC_DIR` 指定独立容量受限 tmpfs；不设置时明确 skip，设置后若文件系统容量大于 64MiB 则拒绝填充并失败。槽填满临时测试目录中的 filler，验证恢复写入失败、原文未变、输入仍在内存；释放 filler 后再保存验证恢复。它覆盖草稿写满路径，不能替代所有 staging/intent/fsync 故障的专项证据。
+
+例如仅在 VM 同一命名空间中执行（测试二进制路径须改为当前快照构建路径）：
+
+```sh
+mkdir -p /home/amao/apps/nextnotes-enospc
+unshare -Ur -m sh -c 'mount -t tmpfs -o size=2m tmpfs /home/amao/apps/nextnotes-enospc && NEXTNOTES_ENOSPC_DIR=/home/amao/apps/nextnotes-enospc /home/amao/apps/nextnotes/build/notes-repository-test realDiskFull'
+```
+
+以上用例本轮仅编写源码，未在本机编译或执行；必须记录 VM 源快照、构建和完整日志，包括 skip，不能据此宣称验收通过。剩余 fsync 返回失败、物理断电及 UI 恢复引导仍待对应验证/阶段实现。
