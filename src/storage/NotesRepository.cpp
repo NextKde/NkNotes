@@ -252,6 +252,44 @@ QVariantMap RepositoryWorker::dispatch(const QString &op, const QVariantMap &a)
     if (root.isEmpty()) return failure("noLibrary");
     if (a.contains("generation") && a.value("generation").toULongLong() != generation) return failure("staleGeneration");
     if (QFileInfo(root).isSymLink() || QFileInfo(root).canonicalFilePath() != root) return failure("unsafePath");
+    if (op == "recoveryVersion" || op == "recoverCommit") {
+        const QString token = a.value("token").toString();
+        if (token.contains('/') || !token.endsWith(".intent")) return failure("recoveryCorrupt", "恢复记录名称无效");
+        const QString journal = path(".nextnotes/commits/" + token, true);
+        QByteArray content;
+        if (journal.isEmpty() || !readBytes(journal, content, error)) return failure("recoveryCorrupt", "恢复记录无法读取");
+        const int split = content.indexOf('\n');
+        QJsonParseError parse;
+        const auto json = QJsonDocument::fromJson(content.left(split), &parse);
+        if (split < 0 || parse.error != QJsonParseError::NoError || !json.isObject()) return failure("recoveryCorrupt", "恢复记录损坏");
+        const auto record = json.object();
+        const QString relative = record.value("path").toString();
+        const QString target = path(relative);
+        const QString staging = QString::fromUtf8(content.mid(split + 1));
+        const QString stagingRelative = QDir(root).relativeFilePath(staging);
+        const QString checked = path(stagingRelative, true);
+        const QString base = record.value("baseHash").toString(), next = record.value("newHash").toString();
+        const QRegularExpression hashPattern("^[0-9a-f]{64}$");
+        if (target.isEmpty() || checked.isEmpty() || checked != staging || QFileInfo(staging).absolutePath() != QFileInfo(target).absolutePath()
+            || !QFileInfo(staging).fileName().startsWith(".nextnotes-") || !staging.endsWith(".swap")
+            || !hashPattern.match(next).hasMatch() || (!base.isEmpty() && !hashPattern.match(base).hasMatch()))
+            return failure("recoveryCorrupt", "恢复路径或版本校验失败");
+        const QString version = a.value("version").toString();
+        if (version != "before" && version != "pending") return failure("recoveryCorrupt", "恢复版本无效");
+        const QString expected = version == "before" ? base : next;
+        QByteArray bytes; bool found = false;
+        for (const auto &candidate : {target, staging}) {
+            QByteArray b;
+            if (readBytes(candidate, b, error) && !expected.isEmpty() && MarkdownFile::digest(b) == expected) { bytes = b; found = true; break; }
+        }
+        if (!found) return failure("recoveryCorrupt", "该版本无法确认或已被外部修改；原记录保留");
+        const auto document = MarkdownFile::decode(bytes);
+        if (op == "recoverCommit") {
+            if (!document.readOnlyReason.isEmpty()) return failure("recoveryCorrupt", "此版本格式不能安全生成副本；原始版本保留");
+            return dispatch("saveAs", {{"path", "恢复-" + uuid() + ".md"}, {"text", document.text}, {"newIdentity", true}});
+        }
+        return {{"ok", true}, {"text", document.text}, {"bytes", bytes}, {"version", version}, {"hash", expected}};
+    }
     if (op == "list") return scan(false);
     if (op == "search") {
         auto listing = scan(false);
@@ -348,7 +386,12 @@ QVariantMap RepositoryWorker::dispatch(const QString &op, const QVariantMap &a)
                 || !record.object().value("baseHash").isString()
                 || !record.object().value("newHash").isString()
                 || content.mid(separator + 1).isEmpty()) return failure("recoveryCorrupt", fi.fileName());
-            commits.append(QVariantMap{{"journal", fi.absoluteFilePath()}, {"intent", QString::fromUtf8(content)}});
+            QVariantList versions;
+            for (const auto &version : {QString("before"), QString("pending")}) {
+                const auto result = dispatch("recoveryVersion", {{"token", fi.fileName()}, {"version", version}});
+                versions.append(QVariantMap{{"version", version}, {"available", result.value("ok").toBool()}, {"text", result.value("text")}});
+            }
+            commits.append(QVariantMap{{"token", fi.fileName()}, {"name", QFileInfo(record.object().value("path").toString()).fileName()}, {"time", fi.lastModified().toString(Qt::ISODate)}, {"versions", versions}});
         }
         QVariantList inMemory;
         for (const auto &draft : memoryDrafts) inMemory.append(draft);

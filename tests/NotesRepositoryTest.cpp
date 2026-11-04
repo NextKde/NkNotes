@@ -248,13 +248,29 @@ private slots:
         QCOMPARE(recovery.value("drafts").toList().size(), 1);
         QCOMPARE(recovery.value("drafts").toList()[0].toMap().value("text").toString(), QString("local\n"));
         const auto commits = recovery.value("commits").toList(); QCOMPARE(commits.size(), 1);
-        const QString retained = commits[0].toMap().value("intent").toString().section(u'\n', 1);
+        const QString token = commits[0].toMap().value("token").toString();
+        const QString journal = dir.filePath(".nextnotes/commits/" + token);
+        const QString retained = QString::fromUtf8(read(journal)).section(u'\n', 1);
+        for (const auto &version : {QString("before"), QString("pending")}) {
+            auto recovered = call(r, "recoveryVersion", {{"token", token}, {"version", version}});
+            QVERIFY(recovered.value("ok").toBool());
+            QCOMPARE(recovered.value("bytes").toByteArray(), version == "before" ? QByteArray("base\n") : QByteArray("local\n"));
+            auto copy = call(r, "recoverCommit", {{"token", token}, {"version", version}});
+            QVERIFY(copy.value("ok").toBool());
+            QVERIFY(read(dir.filePath(copy.value("path").toString())).contains(version == "before" ? "base\n" : "local\n"));
+        }
+        QVERIFY(!call(r, "recoveryVersion", {{"token", "../escape.intent"}, {"version", "before"}}).value("ok").toBool());
         QCOMPARE(read(dir.filePath("a.md")), stage == "intent" ? QByteArray("base\n") : QByteArray("local\n"));
         QCOMPARE(read(retained), stage == "intent" ? QByteArray("local\n") : QByteArray("base\n"));
         QVERIFY(write(dir.filePath("a.md"), "new-external\n"));
         QVERIFY(call(r, "recovery").value("ok").toBool());
         QCOMPARE(read(dir.filePath("a.md")), QByteArray("new-external\n"));
         QVERIFY(QFileInfo::exists(retained));
+        const QByteArray originalJournal = read(journal);
+        QVERIFY(write(journal, originalJournal.left(originalJournal.indexOf('\n')) + "\n/tmp/outside.swap"));
+        QVERIFY(!call(r, "recoveryVersion", {{"token", token}, {"version", "before"}}).value("ok").toBool());
+        QVERIFY(write(journal, "broken\n/tmp/outside.swap"));
+        QVERIFY(!call(r, "recoverCommit", {{"token", token}, {"version", "before"}}).value("ok").toBool());
     }
     void realDiskFull() {
 #ifndef Q_OS_LINUX

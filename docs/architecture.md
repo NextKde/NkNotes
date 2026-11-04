@@ -191,3 +191,11 @@ NotesController 单缓冲会话以 requestId、library、generation、document e
 恢复中心保留每条记录的真实操作按钮与只读正文，通过 Tab 可达；聚焦时滚动使目标可见，操作名称包含记录路径。格式/更多菜单关闭后延迟恢复编辑焦点，让新打开的弹层或正文查找保留焦点；Ctrl+Shift+F 在列表显示后进入全局搜索，不改正文。只有普通笔记行使用 AppTheme.focusRing，没有增加液态控件蓝环。空状态标签不再在标题前拼接分隔符。
 
 本轮仅源码编辑，未在本机编译、测试或启动 GUI。VM 需复测：搜索 Tab 进入笔记行、方向键滚动、Enter/Space/辅助技术 press 打开、AT-SPI FOCUSABLE/SELECTED/name、排序/搜索后稳定选择、文件夹键盘过滤、恢复中心 Tab 滚动，以及菜单 Escape/命令后返回正文与 Ctrl+Shift+F 后正文不变。
+
+### M1 恢复与身份补充（实现待 VM 验收）
+
+恢复中心以文件名、记录时间及保存前/本次待保存版本展示预览；无法确认的版本禁用另存。`recoveryVersion {token, version: before|pending}` 重新读取库内提交记录，校验目标/同目录 staging 路径与 SHA-256，返回 `text`、`bytes`、`hash`；`recoverCommit` 使用同一校验再生成新身份恢复副本，不覆盖原文件，保留记录和草稿。外部改变后不匹配任何记录摘要的版本拒绝恢复。恢复副本只调整身份字段，不整文重排。
+
+允许源码编辑唯一的 nextnotes_id：保存成功后同步当前选择、最近笔记及位置键；重复 ID 仍拒绝保存。另存成功立即记录新文档，直接关闭重开可恢复副本；移动后通过读取新路径激活文档。外观使用 LiquidSelect、SettingsSwitch 与普通材质 LiquidSlider。
+
+新增控制器身份/另存重开测试，并将真实子进程中断提交测试扩展为经恢复 API 读取两版本、独立字节核对及另存、损坏记录拒绝。仅源码实现，未在本机运行构建、测试或 GUI；须在虚拟机验收，不替代尚缺的 IME、键盘、主题及规模证据。

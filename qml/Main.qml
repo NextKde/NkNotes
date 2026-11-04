@@ -135,7 +135,7 @@ ApplicationWindow {
             visible: root.hasLibrary && !!controller.path && root.editorX < root.width
             x: root.editorX; y: tokens.toolbarHeight * 2 + (findBar.visible ? 36 : 0)
             width: Math.max(0, parent.width - x); height: Math.max(0, parent.height - y - statusArea.height)
-            bodySize: bodySizeSlider.value; readingWidth: tokens.readingWidth; inset: tokens.inset
+            bodySize: 12 + Math.round(bodySizeSlider.value * 12); readingWidth: tokens.readingWidth; inset: tokens.inset
         }
     }
     LiquidBackdrop { id: readingBackdrop; sourceItem: readingScene; registerAsDefault: false }
@@ -427,21 +427,24 @@ ApplicationWindow {
             title: "阅读与外观"
             SettingsItem {
                 title: "主题"; minimumLabelWidth: 50
-                RowLayout {
-                    Repeater { model: ["system", "light", "dark"]; delegate: LiquidActionButton { required property string modelData; text: modelData === "system" ? "系统" : modelData === "light" ? "浅色" : "深色"; materialForm: true; onClicked: { AppTheme.appearanceMode = modelData; controller.setPreference("appearance", modelData) } } }
+                LiquidSelect {
+                    model: ["系统", "浅色", "深色"]; materialForm: true
+                    Accessible.name: "主题"
+                    currentIndex: Math.max(0, ["system", "light", "dark"].indexOf(AppTheme.appearanceMode))
+                    onActivated: function(index) { AppTheme.appearanceMode = ["system", "light", "dark"][index]; controller.setPreference("appearance", AppTheme.appearanceMode) }
                 }
             }
             SettingsItem {
                 title: "正文字号"; minimumLabelWidth: 70
-                Slider { id: bodySizeSlider; implicitWidth: 120; from: 12; to: 24; stepSize: 1; value: controller.preference("bodySize", tokens.bodySize); onMoved: controller.setPreference("bodySize", value) }
+                LiquidSlider { id: bodySizeSlider; Accessible.name: "正文字号"; Layout.preferredWidth: 120; Layout.preferredHeight: 24; materialForm: true; thumbWidth: 26; thumbHeight: 14; trackHeight: 4; value: (controller.preference("bodySize", tokens.bodySize) - 12) / 12; onPreviewChanged: function(v) { value = v }; onCommitRequested: function(v) { controller.setPreference("bodySize", 12 + Math.round(v * 12)) }; onCanceled: value = (controller.preference("bodySize", tokens.bodySize) - 12) / 12 }
             }
             SettingsItem {
                 title: "减少透明效果"; minimumLabelWidth: 140
-                KosSwitch { checked: AppTheme.reduceTransparency; onToggled: { AppTheme.reduceTransparency = checked; controller.setPreference("reduceTransparency", checked) } }
+                SettingsSwitch { accessibleName: "减少透明效果"; checked: AppTheme.reduceTransparency; onToggled: { AppTheme.reduceTransparency = checked; controller.setPreference("reduceTransparency", checked) } }
             }
             SettingsItem {
                 title: "减少动画"; minimumLabelWidth: 140
-                KosSwitch { checked: AppTheme.reduceMotion; onToggled: { AppTheme.reduceMotion = checked; controller.setPreference("reduceMotion", checked) } }
+                SettingsSwitch { accessibleName: "减少动画"; checked: AppTheme.reduceMotion; onToggled: { AppTheme.reduceMotion = checked; controller.setPreference("reduceMotion", checked) } }
             }
         }
     }
@@ -500,7 +503,22 @@ ApplicationWindow {
                 Label { Layout.fillWidth: true; text: "每条 intent 含目标路径、基线及新摘要，最后一行是保留文件的绝对路径。交换前它是新版本，交换后是被替换版本；需比较摘要后手动取回，不自动覆盖。"; wrapMode: Text.Wrap; color: AppTheme.mutedText; font.pixelSize: 12 }
                 Repeater {
                     model: controller.recovery.commits || []
-                    delegate: TextArea { required property var modelData; focusPolicy: Qt.StrongFocus; onActiveFocusChanged: root.revealRecoveryControl(this); Accessible.name: "保留的提交版本"; Layout.fillWidth: true; text: modelData.journal + "\n" + modelData.intent; wrapMode: Text.Wrap; readOnly: true; selectByMouse: true; color: AppTheme.text; font.pixelSize: 11; background: null }
+                    delegate: ColumnLayout {
+                        id: commitRow
+                        required property var modelData
+                        Layout.fillWidth: true
+                        Label { text: commitRow.modelData.name + " · " + commitRow.modelData.time; color: AppTheme.text }
+                        Repeater {
+                            model: commitRow.modelData.versions
+                            delegate: ColumnLayout {
+                                required property var modelData
+                                Layout.fillWidth: true
+                                Label { text: (modelData.version === "before" ? "保存前" : "本次待保存") + (modelData.available ? "" : " · 无法确认"); color: AppTheme.text }
+                                TextArea { Layout.fillWidth: true; text: modelData.text || "版本缺失或校验未通过"; readOnly: true; selectByMouse: true; wrapMode: Text.Wrap; implicitHeight: 80; background: null; color: AppTheme.text; Accessible.name: "提交版本预览" }
+                                LiquidActionButton { text: "另存为恢复副本"; materialForm: true; enabled: modelData.available; onClicked: controller.recoverCommit(commitRow.modelData.token, modelData.version) }
+                            }
+                        }
+                    }
                 }
                 LiquidActionButton { focusPolicy: Qt.StrongFocus; onActiveFocusChanged: root.revealRecoveryControl(this); text: "在文件管理器定位恢复目录"; materialForm: true; onClicked: controller.openRecoveryDirectory() }
             }

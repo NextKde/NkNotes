@@ -197,7 +197,7 @@ void NotesController::receive(quint64 id, const QString &op, const QVariantMap &
     if (!r.value("ok").toBool()) {
         report(r); if (m_restoreWorkspace) { m_restoreWorkspace = false; m_error.prepend("上次工作区无法恢复，请重新选择笔记库。"); } m_transition = false; m_afterSave = {}; emit changed(); return;
     }
-    if (op == "saveAs" && p.args.value("recoveryCopy").toBool()) {
+    if (op == "recoverCommit" || (op == "saveAs" && p.args.value("recoveryCopy").toBool())) {
         m_status = "恢复副本已创建：" + r.value("path").toString(); refresh(); inspectRecovery(); emit changed(); return;
     }
     if (op == "selectLibrary") {
@@ -230,7 +230,12 @@ void NotesController::receive(quint64 id, const QString &op, const QVariantMap &
             }
         }
     } else if (op == "save") {
+        const auto position = QSettings().value(positionKey());
         m_base = r.value("baseHash").toString();
+        applyListing(r.value("listing").toMap());
+        for (const auto &v : m_notes) if (v.toMap().value("path").toString() == m_path) m_selectedId = v.toMap().value("id").toString();
+        QSettings().setValue(positionKey(), position);
+        recordActiveDocument();
         m_savedRevision = p.revision; // Never setPlainText here: preserve IME, cursor and undo.
         m_status = dirty() ? "已修改 · 正在保存后续输入" : "已保存"; m_error.clear();
         if (dirty()) { if (!m_session->composing()) save(); } else { refresh(); inspectRecovery(); advance(); }
@@ -263,7 +268,7 @@ void NotesController::receive(quint64 id, const QString &op, const QVariantMap &
             }
         }
         if (p.args.value("discardAfterRead").toBool()) send("discardDraft", {{"path", m_path}});
-        setPreference("lastNote", QVariantMap{{"library", m_library}, {"id", m_selectedId}, {"path", m_path}});
+        recordActiveDocument();
         const auto position = QSettings().value(positionKey()).toMap();
         const int match = p.args.value("match", -1).toInt();
         emit documentLoaded(match >= 0 ? match : position.value("cursor", op == "create" ? m_session->source().size() : 0).toInt(), match >= 0 ? -1 : position.value("scroll", 0).toDouble(), match >= 0 ? m_query.size() : 0);
@@ -277,6 +282,8 @@ void NotesController::receive(quint64 id, const QString &op, const QVariantMap &
         m_revision = m_savedRevision = 0; m_conflict = false; m_readOnly = false; m_error.clear();
         applyListing(r.value("listing").toMap());
         for (const auto &v : m_notes) if (v.toMap().value("path").toString() == m_path) m_selectedId = v.toMap().value("id").toString();
+        recordActiveDocument();
+        emit documentLoaded(0, 0, 0);
         m_status = "副本已保存 · 原恢复记录仍保留"; inspectRecovery(); refresh();
     } else if (op == "trash") {
         ++m_epoch; m_path.clear(); m_selectedId.clear(); m_revision = m_savedRevision = 0;
@@ -327,4 +334,10 @@ void NotesController::externalChange(const QVariantMap &r) {
         } else if (!busy()) load(m_path);
     }
     emit changed();
+}
+
+void NotesController::recoverCommit(const QString &token, const QString &version) { send("recoverCommit", {{"token", token}, {"version", version}}); }
+
+void NotesController::recordActiveDocument() {
+    setPreference("lastNote", QVariantMap{{"library", m_library}, {"id", m_selectedId}, {"path", m_path}});
 }

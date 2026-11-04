@@ -49,6 +49,7 @@ public:
     Q_INVOKABLE void restore(const QString &token, const QString &target = {});
     Q_INVOKABLE void move(const QString &target);
     Q_INVOKABLE void inspectRecovery();
+    Q_INVOKABLE void recoverCommit(const QString &token, const QString &version);
     Q_INVOKABLE void recoverDraft(const QString &path, const QString &text, const QString &base);
     Q_INVOKABLE void saveCopy(const QString &target);
     Q_INVOKABLE void copyRecovery(const QString &text);
@@ -76,6 +77,7 @@ private:
     void applyListing(const QVariantMap &);
     void report(const QVariantMap &);
     QString positionKey() const;
+    void recordActiveDocument();
     EditorSession *m_session;
     NotesRepository *m_repository;
     QTimer m_autosave, m_search;

@@ -35,6 +35,31 @@ class NotesControllerTest : public QObject {
         int count(const QString &op) { int n = 0; for (const auto &r : requests) if (r[1] == op) ++n; return n; }
     };
 private slots:
+    void saveUpdatesEditedIdentity() {
+        Fixture f; f.controller.rememberPosition(2, 12);
+        f.type("changed"); f.controller.save();
+        f.answer("save", {{"baseHash", "next"}, {"listing", QVariantMap{{"notes", QVariantList{QVariantMap{{"path", "a.md"}, {"id", "B"}}}}}}});
+        QCOMPARE(f.controller.property("selectedId").toString(), QString("B"));
+        QCOMPARE(f.controller.preference("lastNote").toMap().value("id").toString(), QString("B"));
+    }
+    void copyImmediatelyBecomesLastDocument() {
+        Fixture f; QSignalSpy loaded(&f.controller, &NotesController::documentLoaded);
+        f.controller.saveCopy("copy.md");
+        f.answer("saveAs", {{"path", "copy.md"}, {"text", "copy"}, {"baseHash", "copyhash"}, {"listing", QVariantMap{{"notes", QVariantList{QVariantMap{{"path", "copy.md"}, {"id", "COPY"}}}}}}});
+        QCOMPARE(f.controller.preference("lastNote").toMap().value("id").toString(), QString("COPY"));
+        QCOMPARE(loaded.size(), 1);
+        f.controller.requestClose();
+        QTextDocument doc; EditorSession session; session.attachDocument(&doc);
+        NotesController next(&session, nullptr); QSignalSpy requests(&next, &NotesController::requestSent);
+        next.restoreWorkspace(); auto select = requests.takeFirst();
+        next.receive(select[0].toULongLong(), "selectLibrary", {{"ok", true}, {"library", "/virtual/library"}, {"generation", 1}, {"notes", QVariantList{QVariantMap{{"path", "copy.md"}, {"id", "COPY"}}}}});
+        QList<QVariant> recovery;
+        for (const auto &r : requests) if (r[1] == "recovery") recovery = r;
+        QVERIFY(!recovery.isEmpty()); requests.clear();
+        next.receive(recovery[0].toULongLong(), "recovery", {{"ok", true}, {"library", "/virtual/library"}, {"generation", 1}});
+        QCOMPARE(requests.last()[1].toString(), QString("read"));
+        QCOMPARE(requests.last()[2].toMap().value("path").toString(), QString("copy.md"));
+    }
     void restartRestoresStableIdentityAfterRecovery() {
         QTemporaryDir settings;
         QSettings::setDefaultFormat(QSettings::IniFormat);
