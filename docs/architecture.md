@@ -92,3 +92,46 @@ kos-vm-dev（已知 Qt 6.10.2，CPU/RAM/GPU/输入法待记录）。先保存源
 性能场景采用规格提案：1MB 长文档、1万篇短笔记。M0 仅对长文档编辑建立基线，笔记库规模等 M1 有模型/索引后再测。记录 CPU/RAM/GPU、Qt 后端、分辨率、输入法、文档内容与行数；测打开耗时、输入到画面更新 p50/p95、一次格式/撤销延迟、进程 RSS 与 GPU 占用。暂定观察目标为输入 p95 < 50ms、格式/撤销 < 100ms（非验收已通过），根据实测与目标 VM 配置再冻结预算。没有运行数据，不宣称满足目标。
 
 本轮未解决：运行/视觉证据、嵌入对照实验、即时映射方案、原始字节文件适配器、真实保存/恢复、混合 Markdown 状态、持久化偏好。M0 当前不能标记完成；下一步先验证原生关键编辑路径，再修订内核决策与推进 M1。
+
+## M1a 文件存储服务（2026-11-04，实现待 VM 验证）
+
+本段取代上文“尚无文件 IO”和“标识策略待数据层实现”的阶段描述；不表示规格或验收状态已更新。依据主控本轮授权确定以下技术默认值，并非用户逐条确认：新建 UTF-8 无 BOM / LF / 末尾 LF；已有文件缓存原始字节，无改动保存保持逐字节不变，编辑保留 BOM、统一 LF/CRLF 与末尾换行状态。非法 UTF-8、混合换行、裸 CR、NUL、U+2028/U+2029 明确只读。未知 front matter、语法、空白不经过 YAML 或 Markdown 序列化。
+
+`src/storage/MarkdownFile` 是字节适配器；`NotesRepository` 是 QObject 异步门面，所有文件读取、递归扫描、JSON、写入、监听和恢复在专属 QThread 中执行。串行请求携带递增 requestId，返回 library/generation；控制器必须忽略旧库 generation 和旧编辑 revision 的响应。服务尚未注册 QML 类型，未修改 main、EditorSession 或 QML。析构等待已接收请求完成；正常退出控制器应先等待保存结果并展示错误，不能靠析构代替关闭流程。
+
+新笔记 front matter 写 UUID `nextnotes_id`。已有无 ID 笔记只在 `.nextnotes/state.json` 建立 ID 映射，不自动改正文；复制出的重复 ID 在列表显式返回，保存拒绝覆盖。外置 ID 在应用重命名、回收恢复和重新打开后保留；无 ID 文件在应用外被重命名目前视为新导入，未做内容相似性身份推断。标题读取支持保守的顶层单行 front matter `title` 标量，然后首个 `# ` 标题，最后文件名；不宣称完整 YAML/Markdown 解析（块标量、复杂转义和围栏上下文待 MarkdownEngine）。重命名仅改路径，不改 title/H1 或跨笔记链接。
+
+`createdUtc` 是首次纳入库元数据的 UTC 时间，`modifiedUtc` 是应用保存时间；列表 `fileModifiedUtc` 单独表示文件系统 UTC 时间，不混称正文创建时间。收藏及回收记录保存在元数据。`.nextnotes` 和 `assets` 在递归进入前被排除；路径拒绝绝对路径、空段、`.`、`..` 和符号链接组件，不清理附件或无关目录。库锁阻止本应用两实例并发写元数据。损坏 state.json 显式报错并保留原文件，不静默重建丢失收藏/身份。
+
+### 后续控制器 API
+
+统一调用 `request(operation, QVariantMap)`，收到 `finished(requestId, operation, result)`。通用结果为 `ok`、`error`、`detail`、`library`、`generation`；调用可携带 generation 防止库切换后的旧请求。错误码须由控制器翻译成“发生了什么、内容安全状态、下一步”，不能只展示内部 error/detail。
+
+| operation | 参数与结果 |
+| --- | --- |
+| selectLibrary | path 为已存在的本地库绝对目录；返回 notes、folders、duplicateIds、unwatchedPaths。存在内存草稿时拒绝切库 |
+| list | 同上列表；notes 包含 path/id/title/baseHash/favorite/createdUtc/fileModifiedUtc/readOnlyReason |
+| createFolder | path 为库内相对路径，父目录必须存在；不覆盖同名对象 |
+| read | path；返回 text、baseHash、readOnly、readOnlyReason，并缓存该版本原始字节 |
+| create | path、text（正文）；创建新 ID front matter，不覆盖同名文件 |
+| checkpoint | path、text、baseHash；持久化编辑恢复草稿，返回 recoveryDurable；失败仍留内存 |
+| save | path、text、baseHash；必须先 read 同一基线。返回规范化后的 text/baseHash；控制器用返回基线更新会话，不能把较旧响应当作较新 revision 已保存 |
+| saveAs | 新 path、text；精确保留传入文本；若保留已有 ID 会重复则拒绝。可显式传 newIdentity=true，仅替换单行 nextnotes_id 为新 UUID，其他正文不变；无 ID 则外置新 ID。原始冲突草稿不会被删除 |
+| favorite | path、favorite 布尔值 |
+| rename | path、target、baseHash；只修改文件路径，返回 oldPath/newPath，为 M4 链接事务预留事件信息 |
+| trash | path、baseHash；保存源路径、原元数据、内容摘要后移动到应用回收区，返回 trashToken |
+| restore | token，可选 target；默认恢复源路径，冲突不覆盖；恢复原 ID/收藏，校验回收文件摘要 |
+| recovery | 返回 drafts（text/baseHash/diskHash/matchesBase）、memoryDrafts、trash；从不自动应用草稿 |
+| discardDraft | path；显式删除该恢复草稿，供用户放弃或已确认另存后的收尾 |
+
+保存先持久化草稿，再检查基线摘要，再使用同目录 QSaveFile 安全替换且禁用直接写入回退。冲突返回磁盘摘要与文本，保留磁盘版本及本地恢复草稿。草稿写入也失败时返回 recoveryDurable=false，并保留内存；不得宣称此时断电可恢复。新建使用 NewOnly 预留目标避免普通重名覆盖；写入失败可能留下空预留文件，草稿保留且错误明确。重命名与回收先持久化恢复元数据，再移动，崩溃可能留下待处理记录但不会自动删除正文。恢复失败保留回收记录；成功移动但元数据收尾失败会返回错误与说明。
+
+QFileSystemWatcher 监听目录及文件，150ms 单次定时器合并事件并重新扫描；自身操作在工作线程刷新摘要基线。`libraryChanged` 返回变化 path/hash/removed 及新列表，监听资源不足返回 unwatchedPaths；控制器应提示并提供 list 手动刷新。当前实现不主动重载已打开缓冲区：无脏编辑可由控制器 read，有脏编辑必须先 checkpoint 并展示冲突。不存在周期轮询。每次扫描为全库扫描，虽在后台但尚无 1 万篇性能结论。
+
+### 边界、验证与后续工作
+
+QtTest 新增字节保真、只读异常格式、冲突及重启恢复、稳定 ID 与重复 ID、收藏、重命名与回收恢复、同名/路径逃逸/符号链接、草稿写失败、权限失败、外部监听样例。测试仅编写，未在本机编译、运行或验证；VM 应以非 root 用户运行权限用例。磁盘满的真实文件系统注入、断电窗口和同步盘并发压力仍待 VM 专项验证。
+
+当前哈希检查与 QSaveFile commit 之间存在系统级竞态窗口：任意外部编辑器不遵守库锁，仍可能在检查之后写入。这里不承诺跨进程原子 compare-and-swap 或同步协议。路径逐组件检查同样不等于抵御攻击者同时替换目录的 openat 沙箱。正常文件更改、预先存在的符号链接和重名均走显式拒绝路径；高对抗并发目录替换不在本轮可移植 Qt 文件 API 的保证内。
+
+700ms 自动保存、切换/关闭时处理脏状态、QML 模型/错误文案、工作区布局与最近打开、搜索、附件导入、历史版本（不同于草稿）及 M4 跨笔记引用更新尚未实现。单行 front matter 解析器应由后续 MarkdownEngine 共享语法契约替换；不可将本层简化标题读取声称为完整 Markdown 语义分析。
