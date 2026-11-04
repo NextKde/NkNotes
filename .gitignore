@@ -1,0 +1,4 @@
+/build*/
+/.qt/
+/CMakeUserPresets.json
+*.user
