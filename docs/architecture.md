@@ -162,3 +162,22 @@ unshare -Ur -m sh -c 'mount -t tmpfs -o size=2m tmpfs /home/amao/apps/nextnotes-
 ```
 
 以上用例本轮仅编写源码，未在本机编译或执行；必须记录 VM 源快照、构建和完整日志，包括 skip，不能据此宣称验收通过。剩余 fsync 返回失败、物理断电及 UI 恢复引导仍待对应验证/阶段实现。
+
+
+## M1b 应用控制器与真实工作区（源码实现，待 VM 验证）
+
+本节取代前文“未接入 QML / 未实现自动保存与搜索”的阶段描述。main 注册 EditorSession 与 NotesController 实例；NotesRepository 仍为独立工作线程。共享 Kos.Ui 与旁边组件仓库均未修改。
+
+NotesController 单缓冲会话以 requestId、library、generation、document epoch、revision 关联异步响应。700ms 单次定时器触发保存；一次只允许一个 save 在途。回包只更新提交 revision 与 baseHash，不用返回 text 重写编辑器；在途期间的后续输入继续脏并再次保存。切换/关闭的 continuation 排空最新 revision 后执行。失败撤销 continuation，保留窗口与缓冲，显示恢复是否已持久化；用户需重试后再次切换或关闭。IME 组合期间不保存、不切换、不把编辑器改为只读；组合结束后继续排空。SourceEditor 仅在明确加载文档时替换文本，保留原生命令撤销语义。
+
+读取失败保留旧缓冲。重读回包若 revision 已改变则拒绝应用。外部监听按 generation 过滤；干净笔记重读、脏/组合/删除状态 checkpoint 并提示冲突。保存仍由仓库摘要比较裁决。在重开库时先读取 recovery；有草稿的笔记以磁盘版本只读呈现，明确载入草稿（基线不同阻止覆盖）、复制到新文件或丢弃后读取磁盘。丢弃当前输入也先 read 成功再删除草稿。saveAs 显式新身份，原始草稿保持，恢复中心可显式清理；不会自动覆盖冲突正文。
+
+仓库 search 新操作在 worker 执行扫描与 UTF-16 子串定位，支持 query、filter=all/favorite/folder:relative，返回 notes（summary/match）、allNotes、folders 与 duplicateIds。摘要和标题纯文本展示；正文命中位置可直接映射 Qt TextArea UTF-16 光标。列表排序按文件系统修改时间降序。全库搜索与 UI 没有文件 IO，同步的字符串筛选在 worker；当前仍为每次全扫描，规模性能未知。documentResult 新增 id 便于读完后稳定选择。重复 ID 显式警告、列表按 ID+路径区分，位置缓存对重复 ID 加路径区分；仓库的拒绝覆盖规则保持。
+
+工作区通过 QSettings 保存窗口大小、导航/栏宽、字号/外观、每库每稳定 ID 的光标/滚动（无 ID 或重复 ID 使用路径回退）。文件夹侧栏使用 KosSidebar，缺少真实下层细节时选用规定的不透明普通回退；液态控件及浮层采样 readingScene，独立于消费组件和采样器。正文不被顶部工具栏覆盖，顶部保持普通连续底色。窄窗口单列切换列表/正文；三栏分界可拖动，库导航在窄窗口仍有文件夹面板。所有快捷键集中在 CommandRegistry，格式只在正文焦点生效，弹层和 IME 隔离。
+
+恢复中心把 commits 的 journal 与 intent（包括绝对 staging 路径、基线和新摘要）显示为可选择复制文本，并提供文件管理器定位 .nextnotes 入口。明确解释交换前后 staging 身份不同，保留双方且不自动清理；这不是完整历史浏览/比较器。原路径无法恢复时可改用根目录新文件名，仍遵循 ID 与不覆盖检查。
+
+新测试源码 NotesControllerTest 覆盖保存期间继续输入、切换和关闭排空、失败关闭阻止、组合输入、陈旧搜索/未知回包、冲突与读取失败保留、恢复草稿必须显式选择。NotesRepositoryTest 增加目录创建/列举、中文标题正文搜索、父目录缺失、跨目录移动失败原文不变及重开身份。全部仅源码编写与阅读，未本机编译/测试/启动 GUI/shader，也未宣称 VM 验收。还需 VM 运行完整测试与浅深色/IME/恢复/窄窗口人工验收；权限、磁盘满、物理断电、1MB 与 1 万篇性能仍按既有专项计划记录。
+
+仍未实现 M2 即时排版、完善 Markdown 解析/链接命令、附件、标签、反链与关系图；没有相应占位按钮。无需自动扫描用户目录；最近库路径只记忆，不自动打开。应用是 M1b 待验证源码，不代表产品规格全部完成或 M1 已验收。

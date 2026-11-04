@@ -6,6 +6,9 @@ ScrollView {
     id: root
     required property var session
     property alias editor: input
+    required property var controller
+    property bool restoring: false
+    function rememberPosition() { if (!restoring) controller.rememberPosition(input.cursorPosition, contentItem.contentY) }
     property int bodySize: 16
     property real readingWidth: availableWidth
     clip: true
@@ -17,6 +20,7 @@ ScrollView {
     TextArea {
         id: input
         objectName: "markdownSource"
+        readOnly: root.controller.readOnly
         textFormat: TextEdit.PlainText
         wrapMode: TextEdit.Wrap
         selectByMouse: true
@@ -31,14 +35,31 @@ ScrollView {
         topPadding: 18; bottomPadding: 60
         background: null
         Accessible.name: "Markdown 源码编辑器"
-        onCursorPositionChanged: root.rememberSelection()
+        onCursorPositionChanged: { root.rememberSelection(); root.rememberPosition() }
         onSelectionStartChanged: root.rememberSelection()
         onSelectionEndChanged: root.rememberSelection()
         onInputMethodComposingChanged: root.session.composing = inputMethodComposing
         Component.onCompleted: {
             root.session.attach(textDocument)
-            root.session.loadPrototype("# 留下一个想法\n\n从一个句子开始，慢慢连接成自己的知识。\n\n## 今天的灵感\n\n选中这段文字，尝试加粗或斜体。工具栏与快捷键使用同一份 Markdown。\n\n- 让想法先留下来\n- 为值得回看的内容留一个位置\n\n> 这是编辑器原型，内容仅保留在本次会话中。\n")
-            forceActiveFocus()
+
+        }
+    }
+    Connections {
+        target: root.contentItem
+        function onContentYChanged() { root.rememberPosition() }
+    }
+    Connections {
+        target: root.controller
+        function onDocumentLoaded(cursor, scroll, matchLength) {
+            root.restoring = true
+            Qt.callLater(function() {
+                input.cursorPosition = Math.min(input.length, cursor)
+                if (matchLength > 0) input.select(cursor, Math.min(input.length, cursor + matchLength))
+                if (scroll >= 0) root.contentItem.contentY = Math.max(0, Math.min(scroll, root.contentItem.contentHeight - root.availableHeight))
+                else { const r = input.positionToRectangle(cursor); root.contentItem.contentY = Math.max(0, r.y - 80) }
+                input.forceActiveFocus()
+                root.restoring = false
+            })
         }
     }
     Connections {

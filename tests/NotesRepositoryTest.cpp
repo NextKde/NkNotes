@@ -31,6 +31,37 @@ class NotesRepositoryTest : public QObject {
         return {{"ok", false}, {"error", "missingRequest"}};
     }
 private slots:
+    void foldersSearchMoveAndReopen() {
+        QTemporaryDir dir;
+        QString id;
+        {
+            NotesRepository r;
+            QVERIFY(call(r, "selectLibrary", {{"path", dir.path()}}).value("ok").toBool());
+            QVERIFY(call(r, "createFolder", {{"path", "研究"}}).value("ok").toBool());
+            QVERIFY(call(r, "createFolder", {{"path", "研究/中文"}}).value("ok").toBool());
+            QVERIFY(!call(r, "createFolder", {{"path", "缺少/子目录"}}).value("ok").toBool());
+            QVERIFY(call(r, "list").value("folders").toList().contains("研究/中文"));
+            auto created = call(r, "create", {{"path", "a.md"}, {"text", "# 中文标题\n正文命中月光\n"}});
+            QVERIFY(created.value("ok").toBool());
+            id = created.value("id").toString();
+            QVERIFY(!id.isEmpty());
+            auto found = call(r, "search", {{"query", "月光"}, {"filter", "all"}});
+            QCOMPARE(found.value("notes").toList().size(), 1);
+            QVERIFY(found.value("notes").toList()[0].toMap().value("match").toInt() > 0);
+            auto original = read(dir.filePath("a.md"));
+            auto failed = call(r, "rename", {{"path", "a.md"}, {"target", "不存在/a.md"}, {"baseHash", created.value("baseHash")}});
+            QVERIFY(!failed.value("ok").toBool()); QCOMPARE(read(dir.filePath("a.md")), original);
+            auto moved = call(r, "rename", {{"path", "a.md"}, {"target", "研究/中文/a.md"}, {"baseHash", created.value("baseHash")}});
+            QVERIFY(moved.value("ok").toBool()); QCOMPARE(read(dir.filePath("研究/中文/a.md")), original);
+            auto selected = call(r, "read", {{"path", "研究/中文/a.md"}});
+            QVERIFY(selected.value("ok").toBool()); QCOMPARE(selected.value("id").toString(), id);
+        }
+        NotesRepository reopened;
+        QVERIFY(call(reopened, "selectLibrary", {{"path", dir.path()}}).value("ok").toBool());
+        auto note = call(reopened, "read", {{"path", "研究/中文/a.md"}});
+        QCOMPARE(note.value("id").toString(), id);
+        QCOMPARE(call(reopened, "search", {{"query", "中文标题"}, {"filter", "folder:研究"}}).value("notes").toList().size(), 1);
+    }
     void fifoGenerationAndRecovery() {
         QTemporaryDir dir, second;
         {

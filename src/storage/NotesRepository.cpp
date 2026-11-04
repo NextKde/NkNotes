@@ -16,10 +16,20 @@
 #include <QRegularExpression>
 #include <QLockFile>
 #include <memory>
+#include <algorithm>
 
 namespace {
 QString uuid() { return QUuid::createUuid().toString(QUuid::WithoutBraces); }
 QString now() { return QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs); }
+QString summary(QString text) {
+    if (text.startsWith("---\n")) {
+        const int end = text.indexOf("\n---", 3);
+        if (end >= 0) text = text.mid(end + 4);
+    }
+    text = text.trimmed();
+    if (text.startsWith("# ")) { const int newline = text.indexOf('\n'); if (newline >= 0) text = text.mid(newline + 1); }
+    return text.simplified().left(150);
+}
 QVariantMap failure(const QString &code, const QString &detail = {})
 { return {{"ok", false}, {"error", code}, {"detail", detail}}; }
 bool readBytes(const QString &path, QByteArray &bytes, QString &error)
@@ -104,7 +114,7 @@ private:
     }
     QVariantMap documentResult(const QString &relative, const MarkdownFile::Document &d) {
         return {{"ok", true}, {"path", relative}, {"text", d.text}, {"baseHash", d.hash},
-            {"readOnly", !d.readOnlyReason.isEmpty()}, {"readOnlyReason", d.readOnlyReason}};
+            {"id", metadata.value("entries").toObject().value(relative).toObject().value("id").toString()}, {"favorite", metadata.value("entries").toObject().value(relative).toObject().value("favorite").toBool()}, {"readOnly", !d.readOnlyReason.isEmpty()}, {"readOnlyReason", d.readOnlyReason}};
     }
     QVariantMap scan(bool notify) {
         const bool initial = !watcher;
@@ -145,7 +155,7 @@ private:
                 if (!entry.contains("createdUtc")) { entry.insert("createdUtc", now()); dirty = true; }
                 entries.insert(rel, entry);
                 notes.append(QVariantMap{{"path", rel}, {"id", stableId}, {"title", MarkdownFile::title(doc.text, fi.completeBaseName())},
-                    {"baseHash", doc.hash}, {"favorite", entry.value("favorite").toBool()}, {"createdUtc", entry.value("createdUtc").toString()},
+                    {"summary", summary(doc.text)}, {"baseHash", doc.hash}, {"favorite", entry.value("favorite").toBool()}, {"createdUtc", entry.value("createdUtc").toString()},
                     {"fileModifiedUtc", fi.lastModified().toUTC().toString(Qt::ISODateWithMs)}, {"readOnlyReason", doc.readOnlyReason}});
             }
         }
@@ -232,6 +242,32 @@ QVariantMap RepositoryWorker::dispatch(const QString &op, const QVariantMap &a)
     if (a.contains("generation") && a.value("generation").toULongLong() != generation) return failure("staleGeneration");
     if (QFileInfo(root).isSymLink() || QFileInfo(root).canonicalFilePath() != root) return failure("unsafePath");
     if (op == "list") return scan(false);
+    if (op == "search") {
+        auto listing = scan(false);
+        if (!listing.value("ok").toBool()) return listing;
+        const QString query = a.value("query").toString(), filter = a.value("filter").toString();
+        QVariantList matches;
+        for (const auto &value : listing.value("notes").toList()) {
+            auto note = value.toMap();
+            const QString relative = note.value("path").toString();
+            if (filter == "favorite" && !note.value("favorite").toBool()) continue;
+            if (filter.startsWith("folder:") && !relative.startsWith(filter.mid(7) + '/')) continue;
+            QByteArray bytes;
+            if (!readBytes(path(relative), bytes, error)) return failure("readFailed", relative + ": " + error);
+            const QString text = MarkdownFile::decode(bytes).text;
+            const int position = query.isEmpty() ? -1 : text.indexOf(query, 0, Qt::CaseInsensitive);
+            if (!query.isEmpty() && position < 0 && !note.value("title").toString().contains(query, Qt::CaseInsensitive)) continue;
+            note.insert("match", position);
+            if (position >= 0) note.insert("summary", text.mid(qMax(0, position - 32), 150).simplified());
+            matches.append(note);
+        }
+        std::stable_sort(matches.begin(), matches.end(), [](const QVariant &left, const QVariant &right) {
+            return left.toMap().value("fileModifiedUtc").toString() > right.toMap().value("fileModifiedUtc").toString();
+        });
+        listing.insert("allNotes", listing.value("notes"));
+        listing.insert("notes", matches);
+        return listing;
+    }
     if (op == "createFolder") {
         const QString target = path(a.value("path").toString());
         if (target.isEmpty()) return failure("unsafePath");
