@@ -140,6 +140,8 @@ ApplicationWindow {
         KosToolTip { target: parent; backdrop: readingBackdrop; text: parent.help }
     }
     component NavigationRow: LiquidNavigationButton {
+        // Selection belongs to controller.filter; activation must not toggle it off.
+        checkable: false
         specificationForm: true; specificationFontSize: tokens.navigationSize
         implicitHeight: tokens.navigationHeight
         specificationSelectedFillColor: AppTheme.accent
@@ -288,7 +290,7 @@ ApplicationWindow {
                 visible: !root.showSidebar; Layout.fillWidth: true
                 LiquidActionButton { text: "全部"; materialForm: true; onClicked: controller.filter = "all" }
                 LiquidActionButton { text: "收藏"; materialForm: true; onClicked: controller.filter = "favorite" }
-                LiquidActionButton { text: "资料库"; materialForm: true; onClicked: root.showRecovery() }
+                LiquidActionButton { text: "最近删除"; materialForm: true; onClicked: root.showRecovery() }
                 LiquidActionButton { id: smallFolderButton; text: "文件夹"; materialForm: true; onClicked: { folderPanel.anchorItem = smallFolderButton; folderPanel.open() } }
             }
             Label { text: controller.notes.length + " 篇笔记 · 最近修改"; color: AppTheme.mutedText; font.pixelSize: 11 }
