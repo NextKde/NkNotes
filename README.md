@@ -1,12 +1,62 @@
 # NextNotes / NkNotes
 
-面向 NextKde 的原生 Qt Quick Markdown 笔记应用。当前源码推进到 **M1b 真实笔记库流程，等待 VM 验证**：选择单个本地库、三栏导航、源码编辑、700ms 自动保存、中文子串搜索、收藏、文件夹、移动与回收恢复。首次打开不扫描个人目录、不创建演示数据。即时排版、附件、知识关联仍属于后续阶段。
+面向 NextKde 的原生 Qt Quick Markdown 笔记应用：本地笔记库、三栏导航、所见即所得编辑、700ms 自动保存、中文子串搜索、收藏、文件夹、移动与回收恢复。首次打开不扫描个人目录、不创建演示数据。正文支持附件导入与可恢复清理；支持安全移动／重命名、非空文件夹整理和应用内 Markdown 链接导航；现支持笔记历史、搜索索引、标签／属性、双链补全与反链、智能文件夹、模板和每日笔记。
 
-产品依据：[产品规格](docs/PRODUCT_SPEC.zh-CN.md)。实现边界、编辑器比较、命令表、最小文件约定和组件差距：[架构记录](docs/architecture.md)。本轮源码尚未经过构建、运行或视觉验收。
+产品依据：[产品规格](docs/PRODUCT_SPEC.zh-CN.md)。正文功能、存储边界和 VM 验证记录见[正文编辑说明](docs/body-editor.md)，笔记整理与批量接口见[整理操作说明](docs/organizer.md)。实现边界、编辑器比较、命令表、最小文件约定和组件差距：[架构记录](docs/architecture.md)。本次编辑器验证范围见下文，不代表全部产品验收。
+
+“更多笔记操作”现提供 Markdown 源码模式，完整编辑 front matter 与正文；两种模式共用撤销历史。恢复中心支持笔记／文件夹批量恢复、永久删除和确认后清空。操作边界见上述正文与整理说明。
+
+## 知识组织与记录（2026-11-05）
+
+更多菜单提供笔记历史、链接与反向链接、标签与属性、保存搜索为智能文件夹、笔记模板和打开今日笔记。
+
+- 历史：保存前记录旧内容，按稳定身份保留最多 50 个不同内容版本；支持与当前源码并排对照、恢复及撤销恢复。
+- 搜索：后台内存子串索引，支持中文；可组合 `tag:工作`、`tag:"project alpha"`、`folder:项目`、`is:favorite`、`prop:status=done` 和正文查询。智能文件夹保存当前条件与范围。
+- 双链：缺失目标提供“创建并打开”，按来源笔记解析相对路径，已存在目标不覆盖。正文输入 `[[` 弹出候选；支持键盘选择、别名、标题片段及 Ctrl+点击应用内导航。关联面板提供目标／标题选择和反链上下文。
+- 标签管理：列表多选后批量添加／移除标签；全库重命名先预览影响篇数，合并重复标签并跳过发生外部修改的笔记。
+- 属性：标签写入 front matter 的 `tags`；简单属性写回 Markdown，保留其他字段。复杂 YAML 可用源码模式编辑。
+- 模板：保存当前笔记或自定义 Markdown，支持 `{{date}}`、`{{time}}`、`{{title}}`。每日笔记使用“每日笔记”模板，路径为 `日记/YYYY-MM-DD.md`；当天已有文件则直接打开。
+
+万篇笔记规模验证及优化已完成：反链查询约 91 毫秒，万行重排约 35 毫秒，千文件外部变更约 2.1 秒后进入索引。约 2 MB、1.6 万段长文的正文打开已从 13.41 秒降至约 8～10 秒；源码采用可见区域渲染，打开从约 42 秒降至约 1 秒。正文编辑的 Web 阻塞从约 2.38 秒降至约 0.4～0.62 秒，源码编辑从约 35 秒降至约 0.1 秒。正文超长文仍有可感知停顿，具体测量条件与边界见实测记录。
+
+实现范围、持久化位置与验证见[整理操作说明](docs/organizer.md)。没有加入独立整库备份系统、自动冲突合并或附件健康检查。
+
+## 当前所见即所得编辑器（2026-11-05）
+
+主编辑器使用 [Milkdown](https://github.com/Milkdown/milkdown) 7.23.0（MIT），基于 ProseMirror / remark，启用 CommonMark、GFM、剪贴板、历史、光标、缩进和尾部段落插件。Qt Quick 保留现有 Kos.Ui 工具栏、导航、弹层及应用状态；网页只负责正文编辑。此前的 QTextDocument 实现保留供旧契约测试和独立原型使用，主界面不再依赖逐项自制输入规则。
+
+- 段落、标题、粗体、斜体、删除线、行内代码、引用、代码块、分隔线、链接和本地库内图片。
+- 行首 `# ` 至 `###### `、`- `、`1. `、`- [ ] `、`> ` 等输入规则；正文 Enter 分段、Shift+Enter 换行，列表 Enter 续项、空项 Enter 退出，Tab / Shift+Tab 缩进。
+- GFM 表格：输入完整表头与分隔行后按 Enter、粘贴 Markdown 表格，或输入 `|3x3| ` 建立三列三行表格。顶部“表格与行列操作”提供增删行列、列对齐、删表和退出；表格内 Tab / Shift+Tab 导航，Ctrl+Enter 退出。
+- Markdown 及富文本粘贴、统一撤销/重做；格式按钮和快捷键调用同一编辑内核命令。
+
+正文工具已补齐：`/` 双语过滤与键盘选择、块拖动/移动/复制/多选、大纲与标题折叠、`[toc]` 实时目录、查找替换与字数统计、图片/附件导入与可恢复清理、图片显示宽度、代码语言/高亮/复制、离线 Mermaid、KaTeX 行内/块公式、脚注、英文拼写检查，以及独立 HTML / PDF 导出与 PDF 打印预览。工具入口为格式栏“正文编辑与导出”；Ctrl+H 打开替换。公式可通过工具菜单或 `/` 插入，双击公式编辑。图片/表格宽度保存在应用偏好中，不扩展 Markdown 语法。折叠仅影响编辑视图，导出会展开全文。附件清理先等待正文保存，再检查磁盘引用，移入专用回收区，可恢复。
+
+`web/editor/editor.js` 负责上游插件配置与命令适配；`qml/SourceEditor.qml` 通过 WebChannel 传递主题、焦点与工作区位置；`src/EditorSessionWeb.cpp` 缓存已提交 Markdown，并按文档代次和递增序号拒绝过期消息。现有 `EditorSession::execute/link/undo/redo` 和 controller 存储接口保留。切换笔记、切库和关闭前先向编辑区取得最新已提交状态；自动保存回包不重建编辑器或撤销栈。
+
+只打开不编辑时保留原文，未知 front matter 原样保留；编辑后由上游标准 Markdown 序列化，写法与空行可能规范化。尚未支持的 HTML 扩展保护为只读，不静默丢弃。所有脚本、样式随应用打包，无 CDN、运行时 npm 或 Node 依赖；页面不允许网络请求和外部导航，本地图片仅可读取当前笔记库中的文件。
+
+构建脚本和依赖更新只在虚拟机执行：
+
+```sh
+cd web/editor
+npm ci --ignore-scripts
+npm run build
+```
+
+精确依赖及完整性哈希在 `package-lock.json`，对应第三方许可在 `THIRD_PARTY_LICENSES.txt`；打包后的 `dist/editor.js`、按需加载的 `dist/diagram.js`、公式字体和英文词典随源码提交。维护 bundle 时同时更新锁定文件与许可清单。Qt WebEngine 的 helper、resources、locales 及适用 Qt/Chromium 许可材料也须随正式部署收集，不能只复制应用可执行文件。
+
+源码视图使用 CodeMirror 6 的可见区域渲染，文本、选区和撤销仍同步到原有 ProseMirror 会话。`npm run build` 经 `build.mjs` 打包，并对锁定的 Milkdown 7.23.0 序列化器应用 `transformer-patch.mjs`：消除段落数组的平方级复制、复用 schema 候选表。补丁不改写 `node_modules`，上游源码不匹配时构建直接失败；升级依赖须审查此补丁并在 VM 重跑 `tests/TransformerRegression.mjs` 和编辑回归。
+
+预览用 `nextnotes --settings-dir /absolute/path/to/preview-settings` 隔离应用设置（内部为 `NextKde/NextNotes.conf`），不覆盖 `XDG_CONFIG_HOME`，避免 fcitx 客户端读不到系统主题。输入法组合期间不导出 preedit、执行格式命令或完成切换；提交后继续保存。
+
+虚拟机 `kos-vm-dev` / Qt 6.10.2：repository、controller、editor-session 三组测试通过；编辑回归覆盖段落与标题输入、行内格式、列表续项退出、任务勾选、引用、代码块、直接输入/粘贴表格、增行增列、列对齐、删除/撤销重做和 front matter 保留。真实 fcitx 回归覆盖组合不提前保存、选词提交、取消组合与选区替换。下方 M1 段落为历史记录，不代表当前内核边界。
+
+手工浏览器回归脚本为 `tests/WebEditorRegression.mjs` 和 `tests/AdvancedEditorRegression.mjs`，仅在 VM 启用开发调试端口后使用。明确提供 `NEXTNOTES_TEST_FILE`，且在应用中打开同一个可丢弃测试笔记；测试会替换该笔记正文。测试笔记须以 `---\ncustom: untouched\n---\n` 为 front matter。设置 `NEXTNOTES_CDP_URL` 指定本地调试端点，`NEXTNOTES_TEST_REPORT` 可保存结果；无自动验证工作流。
 
 ## 依赖
 
-Qt 6.8+（Core、Gui、Qml、Quick、QuickControls2、QuickDialogs2、Svg），运行时 Qt Quick Effects、Qt5Compat.GraphicalEffects 与 SVG 图像支持。Kos.Ui 子模块固定为 `608847c9231121b888f11c4e5f84850ac95deda4`，保留上游 GPL-3.0 LICENSE 与 NOTICE.md。应用正式许可与发布身份尚待确定，不作为当前可分发版本。
+Qt 6.8+（Core、Gui、Qml、Quick、QuickControls2、QuickDialogs2、Svg、WebEngineQuick、WebChannel），运行时 Qt Quick Effects、Qt5Compat.GraphicalEffects 与 SVG 图像支持。Kos.Ui 子模块固定为 `608847c9231121b888f11c4e5f84850ac95deda4`，保留上游 GPL-3.0 LICENSE 与 NOTICE.md。应用正式许可与发布身份尚待确定，不作为当前可分发版本。
 
 ## 仅在指定虚拟机或托管 CI 构建
 
@@ -25,7 +75,7 @@ ctest --test-dir build --output-on-failure
 编辑区支持 Ctrl+B 加粗、Ctrl+I 斜体、Ctrl+Shift+X 删除线、Ctrl+E 行内代码；侧栏为 Ctrl+Shift+B。格式菜单与快捷键调用同一会话。当前命令是局部源码标记转换，尚非完整 Markdown 语法解析。
 
 
-## M1b 使用与恢复
+## M1b 使用与恢复（早期阶段记录，当前能力以上文为准）
 
 选择一个已存在的本地文件夹；新建文件夹入口可建立库内目录。新建笔记立即进入编辑器，标题从 front matter / 一级标题读取。正文直接编辑原始 Markdown；文件路径重命名不会同步正文标题或链接。搜索标题和正文采用后台子串检索，中文不依赖英文分词；打开命中后选中第一处正文匹配。列表按最近修改排序。
 

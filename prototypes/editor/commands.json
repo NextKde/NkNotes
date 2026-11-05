@@ -1,0 +1,8 @@
+[
+ {"id":"bold","marker":"**","keys":["Ctrl-b"],"qtKey":66,"shift":false},
+ {"id":"italic","marker":"*","keys":["Ctrl-i"],"qtKey":73,"shift":false},
+ {"id":"strike","marker":"~~","keys":[]},
+ {"id":"code","marker":"`","keys":[]},
+ {"id":"undo","keys":["Ctrl-z"],"qtKey":90,"shift":false},
+ {"id":"redo","keys":["Ctrl-Shift-z","Ctrl-y"],"qtKey":90,"shift":true,"alternateQtKey":89}
+]

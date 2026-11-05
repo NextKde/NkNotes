@@ -10,6 +10,8 @@
 #include <QProcess>
 #include <QProcessEnvironment>
 #include <cstdlib>
+#include <QJsonDocument>
+#include <QJsonObject>
 #ifdef Q_OS_LINUX
 #include <sys/statvfs.h>
 #endif
@@ -31,6 +33,276 @@ class NotesRepositoryTest : public QObject {
         return {{"ok", false}, {"error", "missingRequest"}};
     }
 private slots:
+    void missingWikiCreationIsScopedAndNeverOverwrites() {
+        QTemporaryDir d;QVERIFY(QDir(d.path()).mkdir("folder"));QVERIFY(write(d.filePath("folder/a.md"),"# Source\n"));
+        NotesRepository r;call(r,"selectLibrary",{{"path",d.path()}});
+        auto missing=call(r,"resolveWiki",{{"path","folder/a.md"},{"target","新笔记"}});
+        QVERIFY(missing.value("missing").toBool());QCOMPARE(missing.value("targetPath").toString(),QString("folder/新笔记.md"));
+        auto created=call(r,"createWiki",{{"path","folder/a.md"},{"target","新笔记"}});QVERIFY(created.value("ok").toBool());
+        QVERIFY(read(d.filePath("folder/新笔记.md")).contains("# 新笔记"));
+        QVERIFY(write(d.filePath("folder/新笔记.md"),"# External\nkeep\n"));
+        QVERIFY(call(r,"createWiki",{{"path","folder/a.md"},{"target","新笔记"}}).value("ok").toBool());QCOMPARE(read(d.filePath("folder/新笔记.md")),QByteArray("# External\nkeep\n"));
+        QVERIFY(call(r,"createWiki",{{"path","folder/a.md"},{"target","../nested/目标"}}).value("ok").toBool());QVERIFY(QFileInfo::exists(d.filePath("nested/目标.md")));
+        for(const QString bad:{QString("../../outside"),QString("../.git/config"),QString("../assets/n"),QString("/absolute"),QString("bad\nname")})QVERIFY(!call(r,"createWiki",{{"path","folder/a.md"},{"target",bad}}).value("ok").toBool());
+        QVERIFY(write(d.filePath("new.md"),"# Duplicate\n"));QVERIFY(write(d.filePath("another.md"),"# Duplicate\n"));
+        QCOMPARE(call(r,"createWiki",{{"path","folder/a.md"},{"target","Duplicate"}}).value("error").toString(),QString("ambiguousLink"));
+    }
+    void tagBatchMergesPreservesHistoryAndSkipsChangedSnapshots() {
+        QTemporaryDir d;NotesRepository r;
+        QVERIFY(write(d.filePath("a.md"),"---\ncustom: keep\ntags: [old, keep]\n---\n# A\n"));
+        QVERIFY(write(d.filePath("b.md"),"---\ntags:\n- old\n- new\n---\n# B\n"));
+        call(r,"selectLibrary",{{"path",d.path()}});
+        QVariantList items;for(const QString p:{QString("a.md"),QString("b.md")})items.append(QVariantMap{{"path",p},{"baseHash",call(r,"read",{{"path",p}}).value("baseHash")}});
+        auto added=call(r,"tagBatch",{{"action","add"},{"tags",QStringList{"new","extra"}},{"items",items}});QCOMPARE(added.value("succeeded").toInt(),2);
+        QVERIFY(read(d.filePath("a.md")).contains("custom: keep"));QVERIFY(!read(d.filePath("b.md")).contains("- old"));
+        auto plan=call(r,"tagPlan",{{"action","rename"},{"tags",QStringList{"old"}},{"replacement","new"}});QCOMPARE(plan.value("count").toInt(),2);
+        QVERIFY(write(d.filePath("b.md"),"external content\n"));
+        auto renamed=call(r,"tagBatch",plan);QCOMPARE(renamed.value("succeeded").toInt(),1);QCOMPARE(renamed.value("failed").toInt(),1);QCOMPARE(read(d.filePath("b.md")),QByteArray("external content\n"));
+        auto props=call(r,"knowledge",{{"path","a.md"}}).value("properties").toMap();QCOMPARE(props.value("tags").toStringList(),(QStringList{"new","keep","extra"}));
+        QVERIFY(call(r,"history",{{"path","a.md"}}).value("versions").toList().size()>=3);
+        auto doc=call(r,"read",{{"path","a.md"}});auto removed=call(r,"tagBatch",{{"action","remove"},{"tags",QStringList{"extra"}},{"items",QVariantList{QVariantMap{{"path","a.md"},{"baseHash",doc.value("baseHash")}}}}});QCOMPARE(removed.value("succeeded").toInt(),1);
+        QCOMPARE(call(r,"search",{{"query","tag:extra"},{"indexed",true}}).value("notes").toList().size(),0);
+    }
+
+    void templatesAndDailyNotesDoNotOverwriteExistingContent() {
+        QTemporaryDir d,other;NotesRepository r;call(r,"selectLibrary",{{"path",d.path()}});
+        QVERIFY(call(r,"templateSave",{{"name","Meeting"},{"text","---\nnextnotes_id: old-id\ntags: [\"meeting\"]\n---\n# {{title}}\n{{date}} {{time}}\n"}}).value("ok").toBool());
+        auto first=call(r,"fromTemplate",{{"name","Meeting"},{"title","Weekly"}}),second=call(r,"fromTemplate",{{"name","Meeting"},{"title","Next"}});
+        QVERIFY(first.value("ok").toBool());QVERIFY(second.value("ok").toBool());QVERIFY(first.value("id")!=second.value("id"));
+        const auto bytes=read(d.filePath(first.value("path").toString()));QVERIFY(bytes.contains("# Weekly"));QVERIFY(!bytes.contains("{{date}}"));QVERIFY(!bytes.contains("old-id"));
+        QVERIFY(call(r,"templateSave",{{"name","每日笔记"},{"text","# {{date}}\n\nDiary\n"}}).value("ok").toBool());
+        auto daily=call(r,"dailyNote");QVERIFY(daily.value("ok").toBool());auto again=call(r,"dailyNote");QVERIFY(again.value("existing").toBool());QCOMPARE(daily.value("path"),again.value("path"));
+        const auto before=read(d.filePath(daily.value("path").toString()));call(r,"dailyNote");QCOMPARE(read(d.filePath(daily.value("path").toString())),before);
+        call(r,"smartSave",{{"name","Meetings"},{"query","tag:meeting"},{"filter","all"}});
+        QVERIFY(call(r,"selectLibrary",{{"path",other.path()}}).value("ok").toBool());auto reopened=call(r,"selectLibrary",{{"path",d.path()}});QVERIFY(reopened.value("smartFolders").toMap().contains("Meetings"));
+        QVERIFY(call(r,"templates").value("templates").toMap().contains("Meeting"));
+    }
+    void indexedThousandNoteQueriesDoNotRescan() {
+        QTemporaryDir d;for(int i=0;i<1000;++i)QVERIFY(write(d.filePath(QString::number(i)+".md"),("# Note "+QString::number(i)+"\n\n中文知识检索 "+QString::number(i)+"\n").toUtf8()));
+        NotesRepository r;QVERIFY(call(r,"selectLibrary",{{"path",d.path()}}).value("ok").toBool());int scans=0;RepositoryTestHooks::beforeScan=[&](bool){++scans;};
+        QElapsedTimer timer;timer.start();bool valid=true;for(int i=0;i<30;++i){auto found=call(r,"search",{{"query","中文知识检索 999"},{"indexed",true}});valid=valid&&found.value("notes").toList().size()==1;}
+        auto elapsed=timer.elapsed();RepositoryTestHooks::beforeScan={};QVERIFY(valid);QCOMPARE(scans,0);qInfo()<<"1000 notes, 30 indexed searches:"<<elapsed<<"ms";
+    }
+    void knowledgeIndexPropertiesLinksSmartFoldersAndHistory() {
+        QTemporaryDir d;QVERIFY(QDir(d.path()).mkdir("folder"));
+        QVERIFY(write(d.filePath("a.md"),"---\ncustom: keep\ntags: [\"work\", \"中文\"]\nstatus: draft\n---\n# Alpha\n\n中文检索 [[./b.md|Beta]] [normal](b.md#section)\n`[[fake]]`\n"));
+        QVERIFY(write(d.filePath("b.md"),"# Beta\n\n## Section\n"));
+        QVERIFY(write(d.filePath("folder/b.md"),"# Other\n"));
+        NotesRepository r;QVERIFY(call(r,"selectLibrary",{{"path",d.path()}}).value("ok").toBool());
+        auto search=call(r,"search",{{"query","tag:中文 prop:status=draft 中文检索"},{"indexed",true}});QCOMPARE(search.value("notes").toList().size(),1);
+        QCOMPARE(call(r,"search",{{"query",QString::fromUtf8("tag:\"中文\" prop:\"status=draft\" 中文检索")},{"indexed",true}}).value("notes").toList().size(),1);
+        QCOMPARE(call(r,"resolveWiki",{{"path","b.md"},{"target","Alpha"}}).value("path").toString(),QString("a.md"));
+        const auto updates=search.value("indexUpdates");for(int i=0;i<5;++i)QCOMPARE(call(r,"search",{{"query","检索"},{"indexed",true}}).value("indexUpdates"),updates);
+        QCOMPARE(call(r,"resolveWiki",{{"path","a.md"},{"target","b"}}).value("error").toString(),QString("ambiguousLink"));
+        QCOMPARE(call(r,"resolveWiki",{{"path","a.md"},{"target","./b.md"}}).value("path").toString(),QString("b.md"));
+        auto knowledge=call(r,"knowledge",{{"path","b.md"}});QCOMPARE(knowledge.value("backlinks").toList().size(),1);
+        auto doc=call(r,"read",{{"path","a.md"}});auto property=call(r,"setProperty",{{"path","a.md"},{"baseHash",doc.value("baseHash")},{"key","status"},{"value","done"}});QVERIFY(property.value("ok").toBool());
+        QVERIFY(read(d.filePath("a.md")).contains("custom: keep"));
+        QCOMPARE(call(r,"search",{{"query","prop:status=done"},{"indexed",true}}).value("notes").toList().size(),1);
+        auto history=call(r,"history",{{"path","a.md"}}).value("versions").toList();QCOMPARE(history.size(),2);
+        QString oldHash;for(auto v:history)if(!v.toMap().value("current").toBool())oldHash=v.toMap().value("hash").toString();
+        QVERIFY(call(r,"historyVersion",{{"path","a.md"},{"hash",oldHash}}).value("text").toString().contains("status: draft"));
+        doc=call(r,"read",{{"path","a.md"}});QVERIFY(call(r,"rename",{{"path","a.md"},{"target","renamed.md"},{"baseHash",doc.value("baseHash")}}).value("ok").toBool());
+        QVERIFY(call(r,"historyVersion",{{"path","renamed.md"},{"hash",oldHash}}).value("ok").toBool());
+        QVERIFY(call(r,"smartSave",{{"name","Work"},{"query","tag:work"},{"filter","all"}}).value("ok").toBool());
+        QVERIFY(call(r,"knowledge",{{"path","renamed.md"}}).value("smartFolders").toMap().contains("Work"));
+        QVERIFY(call(r,"search",{{"query","tag:work"},{"indexed",true}}).value("smartFolders").toMap().contains("Work"));
+        QVERIFY(write(d.filePath("b.md"),"# Beta\nexternal index update\n"));
+        QVERIFY(call(r,"reindex").value("ok").toBool());QCOMPARE(call(r,"search",{{"query","external index update"},{"indexed",true}}).value("notes").toList().size(),1);
+    }
+    void sourceSaveChangesTerminalNewlineWithoutChangingEncoding() {
+        QTemporaryDir d;QVERIFY(write(d.filePath("a.md"),QByteArray("\xEF\xBB\xBF")+"old\r\n"));
+        NotesRepository r;call(r,"selectLibrary",{{"path",d.path()}});auto doc=call(r,"read",{{"path","a.md"}});
+        auto saved=call(r,"save",{{"path","a.md"},{"baseHash",doc.value("baseHash")},{"text","line\nlast"},{"sourceNewlines",true}});
+        QVERIFY(saved.value("ok").toBool());QCOMPARE(read(d.filePath("a.md")),QByteArray("\xEF\xBB\xBF")+"line\r\nlast");
+    }
+    void recycleBatchRestorePurgeAndChangedSnapshot() {
+        QTemporaryDir d;QVERIFY(QDir(d.path()).mkdir("folder"));
+        QVERIFY(write(d.filePath("a.md"),"A\n"));QVERIFY(write(d.filePath("b.md"),"B\n"));QVERIFY(write(d.filePath("folder/n.md"),"nested\n"));
+        NotesRepository r;auto list=call(r,"selectLibrary",{{"path",d.path()}});
+        for(const QString name:{QString("a.md"),QString("b.md")}){auto doc=call(r,"read",{{"path",name}});QVERIFY(call(r,"trash",{{"path",name},{"baseHash",doc.value("baseHash")}}).value("ok").toBool());}
+        QVERIFY(call(r,"trashFolder",{{"path","folder"}}).value("ok").toBool());
+        auto items=call(r,"recovery").value("trashItems").toList();QCOMPARE(items.size(),3);
+        QVERIFY(write(d.filePath("a.md"),"external"));
+        auto restored=call(r,"trashBatch",{{"action","restore"},{"items",items}});QCOMPARE(restored.value("succeeded").toInt(),2);QCOMPARE(restored.value("failed").toInt(),1);
+        QCOMPARE(read(d.filePath("a.md")),QByteArray("external"));QVERIFY(QFileInfo::exists(d.filePath("folder/n.md")));
+        auto remain=call(r,"recovery").value("trashItems").toList();QCOMPARE(remain.size(),1);
+        const auto item=remain.first().toMap();const QString stored=d.filePath(".nextnotes/trash/"+item.value("token").toString()+".md");
+        QVERIFY(write(stored,"changed"));auto rejected=call(r,"trashBatch",{{"action","purge"},{"items",remain}});QCOMPARE(rejected.value("failed").toInt(),1);QCOMPARE(read(stored),QByteArray("changed"));
+        remain=call(r,"recovery").value("trashItems").toList();QCOMPARE(call(r,"trashBatch",{{"action","purge"},{"items",remain}}).value("succeeded").toInt(),1);QVERIFY(!QFileInfo::exists(stored));
+        QVERIFY(call(r,"trashFolder",{{"path","folder"}}).value("ok").toBool());
+        items=call(r,"recovery").value("trashItems").toList();QCOMPARE(call(r,"trashBatch",{{"action","purge"},{"items",items}}).value("succeeded").toInt(),1);
+        QVERIFY(call(r,"recovery").value("trashItems").toList().isEmpty());
+        QCOMPARE(read(d.filePath("a.md")),QByteArray("external"));
+    }
+    void recycleRejectsSymlinkTree() {
+        QTemporaryDir d,out;QVERIFY(QDir(d.path()).mkdir("folder"));QVERIFY(write(d.filePath("folder/n.md"),"note"));QVERIFY(write(out.filePath("keep"),"outside"));
+        NotesRepository r;call(r,"selectLibrary",{{"path",d.path()}});auto removed=call(r,"trashFolder",{{"path","folder"}});QVERIFY(removed.value("ok").toBool());
+        const QString stored=d.filePath(".nextnotes/folder-trash/"+removed.value("trashToken").toString());
+        auto before=call(r,"recovery").value("trashItems").toList();QVERIFY(QFile::link(out.path(),stored+"/link"));
+        QCOMPARE(call(r,"trashBatch",{{"action","purge"},{"items",before}}).value("failed").toInt(),1);QCOMPARE(read(out.filePath("keep")),QByteArray("outside"));
+    }
+    void interruptedMoveCanRollbackAfterReopen() {
+        QTemporaryDir d; QVERIFY(QDir(d.path()).mkdir("dest"));
+        const QByteArray original("[self](a.md)\n");QVERIFY(write(d.filePath("a.md"),original));
+        {
+            NotesRepository r;QVERIFY(call(r,"selectLibrary",{{"path",d.path()}}).value("ok").toBool());
+            auto a=call(r,"read",{{"path","a.md"}});
+            SafeCommit::afterExchange=[&]{write(d.filePath("dest/b.md"),"collision");};
+            auto result=call(r,"rename",{{"path","a.md"},{"target","dest/b.md"},{"baseHash",a.value("baseHash")}});
+            SafeCommit::afterExchange={};QVERIFY(!result.value("ok").toBool());
+            QCOMPARE(read(d.filePath("dest/b.md")),QByteArray("collision"));
+        }
+        QVERIFY(QFile::remove(d.filePath("dest/b.md")));
+        NotesRepository reopened;QVERIFY(call(reopened,"selectLibrary",{{"path",d.path()}}).value("ok").toBool());
+        QVERIFY(call(reopened,"read",{{"path","a.md"}}).value("readOnly").toBool());
+        QVERIFY(call(reopened,"recoverMove").value("ok").toBool());
+        QCOMPARE(read(d.filePath("a.md")),original);
+    }
+    void linkedBatchAndFolderRecycle() {
+        QTemporaryDir d;QVERIFY(QDir(d.path()).mkdir("dest"));
+        QVERIFY(write(d.filePath("a.md"),"[b](b.md)\n"));QVERIFY(write(d.filePath("b.md"),"[a](a.md)\n"));
+        NotesRepository r;auto list=call(r,"selectLibrary",{{"path",d.path()}});
+        auto result=call(r,"batch",{{"action","move"},{"folder","dest"},{"items",list.value("notes")}});
+        QCOMPARE(result.value("succeeded").toInt(),2);
+        QVERIFY(read(d.filePath("dest/a.md")).contains("(b.md)"));QVERIFY(read(d.filePath("dest/b.md")).contains("(a.md)"));
+        QVERIFY(write(d.filePath("dest/.hidden"),"attachment"));
+        auto removed=call(r,"trashFolder",{{"path","dest"}});QVERIFY(removed.value("ok").toBool());
+        QVERIFY(!QFileInfo::exists(d.filePath("dest")));
+        QVERIFY(call(r,"restoreFolder",{{"token",removed.value("trashToken")}}).value("ok").toBool());
+        QCOMPARE(read(d.filePath("dest/.hidden")),QByteArray("attachment"));
+        QVERIFY(read(d.filePath("dest/b.md")).contains("(a.md)"));
+    }
+    void relocationUpdatesReferences() {
+        QTemporaryDir d; QVERIFY(QDir(d.path()).mkdir("folder"));
+        QVERIFY(write(d.filePath("a.md"), "# A\n\n[x](b.md#hello)\n![pic](assets/p.png)\n`[code](b.md)`\n"));
+        QVERIFY(write(d.filePath("b.md"), "# B\n\n[back](a.md)\n"));
+        NotesRepository r; QVERIFY(call(r,"selectLibrary",{{"path",d.path()}}).value("ok").toBool());
+        auto a=call(r,"read",{{"path","a.md"}});
+        auto moved=call(r,"rename",{{"path","a.md"},{"target","folder/renamed.md"},{"baseHash",a.value("baseHash")}});
+        QVERIFY2(moved.value("ok").toBool(),qPrintable(moved.value("error").toString()));
+        QVERIFY(read(d.filePath("folder/renamed.md")).contains("(../b.md#hello)"));
+        QVERIFY(read(d.filePath("folder/renamed.md")).contains("(../assets/p.png)"));
+        QVERIFY(read(d.filePath("folder/renamed.md")).contains("`[code](b.md)`"));
+        QVERIFY(read(d.filePath("b.md")).contains("(folder/renamed.md)"));
+        auto folder=call(r,"renameFolder",{{"path","folder"},{"target","renamed folder"}});
+        QVERIFY2(folder.value("ok").toBool(),qPrintable(folder.value("error").toString()));
+        QVERIFY(QFileInfo::exists(d.filePath("renamed folder/renamed.md")));
+        QVERIFY(read(d.filePath("b.md")).contains("(renamed%20folder/renamed.md)"));
+        QVERIFY(!call(r,"renameFolder",{{"path","renamed folder"},{"target","renamed folder/child"}}).value("ok").toBool());
+    }
+    void relocationRecoveryPreservesExternalChanges() {
+        QTemporaryDir d; QVERIFY(QDir(d.path()).mkdir("dest"));
+        QVERIFY(write(d.filePath("a.md"),"[self](a.md)\n"));
+        NotesRepository r; QVERIFY(call(r,"selectLibrary",{{"path",d.path()}}).value("ok").toBool());
+        auto a=call(r,"read",{{"path","a.md"}});
+        SafeCommit::beforeCommit=[&]{write(d.filePath("a.md"),"external\n");};
+        auto moved=call(r,"rename",{{"path","a.md"},{"target","dest/b.md"},{"baseHash",a.value("baseHash")}});
+        SafeCommit::beforeCommit={};
+        QVERIFY(!moved.value("ok").toBool()); QCOMPARE(read(d.filePath("a.md")),QByteArray("external\n"));
+        QVERIFY(!call(r,"recoverMove").value("ok").toBool());
+        QCOMPARE(read(d.filePath("a.md")),QByteArray("external\n"));
+        QVERIFY(write(d.filePath("a.md"),"[self](a.md)\n"));
+        QVERIFY(call(r,"recoverMove").value("ok").toBool());
+        QVERIFY(!QFileInfo::exists(d.filePath(".nextnotes/move.json")));
+    }
+    void organizerPinsAndDeterministicSorting() {
+        QTemporaryDir dir; QVERIFY(write(dir.filePath("a.md"), "# Alpha\n")); QVERIFY(write(dir.filePath("b.md"), "# Beta\n"));
+        {
+            NotesRepository r; auto listing = call(r, "selectLibrary", {{"path", dir.path()}}); QVERIFY(listing.value("ok").toBool());
+            auto sorted = call(r, "search", {{"sort", "title"}, {"ascending", false}}).value("notes").toList();
+            QCOMPARE(sorted.first().toMap().value("path").toString(), QString("b.md"));
+            const auto a = sorted.last().toMap();
+            auto batch = call(r, "batch", {{"action", "pin"}, {"items", QVariantList{a}}}); QCOMPARE(batch.value("succeeded").toInt(), 1);
+            sorted = call(r, "search", {{"sort", "title"}, {"ascending", false}}).value("notes").toList();
+            QCOMPARE(sorted.first().toMap().value("path").toString(), QString("a.md"));
+            QVERIFY(sorted.first().toMap().value("pinned").toBool()); QVERIFY(!sorted.first().toMap().value("favorite").toBool());
+            QVERIFY(call(r, "search", {{"filter", "favorite"}}).value("notes").toList().isEmpty());
+            QCOMPARE(read(dir.filePath("a.md")), QByteArray("# Alpha\n"));
+        }
+        NotesRepository reopened; QVERIFY(call(reopened, "selectLibrary", {{"path", dir.path()}}).value("ok").toBool());
+        auto notes = call(reopened, "search", {{"sort", "title"}, {"ascending", false}}).value("notes").toList();
+        QVERIFY(notes.first().toMap().value("pinned").toBool());
+        QCOMPARE(call(reopened, "batch", {{"action", "unpin"}, {"items", QVariantList{notes.first()}}}).value("failed").toInt(), 0);
+        notes = call(reopened, "search", {{"sort", "title"}, {"ascending", false}}).value("notes").toList();
+        QCOMPARE(notes.first().toMap().value("path").toString(), QString("b.md"));
+    }
+    void organizerBatchPartialFailuresCopyTrashAndRestore() {
+        QTemporaryDir dir; QVERIFY(QDir(dir.path()).mkdir("target"));
+        const QByteArray original("---\ncustom: retained\n---\n# A\n\nPlain body.\n");
+        QVERIFY(write(dir.filePath("a.md"), original));
+        QVERIFY(write(dir.filePath("b.md"), "# B\n\n![image](assets/a.png)\n"));
+        QVERIFY(write(dir.filePath("c.md"), "# C\n")); QVERIFY(write(dir.filePath("target/c.md"), "existing\n"));
+        QVERIFY(write(dir.filePath("d.md"), "# D\n"));
+        NotesRepository r; auto listing = call(r, "selectLibrary", {{"path", dir.path()}}); QVERIFY(listing.value("ok").toBool());
+        QVariantList items; for (const auto &v : listing.value("notes").toList()) if (!v.toMap().value("path").toString().startsWith("target/")) items.append(v);
+        QVERIFY(write(dir.filePath("d.md"), "external changed\n"));
+        const auto moved = call(r, "batch", {{"action", "move"}, {"folder", "target"}, {"items", items}});
+        QCOMPARE(moved.value("succeeded").toInt(), 2); QCOMPARE(moved.value("failed").toInt(), 2);
+        QStringList errors; for (const auto &v : moved.value("results").toList()) errors.append(v.toMap().value("error").toString());
+        QVERIFY(errors.contains("alreadyExists")); QVERIFY(errors.contains("conflict"));
+        QVERIFY(!QFileInfo::exists(dir.filePath("a.md"))); QCOMPARE(read(dir.filePath("target/a.md")), original);
+        QCOMPARE(read(dir.filePath("target/c.md")), QByteArray("existing\n"));
+        QVERIFY(read(dir.filePath("target/b.md")).contains("../assets/a.png")); QCOMPARE(read(dir.filePath("d.md")), QByteArray("external changed\n"));
+        const QVariantMap source{{"path", "target/a.md"}, {"baseHash", MarkdownFile::digest(original)}};
+        const auto copied = call(r, "batch", {{"action", "duplicate"}, {"items", QVariantList{source}}}); QCOMPARE(copied.value("succeeded").toInt(), 1);
+        const QString copyPath = copied.value("results").toList().first().toMap().value("newPath").toString();
+        QCOMPARE(read(dir.filePath(copyPath)), original);
+        const auto sourceRead = call(r, "read", {{"path", "target/a.md"}}), copyRead = call(r, "read", {{"path", copyPath}});
+        QVERIFY(sourceRead.value("id") != copyRead.value("id"));
+        const auto removed = call(r, "batch", {{"action", "trash"}, {"items", QVariantList{source, QVariantMap{{"path", copyPath}, {"baseHash", copyRead.value("baseHash")}}}}});
+        QCOMPARE(removed.value("succeeded").toInt(), 2); QVERIFY(!QFileInfo::exists(dir.filePath(copyPath)));
+        const auto recovery = call(r, "recovery").value("trash").toMap(); QCOMPARE(recovery.size(), 2);
+        for (auto it = recovery.begin(); it != recovery.end(); ++it) QVERIFY(call(r, "restore", {{"token", it.key()}}).value("ok").toBool());
+        QCOMPARE(read(dir.filePath("target/a.md")), original); QCOMPARE(read(dir.filePath(copyPath)), original);
+        const auto invalid = call(r, "batch", {{"action", "trash"}, {"items", QVariantList{QVariantMap{{"path", "../outside.md"}, {"baseHash", "fake"}}}}});
+        QCOMPARE(invalid.value("results").toList().first().toMap().value("error").toString(), QString("unsafePath"));
+    }
+    void organizerFolderOperationsProtectContents() {
+        QTemporaryDir dir; QVERIFY(QDir(dir.path()).mkdir("empty")); QVERIFY(QDir(dir.path()).mkdir("occupied"));
+        QVERIFY(write(dir.filePath("occupied/.hidden"), "keep"));
+        NotesRepository r; QVERIFY(call(r, "selectLibrary", {{"path", dir.path()}}).value("ok").toBool());
+        QVERIFY(call(r, "renameFolder", {{"path", "empty"}, {"target", "renamed"}}).value("ok").toBool());
+        QVERIFY(call(r, "removeFolder", {{"path", "renamed"}}).value("ok").toBool());
+        QCOMPARE(call(r, "removeFolder", {{"path", "occupied"}}).value("error").toString(), QString("folderNotEmpty"));
+        QVERIFY(call(r, "renameFolder", {{"path", "occupied"}, {"target", "elsewhere"}}).value("ok").toBool());
+        QCOMPARE(read(dir.filePath("elsewhere/.hidden")), QByteArray("keep"));
+        QVERIFY(!call(r, "removeFolder", {{"path", ""}}).value("ok").toBool());
+        QVERIFY(QFileInfo(dir.path()).isDir());
+    }
+
+    void attachmentImportReferencesAndRecoverableCleanup() {
+        QTemporaryDir dir; QVERIFY(QDir(dir.path()).mkdir("nested"));
+        const QString note = dir.filePath("nested/note.md"); QVERIFY(write(note, "# Note\n"));
+        NotesRepository repository; QVERIFY(call(repository, "selectLibrary", {{"path", dir.path()}}).value("ok").toBool());
+        const QByteArray bytes("attachment content");
+        const QVariantMap args{{"path", "nested/note.md"}, {"name", "report.txt"}, {"data", bytes.toBase64()}};
+        const auto imported = call(repository, "importAttachment", args); QVERIFY(imported.value("ok").toBool());
+        const QString relative = imported.value("relative").toString();
+        QVERIFY(relative.startsWith("assets/")); QVERIFY(imported.value("url").toString().startsWith("../assets/"));
+        QCOMPARE(read(dir.filePath(relative)), bytes);
+        QCOMPARE(call(repository, "importAttachment", args).value("relative"), imported.value("relative"));
+        QVERIFY(write(note, ("# Note\n\n[Report](" + imported.value("url").toString() + ")\n").toUtf8()));
+        QCOMPARE(call(repository, "quarantineAttachment", {{"relative", relative}}).value("error").toString(), QStringLiteral("attachmentInUse"));
+        QVERIFY(write(note, "# Note\n"));
+        const auto removed = call(repository, "quarantineAttachment", {{"relative", relative}}); QVERIFY(removed.value("ok").toBool());
+        QVERIFY(!QFileInfo::exists(dir.filePath(relative)));
+        QCOMPARE(call(repository, "attachments").value("removed").toList().size(), 1);
+        QVERIFY(call(repository, "restoreAttachment", {{"token", removed.value("token")}}).value("ok").toBool());
+        QCOMPARE(read(dir.filePath(relative)), bytes);
+        QCOMPARE(call(repository, "importAttachment", {{"path", "../outside.md"}, {"data", bytes.toBase64()}}).value("error").toString(), QStringLiteral("unsafePath"));
+        QCOMPARE(call(repository, "importAttachment", {{"path", "nested/note.md"}, {"data", "$$$"}}).value("error").toString(), QStringLiteral("invalidAttachment"));
+    }
+    void attachmentsRejectSymlinkDestinationsAndLargeFiles() {
+        QTemporaryDir dir, outside; QVERIFY(write(dir.filePath("note.md"), "note\n"));
+        NotesRepository repository; QVERIFY(call(repository, "selectLibrary", {{"path", dir.path()}}).value("ok").toBool());
+        QVERIFY(QFile::link(outside.path(), dir.filePath("assets")));
+        const QVariantMap args{{"path", "note.md"}, {"name", "file.txt"}, {"data", QByteArray("small").toBase64()}};
+        QCOMPARE(call(repository, "importAttachment", args).value("error").toString(), QStringLiteral("unsafePath"));
+        QVERIFY(QDir(outside.path()).entryList(QDir::Files).isEmpty());
+        QFile large(outside.filePath("large.bin")); QVERIFY(large.open(QIODevice::WriteOnly)); QVERIFY(large.resize(33 * 1024 * 1024)); large.close();
+        QCOMPARE(call(repository, "importAttachment", {{"path", "note.md"}, {"source", QUrl::fromLocalFile(large.fileName()).toString()}}).value("error").toString(), QStringLiteral("attachmentTooLarge"));
+    }
     void selectionPreparationFailures() {
         QTemporaryDir oldDir, blockedDir, scanDir;
         NotesRepository r;
@@ -248,6 +520,12 @@ private slots:
         QCOMPARE(recovery.value("drafts").toList().size(), 1);
         QCOMPARE(recovery.value("drafts").toList()[0].toMap().value("text").toString(), QString("local\n"));
         const auto commits = recovery.value("commits").toList(); QCOMPARE(commits.size(), 1);
+        const auto summary = call(r, "recovery", {{"includeCommitText", false}});
+        QVERIFY(summary.value("ok").toBool());
+        QCOMPARE(summary.value("drafts"), recovery.value("drafts"));
+        QCOMPARE(summary.value("commits").toList().size(), commits.size());
+        QVERIFY(summary.value("commits").toList()[0].toMap().value("versions").toList().isEmpty());
+        QCOMPARE(call(r, "recovery").value("commits"), recovery.value("commits"));
         const QString token = commits[0].toMap().value("token").toString();
         const QString journal = dir.filePath(".nextnotes/commits/" + token);
         const QString retained = QString::fromUtf8(read(journal)).section(u'\n', 1);

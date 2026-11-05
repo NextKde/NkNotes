@@ -3,6 +3,8 @@
 #include <QTextCursor>
 #include <QSettings>
 #include <QTemporaryDir>
+#include <QFile>
+#include <QJSEngine>
 #include "EditorSession.h"
 #include "NotesController.h"
 
@@ -35,6 +37,141 @@ class NotesControllerTest : public QObject {
         int count(const QString &op) { int n = 0; for (const auto &r : requests) if (r[1] == op) ++n; return n; }
     };
 private slots:
+    void normalSaveRefreshesRecoveryWithoutVersionBodies() {
+        Fixture f; f.type("changed"); f.controller.save();
+        f.answer("save", {{"baseHash", "saved"}});
+        const auto summary = f.take("recovery"); QVERIFY(!summary.isEmpty());
+        QCOMPARE(summary[2].toMap().value("includeCommitText"), QVariant(false));
+        f.controller.inspectRecovery();
+        const auto preview = f.take("recovery"); QVERIFY(!preview.isEmpty());
+        QVERIFY(preview[2].toMap().value("includeCommitText", true).toBool());
+        f.controller.setRecoveryVisible(true);
+        f.controller.receive(summary[0].toULongLong(), "recovery", {{"ok", true}, {"library", "/virtual/library"}, {"generation", 1}, {"commits", QVariantList{}}});
+        QVERIFY(!f.take("recovery").isEmpty());
+        f.type("more"); f.controller.save(); f.answer("save", {{"baseHash", "saved-again"}});
+        QVERIFY(f.take("recovery")[2].toMap().value("includeCommitText").toBool());
+        f.controller.setRecoveryVisible(false);
+        QVERIFY(!f.take("recovery")[2].toMap().value("includeCommitText", true).toBool());
+    }
+    void missingLinkCreationAndTagsWaitForCurrentSave() {
+        Fixture f;QSignalSpy prompt(&f.controller,&NotesController::missingLinkRequested);
+        f.controller.openLink("wiki:New");f.answer("resolveWiki",{{"path","a.md"},{"missing",true},{"target","New"},{"targetPath","New.md"}});QCOMPARE(prompt.size(),1);
+        f.type("draft");f.controller.createMissingLink();QCOMPARE(f.count("createWiki"),0);f.answer("save",{{"baseHash","saved"}});QCOMPARE(f.count("createWiki"),1);
+        f.answer("createWiki",{{"path","New.md"}});f.answer("read",{{"path","New.md"},{"id","N"},{"text","# New"},{"baseHash","new"}});
+        f.type("more");f.controller.editTags("add",{"New.md"},{"tag"});QCOMPARE(f.count("tagBatch"),0);f.answer("save",{{"baseHash","latest"}});
+        const auto request=f.take("tagBatch");QVERIFY(!request.isEmpty());QCOMPARE(request[2].toMap().value("items").toList().first().toMap().value("baseHash").toString(),QString("latest"));
+    }
+
+    void propertyArraysDetachBeforeWaitingForSave() {
+        Fixture f; f.type("changed");
+        {
+            QJSEngine engine;
+            f.controller.setNoteProperty("tags", QVariant::fromValue(engine.evaluate("['工作', 'project alpha']")));
+            QCOMPARE(f.count("setProperty"), 0);
+        }
+        f.answer("save", {{"baseHash", "saved-latest"}});
+        const auto request=f.take("setProperty");QVERIFY(!request.isEmpty());
+        const auto args=request[2].toMap();
+        QCOMPARE(args.value("baseHash").toString(), QString("saved-latest"));
+        QCOMPARE(args.value("value").metaType(), QMetaType::fromType<QStringList>());
+        QCOMPARE(args.value("value").toStringList(), (QStringList{"工作", "project alpha"}));
+    }
+    void navigationHistoryWaitsForSaveAndKeepsPositionOnFailure() {
+        Fixture f; QVERIFY(!f.controller.canGoBack());
+        f.controller.openNote("b.md");f.answer("read",{{"path","b.md"},{"id","B"},{"text","# B"},{"baseHash","b"}});
+        QVERIFY(f.controller.canGoBack());f.type("changed");f.controller.navigateBack();
+        QCOMPARE(f.count("read"),0);f.answer("save",{{"baseHash","saved"}});
+        QCOMPARE(f.count("read"),1);f.answer("read",{{"ok",false},{"error","notFound"}});
+        QVERIFY(f.controller.canGoBack());QCOMPARE(f.controller.property("path").toString(),QString("b.md"));
+        f.controller.dismissError();f.controller.navigateBack();f.answer("read",{{"path","a.md"},{"id","A"},{"text","A"},{"baseHash","a"}});
+        QVERIFY(f.controller.canGoForward());QVERIFY(!f.controller.canGoBack());
+        f.controller.navigateForward();f.answer("read",{{"path","b.md"},{"id","B"},{"text","B"},{"baseHash","b"}});
+        QVERIFY(f.controller.canGoBack());QVERIFY(!f.controller.canGoForward());
+    }
+    void organizeWaitsForSaveAndUsesLatestBaseline() {
+        Fixture f; f.type("新输入"); f.controller.organize("trash", {"a.md"});
+        QCOMPARE(f.count("batch"), 0); QCOMPARE(f.count("save"), 1);
+        f.answer("save", {{"baseHash", "saved-latest"}});
+        QCOMPARE(f.count("batch"), 1); QVERIFY(f.controller.busy());
+        for (const auto &request : f.requests) if (request[1] == "batch") {
+            const auto item = request[2].toMap().value("items").toList().first().toMap();
+            QCOMPARE(item.value("baseHash").toString(), QString("saved-latest"));
+        }
+        QSignalSpy completed(&f.controller, &NotesController::batchFinished);
+        f.answer("batch", {{"action", "trash"}, {"succeeded", 0}, {"failed", 1}, {"results", QVariantList{QVariantMap{{"path", "a.md"}, {"ok", false}, {"error", "conflict"}}}}});
+        QCOMPARE(completed.size(), 1); QVERIFY(!f.controller.busy());
+        QCOMPARE(f.controller.property("path").toString(), QString("a.md"));
+        QVERIFY(f.session.source().contains("新输入"));
+        QVERIFY(!f.controller.property("batchReport").toMap().value("results").toList().first().toMap().value("message").toString().isEmpty());
+    }
+
+    void autosaveDoesNotPublishRawScanOrderingOrUnfilteredRows() {
+        Fixture f;
+        const QVariantMap a{{"id", "A"}, {"path", "a.md"}, {"baseHash", "base"}, {"summary", "query match"}};
+        const QVariantMap b{{"id", "B"}, {"path", "b.md"}};
+        const QVariantMap c{{"id", "C"}, {"path", "c.md"}};
+        f.controller.refresh(); f.answer("search", {{"notes", QVariantList{a,b}}});
+        QSignalSpy moves(f.controller.noteModel(), &QAbstractItemModel::rowsMoved);
+        QSignalSpy rows(&f.controller, &NotesController::notesChanged);
+        f.type("输入"); f.controller.save();
+        auto updated = a; updated["baseHash"] = "saved"; updated["summary"] = "new query match";
+        f.answer("save", {{"baseHash", "saved"}, {"listing", QVariantMap{{"notes", QVariantList{b,c,updated}}}}});
+        QCOMPARE(rows.size(), 0); QCOMPARE(moves.size(), 0);
+        QCOMPARE(f.controller.property("notes").toList(), (QVariantList{a,b}));
+        f.answer("search", {{"notes", QVariantList{updated,b}}});
+        QCOMPARE(rows.size(), 1); QCOMPARE(moves.size(), 0);
+        QCOMPARE(f.controller.property("notes").toList(), (QVariantList{updated,b}));
+    }
+
+    void listingsKeepPersistentRowsAndOnlyNotifyOnChanges() {
+        NotesListModel model;
+        QVariantMap a{{"id", "A"}, {"path", "a.md"}, {"summary", "old"}};
+        QVariantMap b{{"id", "B"}, {"path", "b.md"}};
+        model.replace({a,b});
+        QPersistentModelIndex first(model.index(0));
+        QSignalSpy resets(&model, &QAbstractItemModel::modelReset);
+        QSignalSpy changes(&model, &QAbstractItemModel::dataChanged);
+        model.replace({a,b}); QCOMPARE(changes.size(), 0);
+        a["summary"] = "new"; model.replace({a,b});
+        QCOMPARE(changes.size(), 1); QVERIFY(first.isValid()); QCOMPARE(first.row(), 0);
+        model.replace({b,a}); QCOMPARE(first.row(), 1);
+        QCOMPARE(first.data(Qt::UserRole).toMap().value("summary").toString(), QString("new"));
+        model.replace({a}); QCOMPARE(first.row(), 0); QCOMPARE(model.rowCount(), 1);
+        QCOMPARE(resets.size(), 0);
+        Fixture f; QSignalSpy listings(&f.controller, &NotesController::notesChanged);
+        QTextCursor cursor(&f.document); cursor.insertText("编辑");
+        QCOMPARE(listings.size(), 0);
+    }
+
+    void htmlExportEmbedsImagesWithoutChangingLiteralPaths() {
+        Fixture f; QTemporaryDir library, output, outside;
+        f.controller.setProperty("library", library.path());
+        const QByteArray png = QByteArray::fromBase64("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jfN8AAAAASUVORK5CYII=");
+        QFile image(library.filePath("picture.png")); QVERIFY(image.open(QIODevice::WriteOnly)); QCOMPARE(image.write(png), png.size()); image.close();
+        const QString url = QUrl::fromLocalFile(image.fileName()).toString();
+        const QString target = output.filePath("note.html");
+        QVERIFY(f.controller.exportHtml(QUrl::fromLocalFile(target), "<p>" + url + "</p><img src=\"" + url + "\">", "Title<&"));
+        QFile exported(target); QVERIFY(exported.open(QIODevice::ReadOnly)); const QByteArray bytes = exported.readAll(); exported.close();
+        QVERIFY(bytes.contains(("<p>" + url + "</p>").toUtf8())); QVERIFY(bytes.contains("src=\"data:image/png;base64,")); QVERIFY(bytes.contains("Title&lt;&amp;"));
+        QFile other(outside.filePath("outside.png")); QVERIFY(other.open(QIODevice::WriteOnly)); other.write(png); other.close();
+        QVERIFY(!f.controller.exportHtml(QUrl::fromLocalFile(target), "<img src=\"" + QUrl::fromLocalFile(other.fileName()).toString() + "\">", "Outside"));
+        QVERIFY(exported.open(QIODevice::ReadOnly)); QCOMPARE(exported.readAll(), bytes);
+        QVERIFY(f.controller.outputPath(QUrl("https://example.com/export"), "html").isEmpty());
+    }
+    void webCloseWaitsForLatestRendererSnapshot() {
+        Fixture f; f.session.enableWeb(); f.session.webConnected(); f.session.loadPrototype("原文");
+        const int epoch = f.session.webDocument().value("epoch").toInt();
+        f.session.acceptWebState({{"epoch", epoch}, {"sequence", 1}, {"loaded", true}, {"source", "原文"}});
+        QSignalSpy closed(&f.controller, &NotesController::closeReady);
+        QSignalSpy flush(&f.session, &EditorSession::webFlushRequested);
+        f.controller.requestClose(); QCOMPARE(closed.size(), 0); QCOMPARE(f.count("save"), 0);
+        QVERIFY(!flush.isEmpty());
+        f.session.acceptWebState({{"epoch", epoch}, {"sequence", 2}, {"loaded", true}, {"source", "最后输入"}, {"flush", flush.last()[0]}});
+        const auto save = f.take("save"); QVERIFY(!save.isEmpty());
+        QCOMPARE(save[2].toMap().value("text").toString(), QStringLiteral("最后输入"));
+        f.controller.receive(save[0].toULongLong(), "save", {{"ok", true}, {"library", "/virtual/library"}, {"generation", 1}, {"baseHash", "next"}});
+        QCOMPARE(closed.size(), 1);
+    }
     void saveUpdatesEditedIdentity() {
         Fixture f; f.controller.rememberPosition(2, 12);
         f.type("changed"); f.controller.save();

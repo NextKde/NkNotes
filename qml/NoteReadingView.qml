@@ -2,54 +2,102 @@ import QtQuick
 import QtQuick.Controls
 import Kos.Ui
 
-// Presentation only: the original Markdown remains owned by EditorSession.
+// Presentation only: source and persistence stay owned by EditorSession.
 ScrollView {
     id: root
     required property string source
     required property string noteTitle
+    required property string documentPath
     property string fontFamily: "sans-serif"
-    property int titleSize: 26
+    property int titleSize: 24
     property string modified: ""
     required property int bodySize
     required property real readingWidth
     required property int inset
     clip: true
     contentWidth: availableWidth
-    readonly property string body: {
+    function localImage(value) {
+        let path = value.trim().replace(/^<|>$/g, "")
+        // Only filesystem resources. Encoded schemes and network shares are rejected too.
+        try { path = decodeURIComponent(path) } catch (e) { return "" }
+        if (!path || /[\u0000-\u001f]/.test(path) || /^[/\\]{2}/.test(path)) return ""
+        if (/^[a-z][a-z0-9+.-]*:/i.test(path)) return ""
+        if (!path.startsWith("/")) path = documentPath.slice(0, documentPath.lastIndexOf("/") + 1) + path
+        const parts = []
+        path.split("/").forEach(function(part) { if (part === "..") parts.pop(); else if (part && part !== ".") parts.push(encodeURIComponent(part)) })
+        return "file:///" + parts.join("/")
+    }
+    readonly property var blocks: {
         let markdown = source.replace(/^\uFEFF/, "")
-        // Hide only a complete leading front matter block in the reading surface.
         markdown = markdown.replace(/^---\r?\n[\s\S]*?\r?\n(?:---|\.\.\.)[ \t]*(?:\r?\n|$)/, "")
         markdown = markdown.replace(/^\s*# [^\r\n]*(?:\r?\n|$)/, "")
-        // Do not request remote images from a presentation-only reader.
-        markdown = markdown.replace(/!\[([^\]]*)\]\([^)]*\)/g, "[$1]")
-        return markdown.trim()
+        // Disable raw HTML resource loading. Inline/reference Markdown images are
+        // resolved explicitly below; no Markdown image syntax reaches the Text item.
+        markdown = markdown.replace(/<[^>]*>/g, "")
+        const definitions = {}
+        markdown = markdown.replace(/^\s{0,3}\[([^\]]+)\]:\s*(\S+).*$/gm, function(all, key, value) { definitions[key.toLowerCase()] = value; return "" })
+        markdown = markdown.replace(/!\[([^\]]*)\]\[([^\]]*)\]/g, function(all, alt, key) { return "![" + alt + "](" + (definitions[(key || alt).toLowerCase()] || "") + ")" })
+        markdown = markdown.replace(/!\[([^\]]+)\](?!\()/g, function(all, alt) { return "![" + alt + "](" + (definitions[alt.toLowerCase()] || "") + ")" })
+        const result = [], pattern = /!\[([^\]]*)\]\(([^\r\n]*?)\)/g
+        let match, offset = 0
+        while ((match = pattern.exec(markdown)) !== null) {
+            const before = markdown.slice(offset, match.index).trim()
+            if (before) result.push({kind: "text", value: before})
+            const target = match[2].replace(/\s+["'][\s\S]*["']\s*$/, "")
+            const url = localImage(target)
+            result.push(url ? {kind: "image", value: url, alt: match[1]} : {kind: "text", value: match[1] ? "图片：" + match[1] + "（未加载）" : "图片未加载"})
+            offset = pattern.lastIndex
+        }
+        const tail = markdown.slice(offset).trim()
+        if (tail) result.push({kind: "text", value: tail})
+        return result
     }
     onSourceChanged: contentItem.contentY = 0
     Column {
         width: root.availableWidth
-        spacing: 22
-        Item { width: 1; height: 4 }
-        Column {
-            x: Math.max(root.inset, (parent.width - root.readingWidth) / 2)
-            width: Math.max(0, parent.width - x * 2)
-            spacing: 12
-            Label { width: parent.width; text: root.noteTitle; wrapMode: Text.Wrap; color: AppTheme.text; font.family: root.fontFamily; font.pixelSize: root.titleSize; font.weight: Font.Bold; lineHeight: 1.2 }
-            Label { width: parent.width; visible: !!root.modified; text: root.modified ? new Date(root.modified).toLocaleDateString(Qt.locale(), "yyyy年M月d日") : ""; color: AppTheme.mutedText; font.pixelSize: 11 }
+        spacing: 16
+        Label {
+            width: parent.width; topPadding: 8
+            text: root.modified ? new Date(root.modified).toLocaleString(Qt.locale("zh_CN"), "yyyy年M月d日 dddd HH:mm") : ""
+            horizontalAlignment: Text.AlignHCenter; color: AppTheme.mutedText; font.pixelSize: 12
         }
-        Text {
-            x: Math.max(root.inset, (parent.width - root.readingWidth) / 2)
-            width: Math.max(0, parent.width - x * 2)
-            text: root.body || "这篇笔记还没有正文。"
-            textFormat: Text.MarkdownText
-            wrapMode: Text.Wrap
-            color: AppTheme.text
-            linkColor: AppTheme.accent
-            font.family: root.fontFamily
-            font.pixelSize: root.bodySize
-            lineHeight: 1.55
-            Accessible.role: Accessible.StaticText
-            Accessible.name: "只读阅读正文"
+        Label {
+            x: root.inset; width: parent.width - 2 * x
+            text: root.noteTitle; wrapMode: Text.Wrap; color: AppTheme.text
+            font.family: root.fontFamily; font.pixelSize: root.titleSize; font.weight: Font.Bold
+            bottomPadding: 6
         }
-        Item { width: 1; height: 60 }
+        Repeater {
+            model: root.blocks
+            delegate: Column {
+                id: block
+                required property var modelData
+                x: root.inset; width: root.availableWidth - 2 * x
+                Image {
+                    id: picture
+                    visible: block.modelData.kind === "image"
+                    width: parent.width
+                    height: visible && sourceSize.width > 0 ? width * sourceSize.height / sourceSize.width : 0
+                    source: visible ? block.modelData.value : ""
+                    fillMode: Image.PreserveAspectFit
+                    asynchronous: true
+                    Accessible.role: Accessible.Graphic
+                    Accessible.name: block.modelData.alt || "笔记图片"
+                }
+                Text {
+                    visible: block.modelData.kind === "text" || picture.status === Image.Error
+                    width: parent.width
+                    text: block.modelData.kind === "text" ? block.modelData.value : "图片无法读取：" + (block.modelData.alt || "本地图片")
+                    textFormat: block.modelData.kind === "text" ? Text.MarkdownText : Text.PlainText
+                    wrapMode: Text.Wrap; color: AppTheme.text; linkColor: AppTheme.accent
+                    font.family: root.fontFamily; font.pixelSize: root.bodySize
+                    lineHeight: 1.35
+                    Accessible.role: Accessible.StaticText
+                    Accessible.name: "只读阅读正文"
+                }
+            }
+        }
+        Label { visible: root.blocks.length === 0; x: root.inset; text: "这篇笔记还没有正文。"; color: AppTheme.mutedText }
+        Item { width: 1; height: 36 }
     }
 }

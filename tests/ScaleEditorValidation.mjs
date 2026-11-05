@@ -1,0 +1,51 @@
+// VM only. Requires the generated 10001-note library and its long.md fixture.
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import {spawnSync} from 'node:child_process';
+const file=process.env.NEXTNOTES_TEST_FILE,pid=process.env.NEXTNOTES_TEST_PID;
+assert(file&&pid);
+const original=fs.readFileSync(file);
+const targets=await(await fetch('http://127.0.0.1:9232/json/list')).json();
+const ws=new WebSocket(targets.find(t=>t.url==='qrc:/editor/index.html').webSocketDebuggerUrl);
+await new Promise(resolve=>ws.onopen=resolve);
+let sequence=0;const pending=new Map();
+ws.onmessage=e=>{const m=JSON.parse(e.data);if(m.id){pending.get(m.id)?.(m);pending.delete(m.id);}};
+const call=(method,params={})=>new Promise(resolve=>{const id=++sequence;pending.set(id,resolve);ws.send(JSON.stringify({id,method,params}));});
+const run=async expression=>{const m=await call('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});assert(!m.result.exceptionDetails,JSON.stringify(m));return m.result.result.value;};
+const pause=ms=>new Promise(r=>setTimeout(r,ms));
+const report={};
+try {
+ const raised=spawnSync('python3',['/home/amao/apps/nk-vm-window.py',pid],{encoding:'utf8'});assert.equal(raised.status,0,raised.stderr);
+ await pause(300);
+ await run('window.scaleSample={gaps:[],last:performance.now()};window.scaleTimer=setInterval(()=>{const n=performance.now();scaleSample.gaps.push(n-scaleSample.last);scaleSample.last=n;},16);true');
+ const began=performance.now();
+ const activated=spawnSync('python3',['/home/amao/apps/nk-scale-a11y.py',pid,'action','list item','Long note, long.md'],{env:{...process.env,AT_SPI_BUS_ADDRESS:'unix:path=/run/user/1000/at-spi/bus_0'},encoding:'utf8'});
+ assert.equal(activated.status,0,activated.stderr+activated.stdout);
+ let loaded=false;
+ for(let i=0;i<120;++i){if(await run('nextnotes.view().state.doc.textContent.length>1800000')){loaded=true;break;}await pause(500);}
+ assert(loaded,'long document did not load');
+ await run('document.documentElement.scrollHeight');
+ report.openLongMs=Math.round(performance.now()-began);
+ report.loadPhases=await run('nextnotes.performance()');
+ assert.deepEqual(fs.readFileSync(file),original,'opening changed the original file');
+ report.mode=await run('nextnotes.view().state.doc.firstChild.type.name==="raw_source"?"source":"rich"');
+ if(report.mode==='source')report.renderedSourceLines=await run('document.querySelectorAll(".cm-line").length');
+ report.longTextCharacters=await run('nextnotes.view().state.doc.textContent.length');
+ report.openMaxEventLoopGapMs=await run('Math.max(...scaleSample.gaps)');
+ await pause(500);
+ report.editDispatchMs=await run(`(()=>{scaleSample.gaps=[];scaleSample.last=performance.now();const start=performance.now(),v=nextnotes.view();v.dispatch(v.state.tr.insertText('SCALE_EDIT_MARKER',v.state.doc.firstChild.type.name==='raw_source'?1+v.state.doc.firstChild.content.size:v.state.doc.content.size-1));return performance.now()-start})()`);
+ const saveStarted=performance.now();
+ for(let i=0;i<120&&!fs.readFileSync(file,'utf8').includes('SCALE_EDIT_MARKER');++i)await pause(250);
+ assert(fs.readFileSync(file,'utf8').includes('SCALE_EDIT_MARKER'),'long edit was not saved');
+ report.editToSavedMs=Math.round(performance.now()-saveStarted);
+ report.editMaxEventLoopGapMs=await run('Math.max(...scaleSample.gaps)');
+ assert(await run('nextnotes.command("undo")'));
+ for(let i=0;i<120&&fs.readFileSync(file,'utf8').includes('SCALE_EDIT_MARKER');++i)await pause(250);
+ assert(!fs.readFileSync(file,'utf8').includes('SCALE_EDIT_MARKER'),'undo was not saved');
+ assert.deepEqual(fs.readFileSync(file),original,'undo did not restore the exact original file');
+ report.undoSaved=true;
+ await run('clearInterval(scaleTimer);true');
+ report.ok=true;
+ console.log(JSON.stringify(report,null,2));
+ if(process.env.NEXTNOTES_TEST_REPORT)fs.writeFileSync(process.env.NEXTNOTES_TEST_REPORT,JSON.stringify(report,null,2));
+}finally{ws.close();}

@@ -4,6 +4,7 @@
 #include <QSyntaxHighlighter>
 #include <QTextCursor>
 #include <QRegularExpression>
+#include <QElapsedTimer>
 class Highlight : public QSyntaxHighlighter {
 public:
  bool live=true;
@@ -20,17 +21,20 @@ public:
 class Native : public QObject {
  Q_OBJECT
  QTextDocument *doc=nullptr; Highlight *high=nullptr;
+QElapsedTimer clock;
 public:
- using QObject::QObject;
+ explicit Native(QObject *parent=nullptr):QObject(parent){clock.start();}
+ Q_INVOKABLE double now(){return clock.nsecsElapsed()/1000000.0;}
+ Q_INVOKABLE void load(const QString &s){QTextCursor c(doc);c.beginEditBlock();c.select(QTextCursor::Document);c.insertText(s);c.endEditBlock();emit selection(0,0);}
  Q_INVOKABLE void attach(QQuickTextDocument *d, const QString &text) {doc=d->textDocument();doc->setPlainText(text);doc->setUndoRedoEnabled(true);high=new Highlight(doc);}
  Q_INVOKABLE QString source(){QString s=doc->toRawText();s.replace(QChar::ParagraphSeparator,'\n');return s;}
  Q_INVOKABLE void mode(bool live){high->live=live;high->rehighlight();}
- Q_INVOKABLE void command(QString name,int anchor,int head) {
+ Q_INVOKABLE void command(QString name,int anchor,int head,QString marker) {
   QTextCursor c(doc);c.setPosition(anchor);c.setPosition(head,QTextCursor::KeepAnchor);
   if(name=="undo")doc->undo(&c);
   else if(name=="redo")doc->redo(&c);
   else {
-   QString m=name=="bold"?"**":name=="italic"?"*":name=="strike"?"~~":"`";
+   QString m=marker; if(m.isEmpty())return;
    int lo=qMin(anchor,head),hi=qMax(anchor,head);
    c.beginEditBlock();c.setPosition(hi);c.insertText(m);c.setPosition(lo);c.insertText(m);c.endEditBlock();
    c.setPosition(anchor+m.size());c.setPosition(head+m.size(),QTextCursor::KeepAnchor);

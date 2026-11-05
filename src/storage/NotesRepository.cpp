@@ -1,6 +1,9 @@
 #include "NotesRepository.h"
 #include "MarkdownFile.h"
 #include "SafeCommit.h"
+#include "LinkPaths.h"
+#include "TrashFiles.h"
+#include "KnowledgeIndex.h"
 #include "RepositoryTestHooks.h"
 #include <QDir>
 #include <QDirIterator>
@@ -9,12 +12,17 @@
 #include <QFileSystemWatcher>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QJsonArray>
 #include <QSaveFile>
 #include <QTimer>
 #include <QUuid>
 #include <QDateTime>
 #include <QRegularExpression>
+#include <QMimeDatabase>
+#include <QUrl>
 #include <QLockFile>
+#include <QSet>
+#include <QScopedValueRollback>
 #include <memory>
 #include <algorithm>
 
@@ -65,6 +73,10 @@ signals:
     void finished(quint64, const QString &, const QVariantMap &);
     void changed(const QVariantMap &);
 private:
+    bool editingTags = false;
+    Knowledge::Index index;
+    QVariantMap cachedListing;
+    QString indexRoot;
     QString root;
     quint64 generation = 0;
     QJsonObject metadata;
@@ -118,6 +130,7 @@ private:
     }
     QVariantMap scan(bool notify) {
         const bool initial = !watcher;
+        if(indexRoot!=root){index=Knowledge::Index();cachedListing.clear();indexRoot=root;}
         if (!notify && RepositoryTestHooks::beforeScan) RepositoryTestHooks::beforeScan(false);
         QVariantList notes, folders, duplicates;
         QHash<QString, QString> hashes;
@@ -134,7 +147,7 @@ private:
             if (folderPath.isEmpty()) return failure("unsafePath", folder);
             const QDir dir(folderPath);
             for (const QFileInfo &fi : dir.entryInfoList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot | QDir::Hidden, QDir::Name)) {
-                if (fi.isSymLink() || fi.fileName() == ".nextnotes" || fi.fileName() == "assets") continue;
+                if (fi.isSymLink() || fi.fileName() == ".nextnotes" || fi.fileName() == ".git" || fi.fileName() == "assets") continue;
                 const QString rel = folder.isEmpty() ? fi.fileName() : folder + u'/' + fi.fileName();
                 const QString absolute = path(rel);
                 if (absolute.isEmpty()) continue;
@@ -143,6 +156,8 @@ private:
                 QByteArray bytes;
                 if (!readBytes(absolute, bytes, error)) return failure("readFailed", rel + ": " + error);
                 auto doc = MarkdownFile::decode(bytes);
+                const QString title=MarkdownFile::title(doc.text,fi.completeBaseName());
+                index.put(rel,doc.text,doc.hash,title);
                 hashes.insert(rel, doc.hash);
                 watchPaths.append(absolute);
                 QJsonObject entry = entries.value(rel).toObject();
@@ -154,11 +169,12 @@ private:
                 if (entry.value("id").toString() != stableId) { entry.insert("id", stableId); dirty = true; }
                 if (!entry.contains("createdUtc")) { entry.insert("createdUtc", now()); dirty = true; }
                 entries.insert(rel, entry);
-                notes.append(QVariantMap{{"path", rel}, {"id", stableId}, {"title", MarkdownFile::title(doc.text, fi.completeBaseName())},
-                    {"summary", summary(doc.text)}, {"baseHash", doc.hash}, {"favorite", entry.value("favorite").toBool()}, {"createdUtc", entry.value("createdUtc").toString()},
+                notes.append(QVariantMap{{"path", rel}, {"id", stableId}, {"title", title},
+                    {"summary", summary(doc.text)}, {"baseHash", doc.hash}, {"pinned", entry.value("pinned").toBool()}, {"favorite", entry.value("favorite").toBool()}, {"createdUtc", entry.value("createdUtc").toString()},
                     {"modifiedUtc", entry.value("modifiedUtc").toString()}, {"displayModifiedUtc", entry.value("savedHash").toString() == doc.hash ? entry.value("modifiedUtc").toString() : fi.lastModified().toUTC().toString(Qt::ISODateWithMs)}, {"timeSource", entry.value("savedHash").toString() == doc.hash ? "应用保存" : "文件时间"}, {"fileModifiedUtc", fi.lastModified().toUTC().toString(Qt::ISODateWithMs)}, {"readOnlyReason", doc.readOnlyReason}});
             }
         }
+        for(const auto &key:index.documents.keys())if(!hashes.contains(key))index.remove(key);
         for (const QString &key : entries.keys()) {
             if (!hashes.contains(key)) { entries.remove(key); dirty = true; }
         }
@@ -177,8 +193,10 @@ private:
             });
         }
         const auto oldPaths = watcher->directories() + watcher->files();
-        if (!oldPaths.isEmpty()) watcher->removePaths(oldPaths);
-        const QStringList unwatchable = watcher->addPaths(watchPaths);
+        const QSet<QString> previous(oldPaths.begin(),oldPaths.end()), wanted(watchPaths.begin(),watchPaths.end());
+        const auto removed=(previous-wanted).values(), added=(wanted-previous).values();
+        if (!removed.isEmpty()) watcher->removePaths(removed);
+        const QStringList unwatchable = added.isEmpty()?QStringList():watcher->addPaths(added);
         QVariantList changes;
         for (auto it = hashes.cbegin(); it != hashes.cend(); ++it)
             if (fingerprints.value(it.key()) != it.value()) changes.append(QVariantMap{{"path", it.key()}, {"hash", it.value()}, {"removed", false}});
@@ -187,12 +205,19 @@ private:
         // Silent scans must not consume changes awaiting the watcher debounce.
         if (notify || initial) fingerprints = hashes;
         else if (!changes.isEmpty() && !debounce->isActive()) debounce->start();
-        QVariantMap result{{"ok", true}, {"notes", notes}, {"folders", folders}, {"duplicateIds", duplicates}, {"unwatchedPaths", unwatchable}};
+        QVariantMap result{{"ok", true}, {"notes", notes}, {"folders", folders}, {"duplicateIds", duplicates}, {"unwatchedPaths", unwatchable},{"smartFolders",metadata.value("smartFolders").toObject().toVariantMap()}};
+        cachedListing=result;
         if (notify && (!changes.isEmpty() || !unwatchable.isEmpty())) emit changed({{"library", root}, {"generation", generation}, {"changes", changes}, {"listing", result}});
         return result;
     }
+    bool rememberVersion(const QString &,const QString &,const QByteArray &,QString &);
+    QVariantMap knowledge(const QString &,const QVariantMap &);
+    QVariantMap relocate(const QString &, const QString &, const QString & = {});
     QVariantMap dispatch(const QString &op, const QVariantMap &a);
 };
+
+#include "Relocate.inc"
+#include "Knowledge.inc"
 
 QVariantMap RepositoryWorker::dispatch(const QString &op, const QVariantMap &a)
 {
@@ -252,6 +277,44 @@ QVariantMap RepositoryWorker::dispatch(const QString &op, const QVariantMap &a)
     if (root.isEmpty()) return failure("noLibrary");
     if (a.contains("generation") && a.value("generation").toULongLong() != generation) return failure("staleGeneration");
     if (QFileInfo(root).isSymLink() || QFileInfo(root).canonicalFilePath() != root) return failure("unsafePath");
+    if (op == "recoverMove") {
+        const QString journal=path(".nextnotes/move.json",true); QByteArray bytes;
+        if(!readBytes(journal,bytes,error))return failure("readFailed");
+        const auto record=QJsonDocument::fromJson(bytes).object();
+        const QString from=record.value("from").toString(), to=record.value("to").toString();
+        if(path(from).isEmpty()||path(to).isEmpty()||!record.value("entries").isArray()||!record.value("metadata").isObject())return failure("recoveryCorrupt");
+        const bool moved=!QFileInfo::exists(path(from))&&QFileInfo::exists(path(to));
+        if(!moved && (!QFileInfo::exists(path(from))||QFileInfo::exists(path(to))))return failure("conflict");
+        auto currentPath=[&](QString p){return moved?(p==from?to:p.startsWith(from+'/')?to+p.mid(from.size()):p):p;};
+        for(auto v:record.value("entries").toArray()) {
+            auto e=v.toObject(); QString p=currentPath(e.value("path").toString()); QByteArray disk;
+            if(path(p).isEmpty()||!readBytes(path(p),disk,error))return failure("recoveryCorrupt");
+            if(disk!=QByteArray::fromBase64(e.value("before").toString().toLatin1())&&disk!=QByteArray::fromBase64(e.value("after").toString().toLatin1()))return failure("conflict");
+        }
+        for(auto v:record.value("entries").toArray()) {
+            auto e=v.toObject();QString p=currentPath(e.value("path").toString());QByteArray before=QByteArray::fromBase64(e.value("before").toString().toLatin1()),disk;
+            if(!readBytes(path(p),disk,error))return failure("readFailed");
+            if(disk==before)continue;
+            QString retained; QJsonObject rec{{"path",p},{"baseHash",MarkdownFile::digest(disk)},{"newHash",MarkdownFile::digest(before)}};
+            if(!SafeCommit::commit(path(p),before,path(".nextnotes/commits/"+uuid()+".intent",true),QJsonDocument(rec).toJson(QJsonDocument::Compact),true,retained,error))return failure("writeFailed");
+            QByteArray displaced;if(!readBytes(retained,displaced,error)||displaced!=disk){
+#ifdef Q_OS_LINUX
+                ::syscall(SYS_renameat2,AT_FDCWD,QFile::encodeName(retained).constData(),AT_FDCWD,QFile::encodeName(path(p)).constData(),2U);
+#endif
+                return failure("conflict");
+            }
+        }
+#ifdef Q_OS_LINUX
+        if(moved && ::syscall(SYS_renameat2,AT_FDCWD,QFile::encodeName(path(to)).constData(),AT_FDCWD,QFile::encodeName(path(from)).constData(),1U)!=0)return failure("moveFailed");
+#else
+        if(moved)return failure("moveFailed");
+#endif
+        metadata=record.value("metadata").toObject();if(!persist(error))return failure("metadataWriteFailed");
+        if(!QFile::remove(journal))return failure("writeFailed");
+        opened.clear();fingerprints.clear();return scan(false);
+    }
+    if(QFileInfo::exists(path(".nextnotes/move.json",true)) && !QStringList{"read","list","search","recovery","recoveryVersion","checkpoint"}.contains(op))return failure("pendingRelocation");
+    if(QStringList{"knowledge","linkCandidates","resolveWiki","history","historyVersion","setProperty","smartSave","smartDelete","reindex","templates","templateSave","templateDelete","fromTemplate","dailyNote","createWiki","tagPlan","tagBatch"}.contains(op))return knowledge(op,a);
     if (op == "recoveryVersion" || op == "recoverCommit") {
         const QString token = a.value("token").toString();
         if (token.contains('/') || !token.endsWith(".intent")) return failure("recoveryCorrupt", "恢复记录名称无效");
@@ -290,32 +353,228 @@ QVariantMap RepositoryWorker::dispatch(const QString &op, const QVariantMap &a)
         }
         return {{"ok", true}, {"text", document.text}, {"bytes", bytes}, {"version", version}, {"hash", expected}};
     }
+    if (op == "batch") {
+        const QString action = a.value("action").toString(), folder = a.value("folder").toString();
+        auto items = a.value("items").toList();
+        if (!QStringList{"trash", "move", "duplicate", "pin", "unpin", "favorite", "unfavorite"}.contains(action) || items.isEmpty() || items.size() > 200) return failure("invalidBatch");
+        if (action == "move" && !folder.isEmpty() && (path(folder).isEmpty() || !QFileInfo(path(folder)).isDir())) return failure("unsafePath");
+        QVariantList results; QSet<QString> seen; int succeeded = 0;
+        for (int itemIndex=0;itemIndex<items.size();++itemIndex) {
+            const auto value=items[itemIndex];
+            const auto item = value.toMap(); const QString rel = item.value("path").toString(), absolute = path(rel);
+            QVariantMap result; QByteArray bytes;
+            if (seen.contains(rel)) result = failure("duplicateRequest");
+            else if (absolute.isEmpty() || QFileInfo(rel).suffix().compare("md", Qt::CaseInsensitive)) result = failure("unsafePath");
+            else if (!readBytes(absolute, bytes, error)) result = failure("readFailed", error);
+            else if (item.value("baseHash").toString().isEmpty() || item.value("baseHash").toString() != MarkdownFile::digest(bytes)) result = failure("conflict");
+            else if (action == "move") {
+                const QString target = (folder.isEmpty() ? QString() : folder + '/') + QFileInfo(rel).fileName();
+                if (target == rel) result = {{"ok", true}, {"newPath", rel}, {"unchanged", true}};
+                else result = dispatch("rename", {{"path", rel}, {"target", target}, {"baseHash", item.value("baseHash")}});
+            } else if (action == "duplicate") {
+                const QFileInfo source(rel); QString target;
+                for (int n = 1; n <= 10000; ++n) {
+                    const QString name = source.completeBaseName() + " 副本" + (n == 1 ? QString() : " " + QString::number(n)) + ".md";
+                    target = source.path() == "." ? name : source.path() + '/' + name;
+                    if (!QFileInfo::exists(path(target))) break;
+                }
+                result = dispatch("saveAs", {{"path", target}, {"text", MarkdownFile::decode(bytes).text}, {"newIdentity", true}});
+            } else if (action == "trash") result = dispatch("trash", {{"path", rel}, {"baseHash", item.value("baseHash")}});
+            else if (action == "pin" || action == "unpin") result = dispatch("pin", {{"path", rel}, {"pinned", action == "pin"}});
+            else result = dispatch("favorite", {{"path", rel}, {"favorite", action == "favorite"}});
+            for (int next=itemIndex+1;next<items.size();++next) {
+                auto pending=items[next].toMap();const auto updated=result.value("rewrittenHashes").toMap().value(pending.value("path").toString()).toMap();
+                if(!updated.isEmpty() && pending.value("baseHash")==updated.value("before")){pending.insert("baseHash",updated.value("after"));items[next]=pending;}
+            }
+            seen.insert(rel);
+            // Return only per-item outcomes, never entire scan listings/documents.
+            QVariantMap outcome{{"path", rel}, {"ok", result.value("ok").toBool()}};
+            for (const auto &key : {"error", "detail", "newPath", "trashToken", "unchanged"}) if (result.contains(key)) outcome.insert(key, result.value(key));
+            if (action == "duplicate" && result.value("ok").toBool()) outcome.insert("newPath", result.value("path"));
+            if (outcome.value("ok").toBool()) ++succeeded;
+            results.append(outcome);
+        }
+        return {{"ok", true}, {"action", action}, {"results", results}, {"succeeded", succeeded}, {"failed", results.size() - succeeded}};
+    }
+    if (op == "trashFolder" || op == "restoreFolder") {
+        const bool restore=op=="restoreFolder";const QString token=restore?a.value("token").toString():uuid();
+        auto trash=metadata.value("folderTrash").toObject();auto record=trash.value(token).toObject();
+        if(restore&&record.value("purging").toBool())return failure("purgeIncomplete");
+        const QString relative=restore?record.value("source").toString():a.value("path").toString();
+        const QString stored=".nextnotes/folder-trash/"+token;
+        if(token.contains('/')||token.contains("..")||path(relative).isEmpty())return failure("unsafePath");
+        const QString source=path(restore?stored:relative,restore),target=path(restore?relative:stored,!restore);
+        if(source.isEmpty()||target.isEmpty()||!QFileInfo(source).isDir()||QFileInfo::exists(target))return failure("alreadyExists");
+        if(!restore) {
+            if(!QDir().mkpath(path(".nextnotes/folder-trash",true)))return failure("writeFailed");
+            QJsonObject savedEntries;
+            QDirIterator it(source,QDir::AllEntries|QDir::Hidden|QDir::System|QDir::NoDotAndDotDot,QDirIterator::Subdirectories);
+            while(it.hasNext()){it.next();if(it.fileInfo().isSymLink())return failure("unsafePath");}
+            const auto entries=metadata.value("entries").toObject();
+            for(auto it=entries.begin();it!=entries.end();++it)if(it.key().startsWith(relative+'/')) {
+                if(memoryDrafts.contains(it.key())||QFileInfo::exists(draftPath(it.key())))return failure("pendingDrafts");
+                savedEntries.insert(it.key(),it.value());
+            }
+            record={{"source",relative},{"entries",savedEntries},{"deletedUtc",now()}};
+            trash.insert(token,record);metadata.insert("folderTrash",trash);if(!persist(error))return failure("metadataWriteFailed");
+        }
+#ifdef Q_OS_LINUX
+        if(::syscall(SYS_renameat2,AT_FDCWD,QFile::encodeName(source).constData(),AT_FDCWD,QFile::encodeName(target).constData(),1U)!=0)return failure("moveFailed");
+#else
+        return failure("moveFailed");
+#endif
+        if(restore) {
+            auto entries=metadata.value("entries").toObject();const auto saved=record.value("entries").toObject();
+            for(auto it=saved.begin();it!=saved.end();++it)entries.insert(it.key(),it.value());
+            metadata.insert("entries",entries);trash.remove(token);metadata.insert("folderTrash",trash);
+            if(!persist(error))return failure("metadataWriteFailed");
+        }
+        opened.clear();fingerprints.clear();auto result=scan(false);result.insert("trashToken",token);return result;
+    }
+    if (op == "renameFolder" || op == "removeFolder") {
+        const QString relative = a.value("path").toString(), source = path(relative);
+        if (source.isEmpty() || !QFileInfo(source).isDir()) return failure("unsafePath");
+        if (op == "renameFolder") return relocate(relative, a.value("target").toString());
+        if (!QDir(source).entryList(QDir::AllEntries | QDir::Hidden | QDir::System | QDir::NoDotAndDotDot).isEmpty()) return failure("folderNotEmpty");
+        return QDir().rmdir(source) ? QVariantMap{{"ok", true}} : failure("moveFailed");
+    }
+
     if (op == "list") return scan(false);
     if (op == "search") {
-        auto listing = scan(false);
+        auto listing = a.value("indexed").toBool()&&indexRoot==root&&!cachedListing.isEmpty()?cachedListing:scan(false);
         if (!listing.value("ok").toBool()) return listing;
-        const QString query = a.value("query").toString(), filter = a.value("filter").toString();
+        QString query = a.value("query").toString();const QString filter = a.value("filter").toString();
+        QStringList requiredTags;QVariantMap requiredProps;QString folder;bool favorite=false;
+        QRegularExpression terms(QString::fromUtf8(R"rx((?:^|\s)(tag|folder|is|prop):("(?:[^"\\]|\\.)*"|'[^']*'|[^\s]+))rx"));auto termsIt=terms.globalMatch(query);QList<QPair<int,int>> spans;
+        while(termsIt.hasNext()){auto m=termsIt.next();QString key=m.captured(1),value=Knowledge::scalar(m.captured(2));if(key=="tag")requiredTags.append(value);if(key=="folder")folder=value;if(key=="is"&&value=="favorite")favorite=true;if(key=="prop"&&value.contains('='))requiredProps.insert(value.section('=',0,0),value.section('=',1));spans.append({int(m.capturedStart()),int(m.capturedLength())});}
+        for(auto it=spans.crbegin();it!=spans.crend();++it)query.remove(it->first,it->second);query=query.trimmed();
+        const auto candidates=index.candidates(query);
         QVariantList matches;
         for (const auto &value : listing.value("notes").toList()) {
             auto note = value.toMap();
             const QString relative = note.value("path").toString();
             if (filter == "favorite" && !note.value("favorite").toBool()) continue;
             if (filter.startsWith("folder:") && !relative.startsWith(filter.mid(7) + '/')) continue;
-            QByteArray bytes;
-            if (!readBytes(path(relative), bytes, error)) return failure("readFailed", relative + ": " + error);
-            const QString text = MarkdownFile::decode(bytes).text;
+            if(!candidates.contains(relative))continue;
+            const auto doc=index.documents.value(relative);const QString text=doc.text;
+            const auto tags=doc.props.value("tags").toStringList();bool accepted=true;for(const auto &tag:requiredTags)if(!tags.contains(tag))accepted=false;
+            for(auto it=requiredProps.begin();it!=requiredProps.end();++it)if(doc.props.value(it.key()).toString()!=it.value().toString())accepted=false;
+            if(!accepted||(!folder.isEmpty()&&!relative.startsWith(folder+'/'))||(favorite&&!note.value("favorite").toBool()))continue;
+            note.insert("tags",tags);note.insert("properties",doc.props);
             const int position = query.isEmpty() ? -1 : text.indexOf(query, 0, Qt::CaseInsensitive);
             if (!query.isEmpty() && position < 0 && !note.value("title").toString().contains(query, Qt::CaseInsensitive)) continue;
-            note.insert("match", position);
+            note.insert("match", position);note.insert("matchText",query);
             if (position >= 0) note.insert("summary", text.mid(qMax(0, position - 32), 150).simplified());
             matches.append(note);
         }
-        std::stable_sort(matches.begin(), matches.end(), [](const QVariant &left, const QVariant &right) {
-            return left.toMap().value("displayModifiedUtc").toString() > right.toMap().value("displayModifiedUtc").toString();
+        const QString sort = a.value("sort", "modified").toString();
+        const bool ascending = a.value("ascending", false).toBool();
+        std::stable_sort(matches.begin(), matches.end(), [sort, ascending](const QVariant &left, const QVariant &right) {
+            const auto l = left.toMap(), r = right.toMap();
+            if (l.value("pinned").toBool() != r.value("pinned").toBool()) return l.value("pinned").toBool();
+            const QString field = sort == "title" ? "title" : sort == "created" ? "createdUtc" : "displayModifiedUtc";
+            const int compared = sort == "title" ? QString::localeAwareCompare(l.value(field).toString(), r.value(field).toString()) : QString::compare(l.value(field).toString(), r.value(field).toString());
+            if (compared == 0) return l.value("path").toString() < r.value("path").toString();
+            return ascending ? compared < 0 : compared > 0;
         });
+        listing.insert("smartFolders",metadata.value("smartFolders").toObject().toVariantMap());
         listing.insert("allNotes", listing.value("notes"));
-        listing.insert("notes", matches);
+        listing.insert("notes", matches);listing.insert("indexDocuments",index.documents.size());listing.insert("indexUpdates",index.updates);
         return listing;
+    }
+    if (op == "importAttachment") {
+        const QString note = a.value("path").toString();
+        if (path(note).isEmpty()) return failure("unsafePath");
+        QByteArray bytes;
+        QString name = a.value("name").toString();
+        const QUrl source(a.value("source").toString());
+        if (!source.isEmpty()) {
+            if (!source.isLocalFile() || !QFileInfo(source.toLocalFile()).isFile() || QFileInfo(source.toLocalFile()).size() > 32 * 1024 * 1024) return failure("attachmentTooLarge");
+            name = QFileInfo(source.toLocalFile()).fileName();
+            if (!readBytes(source.toLocalFile(), bytes, error)) return failure("readFailed");
+        } else {
+            const QByteArray encoded = a.value("data").toByteArray();
+            if (encoded.size() > 45 * 1024 * 1024) return failure("attachmentTooLarge");
+            const auto decoded = QByteArray::fromBase64Encoding(encoded, QByteArray::AbortOnBase64DecodingErrors);
+            if (!decoded) return failure("invalidAttachment");
+            bytes = decoded.decoded;
+        }
+        if (bytes.isEmpty() || bytes.size() > 32 * 1024 * 1024) return failure("attachmentTooLarge");
+        QMimeDatabase database;
+        const auto mime = database.mimeTypeForData(bytes);
+        QString extension = QFileInfo(name).suffix().toLower();
+        if (!QRegularExpression("^[a-z0-9]{1,8}$").match(extension).hasMatch()) extension = mime.preferredSuffix();
+        if (extension.isEmpty()) extension = "bin";
+        const QString relative = "assets/" + MarkdownFile::digest(bytes).left(32) + '.' + extension;
+        const QString folder = path("assets", true), target = path(relative, true);
+        if (folder.isEmpty() || target.isEmpty() || !QDir().mkpath(folder)) return failure("unsafePath");
+        if (QFileInfo::exists(target)) {
+            QByteArray existing;
+            if (!readBytes(target, existing, error) || existing != bytes) return failure("alreadyExists");
+        } else if (!atomicWrite(target, bytes, error)) return failure("attachmentWriteFailed");
+        auto names = metadata.value("attachments").toObject();
+        names.insert(relative, QFileInfo(name).fileName()); metadata.insert("attachments", names);
+        if (!persist(error)) return failure("metadataWriteFailed");
+        const QString from = QFileInfo(path(note)).absolutePath();
+        return {{"ok", true}, {"relative", relative}, {"url", QDir(from).relativeFilePath(target)}, {"name", name}, {"image", mime.name().startsWith("image/")}, {"bytes", bytes.size()}};
+    }
+    if (op == "attachments" || op == "quarantineAttachment" || op == "restoreAttachment") {
+        const QString folder = path("assets", true), trash = path(".nextnotes/attachment-trash", true);
+        if (folder.isEmpty() || trash.isEmpty()) return failure("unsafePath");
+        if (op == "restoreAttachment") {
+            const QString token = a.value("token").toString();
+            if (!QRegularExpression("^[a-f0-9-]{36}$").match(token).hasMatch()) return failure("unsafePath");
+            QByteArray recordBytes;
+            const QString manifest = path(".nextnotes/attachment-trash/" + token + ".json", true);
+            if (manifest.isEmpty() || !readBytes(manifest, recordBytes, error)) return failure("notFound");
+            const auto record = QJsonDocument::fromJson(recordBytes).object();
+            const QString relative = record.value("relative").toString();
+            if (!relative.startsWith("assets/") || relative.mid(7).contains('/')) return failure("unsafePath");
+            const QString target = path(relative, true), stored = path(".nextnotes/attachment-trash/" + token + ".data", true);
+            QByteArray data;
+            if (target.isEmpty() || stored.isEmpty() || !readBytes(stored, data, error) || MarkdownFile::digest(data) != record.value("hash").toString()) return failure("attachmentChanged");
+            if (QFileInfo::exists(target)) return failure("alreadyExists");
+            if (!QDir().mkpath(folder) || !QFile::rename(stored, target)) return failure("restoreFailed");
+            QFile::remove(manifest);
+            return {{"ok", true}};
+        }
+        const auto listing = scan(false);
+        if (!listing.value("ok").toBool()) return listing;
+        QStringList texts;
+        for (const auto &entry : listing.value("notes").toList()) {
+            QByteArray bytes;
+            if (!readBytes(path(entry.toMap().value("path").toString()), bytes, error)) return failure("readFailed");
+            texts.append(MarkdownFile::decode(bytes).text);
+        }
+        QVariantList items, removed;
+        for (const auto &file : QDir(folder).entryInfoList(QDir::Files | QDir::NoSymLinks, QDir::Name)) {
+            const QString relative = "assets/" + file.fileName();
+            if (path(relative, true).isEmpty()) continue;
+            int references = 0;
+            for (const QString &text : texts) if (text.contains(file.fileName(), Qt::CaseSensitive)) ++references;
+            if (op == "quarantineAttachment" && relative == a.value("relative").toString()) {
+                if (references) return failure("attachmentInUse");
+                const QString token = uuid();
+                if (!QDir().mkpath(trash)) return failure("attachmentWriteFailed");
+                const QString stored = path(".nextnotes/attachment-trash/" + token + ".data", true);
+                const QString manifest = path(".nextnotes/attachment-trash/" + token + ".json", true);
+                QByteArray data;
+                if (stored.isEmpty() || manifest.isEmpty() || !readBytes(file.absoluteFilePath(), data, error)) return failure("unsafePath");
+                const QJsonObject record{{"relative", relative}, {"hash", MarkdownFile::digest(data)}, {"name", file.fileName()}, {"removedUtc", now()}};
+                if (!atomicWrite(manifest, QJsonDocument(record).toJson(), error)) return failure("attachmentWriteFailed");
+                if (!QFile::rename(file.absoluteFilePath(), stored)) { QFile::remove(manifest); return failure("moveFailed"); }
+                return {{"ok", true}, {"token", token}};
+            }
+            items.append(QVariantMap{{"relative", relative}, {"name", metadata.value("attachments").toObject().value(relative).toString(file.fileName())}, {"bytes", file.size()}, {"references", references}});
+        }
+        if (op == "quarantineAttachment") return failure("notFound");
+        for (const auto &file : QDir(trash).entryInfoList({"*.json"}, QDir::Files | QDir::NoSymLinks, QDir::Name)) {
+            const QString manifest = path(".nextnotes/attachment-trash/" + file.fileName(), true);
+            QByteArray data; if (manifest.isEmpty() || !readBytes(manifest, data, error)) continue;
+            auto item = QJsonDocument::fromJson(data).object().toVariantMap();
+            item.insert("token", file.completeBaseName()); removed.append(item);
+        }
+        return {{"ok", true}, {"items", items}, {"removed", removed}};
     }
     if (op == "createFolder") {
         const QString target = path(a.value("path").toString());
@@ -324,11 +583,40 @@ QVariantMap RepositoryWorker::dispatch(const QString &op, const QVariantMap &a)
         if (!QDir().mkdir(target)) return failure("createFolderFailed");
         return {{"ok", true}, {"listing", scan(false)}};
     }
+    if (op == "trashBatch") {
+        const QString action=a.value("action").toString();const auto items=a.value("items").toList();
+        if(!QStringList{"restore","purge"}.contains(action)||items.isEmpty())return failure("invalidBatch");
+        QVariantList results;QSet<QString> seen;int succeeded=0;
+        for(auto value:items) {
+            auto item=value.toMap();const QString kind=item.value("kind").toString(),token=item.value("token").toString();
+            const QString key=kind+":"+token, bucket=kind=="folder"?"folderTrash":"trash";
+            auto records=metadata.value(bucket).toObject();auto record=records.value(token).toObject();
+            QVariantMap result;const bool folder=kind=="folder";
+            const QString relative=folder?".nextnotes/folder-trash/"+token:".nextnotes/trash/"+token+".md", stored=path(relative,true);
+            if(!QStringList{"note","folder"}.contains(kind)||!QRegularExpression("^[a-f0-9-]{36}$").match(token).hasMatch()||stored.isEmpty()||seen.contains(key))result=failure("unsafePath");
+            else if(record.isEmpty()||(!folder&&record.value("stored").toString()!=relative))result=failure("notFound");
+            else if(action=="restore"&&record.value("purging").toBool())result=failure("purgeIncomplete");
+            else if(record.value("purging").toBool()&&!QFileInfo::exists(stored)&&action=="purge") {
+                records.remove(token);metadata.insert(bucket,records);if(persist(error))result={{"ok",true}};else{records.insert(token,record);metadata.insert(bucket,records);result=failure("metadataWriteFailed");}
+            } else if(item.value("fingerprint").toString().isEmpty()||item.value("fingerprint").toString()!=TrashFiles::fingerprint(stored))result=failure("trashChanged");
+            else if(action=="restore")result=dispatch(folder?"restoreFolder":"restore",{{"token",token}});
+            else {
+                record.insert("purging",true);records.insert(token,record);metadata.insert(bucket,records);
+                if(!persist(error))result=failure("metadataWriteFailed");
+                else if(!TrashFiles::remove(stored,folder,item.value("fingerprint").toString()))result=failure("purgeIncomplete");
+                else {records.remove(token);metadata.insert(bucket,records);if(persist(error))result={{"ok",true}};else{records.insert(token,record);metadata.insert(bucket,records);result=failure("metadataWriteFailed");}}
+            }
+            seen.insert(key);if(result.value("ok").toBool())++succeeded;
+            QVariantMap outcome{{"ok",result.value("ok")},{"kind",kind},{"token",token},{"path",record.value("source").toString()}};if(result.contains("error"))outcome.insert("error",result.value("error"));results.append(outcome);
+        }
+        return {{"ok",true},{"action",action},{"results",results},{"succeeded",succeeded},{"failed",results.size()-succeeded}};
+    }
     if (op == "restore") {
         const QString token = a.value("token").toString();
         auto trash = metadata.value("trash").toObject();
         if (!trash.contains(token)) return failure("notFound");
         const auto record = trash.value(token).toObject();
+        if(record.value("purging").toBool())return failure("purgeIncomplete");
         const QString rel = a.value("target", record.value("source").toString()).toString();
         const QString target = path(rel), source = path(record.value("stored").toString(), true);
         if (target.isEmpty() || source.isEmpty() || QFileInfo(target).suffix().compare("md", Qt::CaseInsensitive) != 0) return failure("unsafePath");
@@ -387,15 +675,24 @@ QVariantMap RepositoryWorker::dispatch(const QString &op, const QVariantMap &a)
                 || !record.object().value("newHash").isString()
                 || content.mid(separator + 1).isEmpty()) return failure("recoveryCorrupt", fi.fileName());
             QVariantList versions;
-            for (const auto &version : {QString("before"), QString("pending")}) {
+            if (a.value("includeCommitText", true).toBool()) for (const auto &version : {QString("before"), QString("pending")}) {
                 const auto result = dispatch("recoveryVersion", {{"token", fi.fileName()}, {"version", version}});
                 versions.append(QVariantMap{{"version", version}, {"available", result.value("ok").toBool()}, {"text", result.value("text")}});
             }
             commits.append(QVariantMap{{"token", fi.fileName()}, {"name", QFileInfo(record.object().value("path").toString()).fileName()}, {"time", fi.lastModified().toString(Qt::ISODate)}, {"versions", versions}});
         }
+        QVariantList trashItems;
+        for(const QString kind:{QString("note"),QString("folder")}) {
+            const auto records=metadata.value(kind=="folder"?"folderTrash":"trash").toObject();
+            for(auto it=records.begin();it!=records.end();++it){
+                const QString relative=kind=="folder"?".nextnotes/folder-trash/"+it.key():".nextnotes/trash/"+it.key()+".md";
+                const QString stored=path(relative,true);auto item=it.value().toObject().toVariantMap();
+                item.insert("kind",kind);item.insert("token",it.key());item.insert("fingerprint",stored.isEmpty()?QString():TrashFiles::fingerprint(stored));trashItems.append(item);
+            }
+        }
         QVariantList inMemory;
         for (const auto &draft : memoryDrafts) inMemory.append(draft);
-        return {{"ok", true}, {"drafts", drafts}, {"commits", commits}, {"memoryDrafts", inMemory}, {"trash", metadata.value("trash").toObject().toVariantMap()}};
+        return {{"ok", true}, {"trashItems",trashItems}, {"drafts", drafts}, {"commits", commits}, {"memoryDrafts", inMemory}, {"folderTrash",metadata.value("folderTrash").toObject().toVariantMap()}, {"trash", metadata.value("trash").toObject().toVariantMap()}};
     }
     const QString rel = a.value("path").toString();
     const QString absolute = path(rel);
@@ -410,6 +707,7 @@ QVariantMap RepositoryWorker::dispatch(const QString &op, const QVariantMap &a)
         QByteArray bytes;
         if (!readBytes(absolute, bytes, error)) return failure("readFailed", error);
         auto d = MarkdownFile::decode(bytes);
+        if(QFileInfo::exists(path(".nextnotes/move.json",true)))d.readOnlyReason="pendingRelocation";
         opened.insert(rel, d);
         return documentResult(rel, d);
     }
@@ -473,7 +771,7 @@ QVariantMap RepositoryWorker::dispatch(const QString &op, const QVariantMap &a)
         if (text.contains(u'\r') || text.contains(QChar(0x2028)) || text.contains(QChar(0x2029)) || text.contains(QChar(0)))
             return failSave("unsupportedSeparator", "Keep the draft; unsupported separators cannot be encoded safely.");
         if (!MarkdownFile::formatError(text).isEmpty()) return failSave("unsupportedFormat", MarkdownFile::formatError(text));
-        auto listing = scan(false);
+        auto listing = editingTags ? cachedListing : scan(false);
         if (!listing.value("ok").toBool()) return failSave("scanFailed", listing.value("detail").toString());
         if (!listing.value("duplicateIds").toList().isEmpty()) return failSave("duplicateId", "Resolve duplicated IDs before saving.");
         const QString proposedId = MarkdownFile::field(text, "nextnotes_id");
@@ -488,7 +786,10 @@ QVariantMap RepositoryWorker::dispatch(const QString &op, const QVariantMap &a)
             auto result = failSave("conflict", "External file and local recovery draft are both retained.");
             result.insert("diskHash", MarkdownFile::digest(disk)); result.insert("diskText", MarkdownFile::decode(disk).text); return result;
         }
-        const QByteArray bytes = MarkdownFile::encode(d, text);
+        auto encoding = d; if(a.value("sourceNewlines").toBool())encoding.trailingNewline=text.endsWith(u'\n');
+        const QByteArray bytes = MarkdownFile::encode(encoding, text);
+        const QString historyId=metadata.value("entries").toObject().value(rel).toObject().value("id").toString();
+        if(bytes!=disk&&!rememberVersion(historyId,rel,disk,error))return failSave("historyWriteFailed",error);
         if (bytes != disk) {
             QString retained;
             const QString journal = path(".nextnotes/commits/" + uuid() + ".intent", true);
@@ -508,16 +809,19 @@ QVariantMap RepositoryWorker::dispatch(const QString &op, const QVariantMap &a)
         entry.insert("savedHash", MarkdownFile::digest(bytes)); entry.insert("modifiedUtc", now()); entries.insert(rel, entry); metadata.insert("entries", entries);
         if (!persist(error)) return failSave("metadataWriteFailed", error);
         auto saved = MarkdownFile::decode(bytes); opened.insert(rel, saved); clearDraft(rel);
-        auto result = documentResult(rel, saved); result.insert("listing", scan(false)); return result;
+        auto result = documentResult(rel, saved);
+        if (!editingTags) result.insert("listing", scan(false));
+        return result;
     }
-    if (op == "favorite") {
+    if (op == "favorite" || op == "pin") {
         if (!QFileInfo(absolute).isFile()) return failure("notFound");
         auto entries = metadata.value("entries").toObject(); auto entry = entries.value(rel).toObject();
-        entry.insert("favorite", a.value("favorite").toBool()); entries.insert(rel, entry);
+        entry.insert(op == "pin" ? "pinned" : "favorite", a.value(op == "pin" ? "pinned" : "favorite").toBool()); entries.insert(rel, entry);
         const auto previous = metadata; metadata.insert("entries", entries);
         if (!persist(error)) { metadata = previous; return failure("metadataWriteFailed", error); }
         return {{"ok", true}};
     }
+    if (op == "rename") return relocate(rel, a.value("target").toString(), a.value("baseHash").toString());
     if (op == "rename" || op == "trash") {
         if (memoryDrafts.contains(rel) || QFileInfo::exists(draftPath(rel))) return failure("pendingDrafts");
         QByteArray disk;
@@ -528,6 +832,11 @@ QVariantMap RepositoryWorker::dispatch(const QString &op, const QVariantMap &a)
         const QString target = path(targetRel, op == "trash");
         if (target.isEmpty() || QFileInfo(target).suffix().compare("md", Qt::CaseInsensitive) != 0) return failure("unsafePath");
         if (QFileInfo::exists(target)) return failure("alreadyExists");
+        if (op == "rename" && QFileInfo(absolute).absolutePath() != QFileInfo(target).absolutePath()) {
+            // Until reference rewriting is available, never silently break relative references.
+            const QString text = MarkdownFile::decode(disk).text;
+            if (text.contains(QRegularExpression(QStringLiteral("\\]\\s*[(:]|\\[\\[|<(?:a|img|source)\\b"), QRegularExpression::CaseInsensitiveOption))) return failure("relativeLinks");
+        }
         auto entries = metadata.value("entries").toObject();
         auto entry = entries.value(rel).toObject();
         if (op == "trash") {

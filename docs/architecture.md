@@ -4,6 +4,12 @@
 
 ## 工程边界
 
+2026-11-05 标题栏补充：可见名称统一为“笔记”。搜索沿用邮件应用的宽窄模式：宽窗口显示 160px 输入框，窄窗口收起为按钮，点击或 Ctrl+Shift+F 展开；与首个窗口圆点的实际布局保持 10px 间距，缩窄窗口保留查询。正文／列表的分隔线贯穿标题栏。
+
+`NotesWindowControls.qml` 使用固定 Kos.Ui 版本的 `buttonLayout`／`externalDrawing`，可选加载应用内 `NativeWindowControls.qml`（`Kos.SurfaceShape.WindowControlSlot`）。只有宿主确认接管后隐藏客户端按钮；服务失效或模块缺失立即保留／恢复回退。不修改共享组件，也不新增桌面全局开关。
+
+VM 验证：`notes-chrome` 覆盖实际按钮几何、重排／删除、三／一／零按钮、模拟接管与服务失效、原生模块缺失和按钮动作。原生 UI 检查覆盖 540／1180／1440px 窗口、160px 搜索宽度、10px 间距、中文过滤、清空、缩放保留查询、快捷键和 Escape。VM 旧模块缺少适配类型；在隔离目录构建当前平台模块后加载成功，但 VM KWin 未提供接管协议（supported=false），因此不宣称真实合成器接管验收。记录见 `output/chrome-2026-11-05/`。
+
 工作目录为 NkNotes，工程暂用 NextNotes，程序名 nextnotes，尚未冻结发布用应用标识。独立 Qt 6.8+ C++17 / Qt Quick 宿主；不依赖 Quickshell、KWin 或 NextKde 服务。默认共享依赖为 Git 子模块 `third_party/nextkdeAppDemo`，上游 https://github.com/NextKde/nextkdeAppDemo.git，精确提交 `608847c9231121b888f11c4e5f84850ac95deda4`。不使用旁边组件工作区的未提交 API。
 
 CMake 链接 Kos::Ui 与 Kos::UiPlugin，QML 使用 Kos.Ui。开发覆盖仅通过 KOS_UI_SOURCE_DIR 显式提供；正式构建不得使用任意未固定的本地覆盖。Qt 开发依赖：Core、Gui、Qml、Quick、QuickControls2、QuickDialogs2、Svg。运行环境还需 QtQuick.Layouts、QtQuick.Window、QtQuick.Effects、QtQuick.Dialogs 和 Qt5Compat.GraphicalEffects QML 模块及 SVG 图像插件。保留上游 LICENSE / NOTICE.md 和预编译 QSB，不重新烘焙 Shader。

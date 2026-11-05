@@ -59,13 +59,16 @@ static QString scalar(QString v, bool &ok)
 }
 static QString parseField(const QString &text, const QString &key, bool &ok)
 {
+    if (!text.startsWith("---\n") && text != "---") return {};
     const auto lines = text.split(u'\n');
     if (lines.first() != "---") return {};
+    static const QRegularExpression idKey("^nextnotes_id\\s*:"), titleKey("^title\\s*:");
+    const QRegularExpression pattern=key=="nextnotes_id"?idKey:key=="title"?titleKey:QRegularExpression("^"+QRegularExpression::escape(key)+"\\s*:");
     QString result; bool seen = false, ended = false;
     for (int i = 1; i < lines.size(); ++i) {
         if (lines[i] == "---" || lines[i] == "...") { ended = true; break; }
         const QString line = lines[i].trimmed();
-        if (!line.contains(key)) continue;
+        if (!pattern.match(line).hasMatch()) continue;
         if (!lines[i].startsWith(key + u':')) { ok = false; continue; }
         if (seen) ok = false;
         seen = true; bool valid = true;
@@ -87,11 +90,16 @@ QString formatError(const QString &text)
 QString title(const QString &text, const QString &fileName)
 {
     const auto value = field(text, "title"); if (!value.isEmpty()) return value;
+    static const QRegularExpression fencePattern("^ {0,3}(`{3,}|~{3,})(.*)$");
+    static const QRegularExpression setextPattern("^ {0,3}=+[ \\t]*$");
+    static const QRegularExpression headingPattern("^ {0,3}#(?:[ \\t]+(.*)|$)");
+    static const QRegularExpression closingPattern("[ \\t]+#+[ \\t]*$");
+    static const QRegularExpression blockPattern("^(?: {4}|\\t| {0,3}(?:#{1,6}(?:[ \\t]|$)|>|[-+*][ \\t]|[0-9]+[.)][ \\t]|(?:[-*_][ \\t]*){3,}$|[-=]+[ \\t]*$))");
     QString paragraph;
     QChar fence; int length = 0; bool front = text.startsWith("---\n"); int n = 0;
     for (const QString &line : text.split(u'\n')) {
         if (front) { if (n++ && (line == "---" || line == "...")) front = false; continue; }
-        const auto m = QRegularExpression("^ {0,3}(`{3,}|~{3,})(.*)$").match(line);
+        const auto m = fencePattern.match(line);
         if (m.hasMatch()) {
             paragraph.clear();
             const auto run = m.captured(1);
@@ -100,13 +108,13 @@ QString title(const QString &text, const QString &fileName)
             continue;
         }
         if (!fence.isNull()) continue;
-        if (!paragraph.isEmpty() && QRegularExpression("^ {0,3}=+[ \\t]*$").match(line).hasMatch())
+        if (!paragraph.isEmpty() && setextPattern.match(line).hasMatch())
             return paragraph;
-        auto h = QRegularExpression("^ {0,3}#(?:[ \\t]+(.*)|$)").match(line);
-        if (h.hasMatch()) { QString t = h.captured(1); t.remove(QRegularExpression("[ \\t]+#+[ \\t]*$")); return t.trimmed(); }
+        auto h = headingPattern.match(line);
+        if (h.hasMatch()) { QString t = h.captured(1); t.remove(closingPattern); return t.trimmed(); }
         // A Setext underline belongs to the preceding paragraph, not an indented
         // code block, list, quote, thematic break, or another heading.
-        if (line.trimmed().isEmpty() || QRegularExpression("^(?: {4}|\\t| {0,3}(?:#{1,6}(?:[ \\t]|$)|>|[-+*][ \\t]|[0-9]+[.)][ \\t]|(?:[-*_][ \\t]*){3,}$|[-=]+[ \\t]*$))").match(line).hasMatch())
+        if (line.trimmed().isEmpty() || blockPattern.match(line).hasMatch())
             paragraph.clear();
         else {
             if (!paragraph.isEmpty()) paragraph += u' ' ;
