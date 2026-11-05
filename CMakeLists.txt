@@ -16,7 +16,7 @@ target_include_directories(nextnotes-storage PUBLIC src/storage)
 target_link_libraries(nextnotes-storage PUBLIC Qt6::Core)
 qt_add_executable(nextnotes src/main.cpp src/EditorSession.cpp src/EditorSession.h src/NotesController.cpp src/NotesController.h)
 qt_add_qml_module(nextnotes URI NextNotes VERSION 1.0 RESOURCE_PREFIX /qt/qml
-    QML_FILES qml/Main.qml qml/SourceEditor.qml qml/CommandRegistry.qml qml/NotesTokens.qml)
+    QML_FILES qml/Main.qml qml/SourceEditor.qml qml/CommandRegistry.qml qml/NotesTokens.qml qml/NoteReadingView.qml)
 target_link_libraries(nextnotes PRIVATE nextnotes-storage Kos::Ui Kos::UiPlugin Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::QuickDialogs2 Qt6::Svg)
 option(NEXTNOTES_BUILD_TESTS "Build editor contract tests (VM/CI only)" OFF)
 if(NEXTNOTES_BUILD_TESTS)

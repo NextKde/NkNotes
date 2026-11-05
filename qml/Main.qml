@@ -16,14 +16,39 @@ ApplicationWindow {
     title: controller.path ? controller.path + " — NextNotes" : "NextNotes"
     flags: Qt.Window | Qt.FramelessWindowHint
     color: AppTheme.contentBackground
+    font.family: tokens.uiFontFamily
     property bool allowClose: false
+    property bool readingMode: true
+    readonly property var currentNote: controller.notes.find(function(note) { return note.id === controller.selectedId && note.path === controller.path }) || ({})
+    function newNote() { readingMode = false; controller.createNote() }
+    function editNote() { readingMode = false; Qt.callLater(function() { source.editor.forceActiveFocus() }) }
     property bool sidebarRequested: controller.preference("sidebar", true)
     property bool listRequested: false
+    property bool compactSidebarRequested: false
+    function toggleNavigation() {
+        if (width >= 1000) sidebarRequested = !sidebarRequested
+        else if (width >= 800) compactSidebarRequested = !compactSidebarRequested
+        else listRequested = !showList
+    }
+    function revealList() { compactSidebarRequested = false; listRequested = true }
+    // Presentation-only cleanup: the repository remains the source of Markdown.
+    function summaryText(value) {
+        return String(value || "")
+            .replace(/(^|\s)#{1,6}\s+/g, "$1")
+            .replace(/(^|\s)(?:[-+*]\s+)?\[[ xX]\]\s*/g, "$1")
+            .replace(/(^|\s)[-+*]\s+/g, "$1")
+            .replace(/(^|\s)>\s*/g, "$1")
+            .replace(/!?(\[([^\]]+)\])\([^)]*\)/g, "$2")
+            .replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, "$2")
+            .replace(/\[\[([^\]]+)\]\]/g, "$1")
+            .replace(/(\*\*|__|~~|`)(.*?)\1/g, "$2")
+            .replace(/\s+/g, " ").trim() || "空白笔记"
+    }
     property real sidebarWidth: controller.preference("sidebarWidth", tokens.sidebarWidth)
     property real listWidth: controller.preference("listWidth", tokens.listWidth)
     readonly property bool hasLibrary: controller.library.length > 0
-    readonly property bool showSidebar: hasLibrary && sidebarRequested && width >= 1000
-    readonly property bool showList: hasLibrary && (width >= 800 || listRequested || !controller.path)
+    readonly property bool showSidebar: hasLibrary && (width >= 1000 ? sidebarRequested : width >= 800 && compactSidebarRequested)
+    readonly property bool showList: hasLibrary && !(width < 1000 && showSidebar) && (width >= 800 || listRequested || !controller.path)
     readonly property real editorX: (showSidebar ? sidebarWidth : 0) + (showList ? (width < 800 ? width : listWidth) : 0)
     readonly property bool popupsOpen: actionMenu.visible || formatMenu.visible || namePanel.visible || recoveryDialog.visible || discardDialog.visible || deleteDialog.visible || folderPanel.visible || appearancePanel.visible || discardRecoveryDialog.visible || libraryPicker.visible
     onClosing: function(close) {
@@ -43,15 +68,16 @@ ApplicationWindow {
     Connections {
         target: controller
         function onCloseReady() { root.allowClose = true; root.close() }
-        function onDocumentLoaded() { root.listRequested = false }
+        function onDocumentLoaded(cursor, scroll, matchLength) { root.listRequested = false; if (matchLength > 0) root.editNote() }
     }
     CommandRegistry {
         id: commands
         session: root.session; editor: source.editor; controller: root.controller
         blocked: root.popupsOpen || search.inputMethodComposing || localFind.inputMethodComposing
-        onSidebarRequested: root.sidebarRequested = !root.sidebarRequested
-        onSearchRequested: { root.listRequested = true; Qt.callLater(function() { search.forceActiveFocus(Qt.ShortcutFocusReason) }) }
-        onFindRequested: { findBar.visible = true; localFind.forceActiveFocus() }
+        onSidebarRequested: root.toggleNavigation()
+        onSearchRequested: { root.revealList(); Qt.callLater(function() { search.forceActiveFocus(Qt.ShortcutFocusReason) }) }
+        onNewNoteRequested: root.newNote()
+        onFindRequested: { root.editNote(); findBar.visible = true; localFind.forceActiveFocus() }
     }
     // One Tab stop per list; arrows move the keyboard cursor without opening a
     // document. Activation still goes through the controller's save/drain path.
@@ -105,16 +131,45 @@ ApplicationWindow {
         title: "选择已有文件夹作为笔记库"
         onAccepted: root.controller.selectLibrary(selectedFolder)
     }
+    component ToolbarAction: LiquidActionButton {
+        property string help: ""
+        iconOnly: true; implicitWidth: 32; implicitHeight: 26
+        materialForm: false; liquidIntensity: "light"; backdrop: readingBackdrop
+        focusPolicy: Qt.TabFocus
+        Accessible.name: help
+        KosToolTip { target: parent; backdrop: readingBackdrop; text: parent.help }
+    }
+    component NavigationRow: LiquidNavigationButton {
+        specificationForm: true; specificationFontSize: tokens.navigationSize
+        implicitHeight: tokens.navigationHeight
+        specificationSelectedFillColor: AppTheme.accent
+        specificationSelectedTextColor: AppTheme.accentText
+        iconColor: checked ? AppTheme.accentText : AppTheme.mutedText
+    }
     header: Item {
-        height: 38
+        height: tokens.toolbarHeight
+        Rectangle { visible: root.showSidebar; width: root.sidebarWidth; height: parent.height; color: AppTheme.contentSecondaryBackground }
         MouseArea {
-            anchors.fill: parent; anchors.rightMargin: windowControls.width + 28
+            anchors.fill: parent
             onPressed: root.startSystemMove()
             onDoubleClicked: root.visibility === Window.Maximized ? root.showNormal() : root.showMaximized()
         }
-        Label {
-            anchors.left: parent.left; anchors.leftMargin: 20; anchors.verticalCenter: parent.verticalCenter
-            text: "NextNotes"; color: AppTheme.text; font.pixelSize: 12; font.weight: Font.DemiBold
+        RowLayout {
+            anchors.left: parent.left; anchors.leftMargin: 18; anchors.verticalCenter: parent.verticalCenter; spacing: 12
+            Label { text: "NextNotes"; color: AppTheme.text; font.pixelSize: 13; font.weight: Font.DemiBold }
+            ToolbarAction { id: sidebarButton; iconName: "panelLeft"; help: "显示或隐藏导航 · Ctrl+Shift+B"
+                onClicked: root.toggleNavigation() }
+        }
+        RowLayout {
+            visible: root.hasLibrary && root.editorX < root.width
+            x: Math.max(190, root.editorX + 18); anchors.verticalCenter: parent.verticalCenter
+            width: Math.max(0, parent.width - x - windowControls.width - 40); spacing: 8
+            ToolbarAction { iconName: "editRounded"; help: "新建笔记 · Ctrl+N"; enabled: !controller.busy; onClicked: root.newNote() }
+            Item { Layout.fillWidth: true }
+            ToolbarAction { iconName: "undo"; help: "撤销"; visible: parent.width > 350; enabled: !root.readingMode && session.canUndo && !controller.readOnly && !session.composing; onClicked: session.undo() }
+            ToolbarAction { id: formatButton; iconName: "bold"; help: "文本格式 · 源码模式可用"; enabled: !!controller.path && !root.readingMode && !controller.readOnly && !session.composing; onClicked: formatMenu.openAtAnchor() }
+            ToolbarAction { iconName: "heart"; help: "切换收藏"; enabled: !!controller.path; iconFilled: !!root.currentNote.favorite; onClicked: controller.favorite() }
+            ToolbarAction { id: moreButton; iconName: "more"; help: "更多笔记操作"; onClicked: actionMenu.openAtAnchor() }
         }
         KosWindowControls {
             id: windowControls
@@ -132,11 +187,23 @@ ApplicationWindow {
         SourceEditor {
             id: source
             session: root.session; controller: root.controller
-            visible: root.hasLibrary && !!controller.path && root.editorX < root.width
-            x: root.editorX; y: tokens.toolbarHeight * 2 + (findBar.visible ? 36 : 0)
+            visible: !root.readingMode && root.hasLibrary && !!controller.path && root.editorX < root.width
+            x: root.editorX; y: 48 + (findBar.visible ? 36 : 0)
             width: Math.max(0, parent.width - x); height: Math.max(0, parent.height - y - statusArea.height)
             bodySize: 12 + Math.round(bodySizeSlider.value * 12); readingWidth: tokens.readingWidth; inset: tokens.inset
         }
+        NoteReadingView {
+            visible: root.readingMode && root.hasLibrary && !!controller.path && root.editorX < root.width
+            x: root.editorX; y: 48
+            width: Math.max(0, parent.width - x); height: Math.max(0, parent.height - y - statusArea.height)
+            source: root.session.source
+            noteTitle: root.currentNote.title || controller.path.split("/").pop().replace(/\.md$/i, "")
+            modified: root.currentNote.displayModifiedUtc || ""
+            bodySize: 12 + Math.round(bodySizeSlider.value * 12)
+            readingWidth: tokens.readingWidth; inset: tokens.inset
+            fontFamily: tokens.uiFontFamily; titleSize: tokens.documentTitleSize
+        }
+
     }
     LiquidBackdrop { id: readingBackdrop; sourceItem: readingScene; registerAsDefault: false }
     KosEmptyState {
@@ -156,27 +223,28 @@ ApplicationWindow {
         Rectangle { anchors.fill: parent; color: AppTheme.contentSecondaryBackground }
         // No distinct content underneath the sidebar: use the specified opaque fallback.
         ColumnLayout {
-            anchors.fill: parent; anchors.margins: 14; spacing: 4
-            Label { text: "资料库"; color: AppTheme.text; font.pixelSize: 20; font.weight: Font.DemiBold; Layout.topMargin: 14; Layout.bottomMargin: 20 }
-            LiquidNavigationButton { Layout.fillWidth: true; text: "全部笔记"; specificationForm: true; checked: controller.filter === "all"; onClicked: { controller.filter = "all"; root.listRequested = true } }
-            LiquidNavigationButton { Layout.fillWidth: true; text: "收藏"; specificationForm: true; checked: controller.filter === "favorite"; onClicked: { controller.filter = "favorite"; root.listRequested = true } }
-            LiquidNavigationButton { Layout.fillWidth: true; text: "最近删除"; specificationForm: true; checkable: false; onClicked: root.showRecovery() }
+            anchors.fill: parent; anchors.margins: 12; spacing: 8
+            Label { text: "我的笔记"; color: AppTheme.mutedText; font.pixelSize: 11; font.weight: Font.DemiBold; Layout.leftMargin: 12; Layout.topMargin: 12; Layout.bottomMargin: 2 }
+            NavigationRow { iconName: "album"; Layout.fillWidth: true; text: "全部笔记"; specificationForm: true; checked: controller.filter === "all"; onClicked: { controller.filter = "all"; root.revealList() } }
+            NavigationRow { iconName: "heart"; Layout.fillWidth: true; text: "收藏"; specificationForm: true; checked: controller.filter === "favorite"; onClicked: { controller.filter = "favorite"; root.revealList() } }
+            NavigationRow { iconName: "trashRounded"; Layout.fillWidth: true; text: "最近删除"; specificationForm: true; checkable: false; onClicked: root.showRecovery() }
             RowLayout {
-                Layout.fillWidth: true; Layout.topMargin: 22
+                Layout.fillWidth: true; Layout.topMargin: 16
                 Label { text: "文件夹"; color: AppTheme.mutedText; font.pixelSize: 11; Layout.fillWidth: true }
-                LiquidActionButton { id: folderButton; text: "新建"; implicitHeight: 26; materialForm: false; liquidIntensity: "light"; backdrop: readingBackdrop; onClicked: root.askName("folder", folderButton) }
+                ToolbarAction { id: folderButton; iconName: "plus"; help: "新建文件夹"; onClicked: root.askName("folder", folderButton) }
             }
             KeyboardList {
                 Layout.fillWidth: true; Layout.fillHeight: true; clip: true
                 model: controller.folders; spacing: 2
-                delegate: LiquidNavigationButton {
+                delegate: NavigationRow {
+                    iconName: "folder"
                     required property var modelData
                     required property int index
                     focusPolicy: Qt.StrongFocus
                     activeFocusOnTab: false
                     Keys.onPressed: function(event) { ListView.view.handleKey(event) }
                     onActiveFocusChanged: if (activeFocus) { ListView.view.currentIndex = index; ListView.view.cursorKey = ListView.view.keyAt(index) }
-                    function activate() { controller.filter = "folder:" + modelData; root.listRequested = true }
+                    function activate() { controller.filter = "folder:" + modelData; root.revealList() }
                     width: ListView.view.width; text: modelData; specificationForm: true
                     checked: controller.filter === "folder:" + modelData
                     onClicked: activate()
@@ -188,7 +256,7 @@ ApplicationWindow {
                     KosToolTip { target: parent; backdrop: readingBackdrop; text: "打开此文件夹中的笔记" }
                 }
             }
-            Label { Layout.fillWidth: true; text: controller.library; elide: Text.ElideMiddle; font.pixelSize: 10; color: AppTheme.mutedText }
+            Label { Layout.fillWidth: true; Layout.leftMargin: 12; text: controller.library.split("/").pop(); elide: Text.ElideMiddle; font.pixelSize: 11; color: AppTheme.mutedText }
             LiquidActionButton { text: "切换笔记库"; implicitHeight: 26; materialForm: false; liquidIntensity: "light"; backdrop: readingBackdrop; enabled: !controller.busy; onClicked: libraryPicker.open() }
         }
     }
@@ -197,20 +265,21 @@ ApplicationWindow {
         visible: root.showList
         x: root.showSidebar ? root.sidebarWidth : 0
         width: root.width < 800 ? root.width : root.listWidth; height: parent.height
-        color: AppTheme.contentSecondaryBackground
+        color: AppTheme.contentBackground
+        Rectangle { anchors.right: parent.right; width: 1; height: parent.height; color: AppTheme.border; opacity: 0.5 }
         ColumnLayout {
-            anchors.fill: parent; anchors.margins: 16; spacing: 12
+            anchors.fill: parent; anchors.margins: 12; spacing: 12
             RowLayout {
                 Layout.fillWidth: true
-                Label { Layout.fillWidth: true; text: controller.filter === "favorite" ? "收藏" : controller.filter.startsWith("folder:") ? controller.filter.slice(7) : "全部笔记"; elide: Text.ElideRight; color: AppTheme.text; font.pixelSize: 20; font.weight: Font.DemiBold }
-                LiquidActionButton { id: newButton; text: "新建"; implicitHeight: 26; materialForm: false; liquidIntensity: "light"; backdrop: readingBackdrop; enabled: !controller.busy; onClicked: controller.createNote(); KosToolTip { target: newButton; backdrop: readingBackdrop; text: "新建笔记 · Ctrl+N" } }
+                Label { Layout.fillWidth: true; text: controller.filter === "favorite" ? "收藏" : controller.filter.startsWith("folder:") ? controller.filter.slice(7) : "全部笔记"; elide: Text.ElideRight; color: AppTheme.text; font.pixelSize: 17; font.weight: Font.DemiBold }
+                ToolbarAction { id: newButton; iconName: "editRounded"; help: "新建笔记 · Ctrl+N"; enabled: !controller.busy; onClicked: root.newNote() }
                 LiquidActionButton { visible: root.width < 800 && !!controller.path; text: "返回"; implicitHeight: 26; materialForm: true; onClicked: root.listRequested = false }
             }
             LiquidTextField {
                 id: search
                 Layout.fillWidth: true; implicitHeight: 30
                 materialForm: false; liquidFinish: true; liquidIntensity: "light"; backdrop: readingBackdrop
-                placeholderText: "搜索标题与正文"; text: controller.query
+                placeholderText: "搜索笔记"; text: controller.query
                 onTextEdited: if (!inputMethodComposing) controller.query = text
                 onInputMethodComposingChanged: if (!inputMethodComposing) controller.query = text
                 Accessible.name: "搜索所有笔记"
@@ -237,18 +306,23 @@ ApplicationWindow {
                     Keys.onPressed: function(event) { ListView.view.handleKey(event) }
                     onActiveFocusChanged: if (activeFocus) { ListView.view.currentIndex = index; ListView.view.cursorKey = ListView.view.keyAt(index) }
                     function activate() { controller.openNote(modelData.path, modelData.match === undefined ? -1 : modelData.match) }
-                    width: ListView.view.width; height: 104
+                    width: ListView.view.width; height: tokens.noteRowHeight
+                    leftPadding: 12; rightPadding: 12; topPadding: 10; bottomPadding: 10
                     highlighted: modelData.id === controller.selectedId && modelData.path === controller.path
                     background: Rectangle {
-                        radius: 9; color: noteRow.highlighted || noteRow.hovered ? AppTheme.controlBackground : "transparent"
+                        radius: 9; color: noteRow.highlighted ? AppTheme.withAlpha(AppTheme.accent, 0.12) : noteRow.hovered ? AppTheme.controlBackground : "transparent"
                         border.width: noteRow.activeFocus ? 2 : 0
                         border.color: AppTheme.focusRing
                     }
                     contentItem: Column {
-                        spacing: 6
-                        Label { width: parent.width; text: (noteRow.rowStatus ? noteRow.rowStatus + " · " : "") + noteRow.modelData.title; elide: Text.ElideRight; font.pixelSize: 14; font.weight: Font.DemiBold; color: AppTheme.text }
-                        Label { width: parent.width; text: noteRow.modelData.summary || "空白笔记"; maximumLineCount: 2; wrapMode: Text.Wrap; elide: Text.ElideRight; font.pixelSize: 12; color: AppTheme.mutedText }
-                        Label { width: parent.width; text: noteRow.modelData.path + " · " + noteRow.modelData.timeSource + " " + new Date(noteRow.modelData.displayModifiedUtc).toLocaleDateString(Qt.locale(), "MM/dd"); elide: Text.ElideMiddle; font.pixelSize: 10; color: AppTheme.mutedText }
+                        spacing: 5
+                        Row {
+                            width: parent.width; spacing: 6
+                            Label { width: parent.width - (favoriteMark.visible ? 20 : 0); text: noteRow.modelData.title; elide: Text.ElideRight; font.pixelSize: 13; font.weight: Font.DemiBold; color: AppTheme.text }
+                            VectorIcon { id: favoriteMark; visible: !!noteRow.modelData.favorite; name: "heart"; size: 13; color: AppTheme.mutedText }
+                        }
+                        Label { width: parent.width; text: new Date(noteRow.modelData.displayModifiedUtc).toLocaleDateString(Qt.locale(), "M月d日") + (noteRow.modelData.readOnlyReason ? " · 只读" : ""); font.pixelSize: 10; color: AppTheme.mutedText }
+                        Label { width: parent.width; text: root.summaryText(noteRow.modelData.summary); textFormat: Text.PlainText; maximumLineCount: 2; wrapMode: Text.Wrap; elide: Text.ElideRight; font.pixelSize: 12; lineHeight: 1.2; color: AppTheme.mutedText }
                     }
                     onClicked: activate()
                     Accessible.role: Accessible.ListItem
@@ -278,39 +352,32 @@ ApplicationWindow {
         visible: root.hasLibrary && root.editorX < root.width
         x: root.editorX; width: root.width - x; height: parent.height
         RowLayout {
-            anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; anchors.margins: 14; spacing: 6
+            anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
+            anchors.leftMargin: tokens.inset; anchors.rightMargin: 20; anchors.topMargin: 10
+            Label { Layout.fillWidth: true; text: controller.path ? (controller.path.indexOf("/") >= 0 ? controller.path.substring(0, controller.path.lastIndexOf("/")) : "笔记") : ""; color: AppTheme.mutedText; font.pixelSize: 11; elide: Text.ElideMiddle }
             LiquidActionButton {
-                id: sidebarButton
-                text: root.width < 800 ? "笔记" : "侧栏"; implicitHeight: 26
-                materialForm: false; liquidIntensity: "light"; backdrop: readingBackdrop
-                onClicked: root.width < 800 ? root.listRequested = true : root.sidebarRequested = !root.sidebarRequested
-                KosToolTip { target: sidebarButton; backdrop: readingBackdrop; text: "展开导航 · Ctrl+Shift+B" }
+                text: root.readingMode ? "阅读" : "源码"
+                implicitHeight: 26; materialForm: false; liquidIntensity: "light"; backdrop: readingBackdrop
+                enabled: !!controller.path && !session.composing
+                Accessible.name: root.readingMode ? "阅读模式，点击切换到源码编辑" : "源码编辑，点击切换到只读阅读"
+                onClicked: { if (root.readingMode) root.editNote(); else { root.readingMode = true; findBar.visible = false } }
+                KosToolTip { target: parent; backdrop: readingBackdrop; text: root.readingMode ? "切换到源码编辑" : "切换到只读阅读" }
             }
-            LiquidActionButton { text: "新建"; implicitHeight: 26; materialForm: false; liquidIntensity: "light"; backdrop: readingBackdrop; enabled: !controller.busy; onClicked: controller.createNote() }
-            Item { Layout.fillWidth: true }
-            LiquidActionButton { text: "撤销"; visible: editorChrome.width > 470; implicitHeight: 26; materialForm: true; focusPolicy: Qt.TabFocus; enabled: session.canUndo && !controller.readOnly && !session.composing; onClicked: { session.undo(); source.editor.forceActiveFocus() } }
-            LiquidActionButton { id: formatButton; text: "格式"; implicitHeight: 26; materialForm: false; liquidIntensity: "light"; backdrop: readingBackdrop; focusPolicy: Qt.TabFocus; enabled: !controller.readOnly && !session.composing; onClicked: formatMenu.openAtAnchor() }
-            LiquidActionButton { id: moreButton; focusPolicy: Qt.StrongFocus; text: "更多"; implicitHeight: 26; materialForm: false; liquidIntensity: "light"; backdrop: readingBackdrop; onClicked: actionMenu.openAtAnchor() }
         }
         RowLayout {
-            anchors.top: parent.top; anchors.topMargin: tokens.toolbarHeight + 16; anchors.left: parent.left; anchors.right: parent.right; anchors.leftMargin: tokens.inset; anchors.rightMargin: tokens.inset
-            Label { Layout.fillWidth: true; text: controller.path || "选择一篇笔记"; elide: Text.ElideMiddle; font.pixelSize: 11; color: AppTheme.mutedText }
-            Label { text: "MARKDOWN"; color: AppTheme.mutedText; font.pixelSize: 10; font.letterSpacing: 1.2 }
-        }
-        RowLayout {
-            id: findBar; visible: false; x: tokens.inset; y: tokens.toolbarHeight * 2 - 4; width: parent.width - tokens.inset * 2
+            id: findBar; visible: false; x: tokens.inset; y: 46; width: parent.width - tokens.inset * 2
             LiquidTextField { id: localFind; Layout.fillWidth: true; materialForm: true; placeholderText: "查找当前正文"; onAccepted: root.findNext() }
             LiquidActionButton { text: "下一个"; materialForm: true; onClicked: root.findNext() }
             LiquidActionButton { text: "关闭"; materialForm: true; onClicked: { findBar.visible = false; source.editor.forceActiveFocus() } }
         }
-        KosEmptyState { anchors.centerIn: parent; width: Math.min(360, parent.width - 48); visible: !controller.path; symbol: ""; title: "一页新的可能"; description: "选择笔记，或写下此刻的想法。"; actionText: "新建笔记"; actionEnabled: !controller.busy; onActionTriggered: controller.createNote() }
+        KosEmptyState { anchors.centerIn: parent; width: Math.min(360, parent.width - 48); visible: !controller.path; symbol: ""; title: "一页新的可能"; description: "选择笔记，或写下此刻的想法。"; actionText: "新建笔记"; actionEnabled: !controller.busy; onActionTriggered: root.newNote() }
     }
     ColumnLayout {
         id: statusArea
         x: root.hasLibrary && root.editorX < root.width ? root.editorX : 16; width: Math.max(0, root.width - x - 16)
         anchors.bottom: parent.bottom; spacing: 6
         visible: root.editorX < root.width || !!controller.error
-        Label { Layout.fillWidth: true; text: controller.status; color: AppTheme.mutedText; font.pixelSize: 11; leftPadding: 14; bottomPadding: controller.error ? 0 : 12 }
+        Label { Layout.fillWidth: true; text: controller.status; color: AppTheme.mutedText; font.pixelSize: 10; leftPadding: tokens.inset; bottomPadding: controller.error ? 0 : 12 }
         Rectangle {
             visible: !!controller.error
             Layout.fillWidth: true; implicitHeight: errorColumn.implicitHeight + 24; radius: 8; color: AppTheme.controlBackground
@@ -370,7 +437,7 @@ ApplicationWindow {
         LiquidPopoverItem { text: "另存为新身份副本…"; enabled: !!controller.path; onTriggered: root.askName("copy", moreButton) }
         LiquidPopoverItem { text: "移到最近删除…"; enabled: !!controller.path; onTriggered: deleteDialog.open() }
         LiquidPopoverItem { text: "放弃本地修改，读取磁盘…"; enabled: !!controller.path; onTriggered: discardDialog.open() }
-        LiquidPopoverItem { text: "查找当前正文…"; enabled: !!controller.path; onTriggered: { findBar.visible = true; Qt.callLater(function() { localFind.forceActiveFocus(Qt.ShortcutFocusReason) }) } }
+        LiquidPopoverItem { text: "查找当前正文…"; enabled: !!controller.path; onTriggered: { root.editNote(); findBar.visible = true; Qt.callLater(function() { localFind.forceActiveFocus(Qt.ShortcutFocusReason) }) } }
         LiquidPopoverItem { text: "刷新笔记库"; onTriggered: controller.refresh() }
         LiquidPopoverItem { text: "恢复中心 / 最近删除…"; onTriggered: root.showRecovery() }
         LiquidPopoverItem { text: "切换笔记库…"; onTriggered: libraryPicker.open() }
@@ -400,7 +467,8 @@ ApplicationWindow {
             KeyboardList {
                 Layout.fillWidth: true; Layout.preferredHeight: Math.min(260, contentHeight); clip: true
                 model: controller.folders
-                delegate: LiquidNavigationButton {
+                delegate: NavigationRow {
+                    iconName: "folder"
                     required property var modelData
                     required property int index
                     width: ListView.view.width; text: modelData; specificationForm: true
@@ -429,6 +497,10 @@ ApplicationWindow {
                 title: "主题"; minimumLabelWidth: 50
                 LiquidSelect {
                     model: ["系统", "浅色", "深色"]; materialForm: true
+                    plainTrigger: true; indicatorStyle: "upDown"; indicatorBackground: true
+                    popupMaterialForm: true; compactPopup: true; popupFontWeight: Font.Normal
+                    popupBorderWidth: 0; popupShadowEnabled: true; neutralOptionHighlight: true
+                    Layout.preferredHeight: 24
                     Accessible.name: "主题"
                     currentIndex: Math.max(0, ["system", "light", "dark"].indexOf(AppTheme.appearanceMode))
                     onActivated: function(index) { AppTheme.appearanceMode = ["system", "light", "dark"][index]; controller.setPreference("appearance", AppTheme.appearanceMode) }
