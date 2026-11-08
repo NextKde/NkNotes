@@ -1,0 +1,19 @@
+{
+  "openLongMs": 10217,
+  "loadPhases": {
+    "parseMs": 2435.699999999255,
+    "viewMs": 3210.300000000745,
+    "layoutMs": 4.300000000745058,
+    "prepareSnapshotMs": 267.8999999985099,
+    "publishMs": 112.30000000074506,
+    "totalMs": 6030.5
+  },
+  "mode": "rich",
+  "longTextCharacters": 1940899,
+  "openMaxEventLoopGapMs": 6726.199999999255,
+  "editDispatchMs": 46,
+  "editToSavedMs": 2481,
+  "editMaxEventLoopGapMs": 2376.800000000745,
+  "undoSaved": true,
+  "ok": true
+}

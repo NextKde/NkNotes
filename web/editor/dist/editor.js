@@ -89652,6 +89652,14 @@
       bridge.focusRequested.connect(focusEditor);
       bridge.ready();
     });
+    document.addEventListener("keydown", (event) => {
+      if (event.isComposing || !(event.ctrlKey || event.metaKey) || event.altKey) return;
+      const key4 = event.key.toLowerCase();
+      if (!["z", "y"].includes(key4) || event.target.closest("input,textarea")) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      bridge.history(key4 === "y" || event.shiftKey);
+    }, true);
     window.addEventListener("scroll", () => {
       scheduleReport();
       tools.ui();

@@ -1,0 +1,11 @@
+{
+  "openLongMs": 7984,
+  "mode": "rich",
+  "longTextCharacters": 1940899,
+  "openMaxEventLoopGapMs": 5942.099999997765,
+  "editDispatchMs": 62,
+  "editToSavedMs": 2427,
+  "editMaxEventLoopGapMs": 1897.199999999255,
+  "undoSaved": true,
+  "ok": true
+}

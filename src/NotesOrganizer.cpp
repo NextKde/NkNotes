@@ -62,11 +62,14 @@ void NotesController::manageFolder(const QString &operation, const QString &path
     });
 }
 void NotesController::acceptBatch(QVariantMap report) {
-    QVariantList results; QString moved;
+    QVariantList results; QString moved, duplicated;
     for (const auto &value : report.value("results").toList()) {
         auto result = value.toMap();
         if (result.value("error") == "pendingRelocation") m_readOnly = true;
         if (!result.value("ok").toBool()) result.insert("message", organizerError(result.value("error").toString()));
+        else if (report.value("action") == "duplicate") {
+            if (duplicated.isEmpty()) duplicated=result.value("newPath").toString();
+        }
         else if (report.value("action") == "move") {
             relocateHistory(result.value("path").toString(), result.value("newPath").toString());
             if (result.value("path").toString() == m_path) moved = result.value("newPath").toString();
@@ -82,6 +85,7 @@ void NotesController::acceptBatch(QVariantMap report) {
     }
     report.insert("results", results); m_batchReport = report;
     m_status = QString("完成 %1 项，失败 %2 项").arg(report.value("succeeded").toInt()).arg(report.value("failed").toInt());
+    if(!duplicated.isEmpty()) { m_filter="all";m_query.clear();++m_searchSerial;load(duplicated); }
     if (!moved.isEmpty()) { m_filter = "all"; ++m_searchSerial; load(moved); }
     if (moved.isEmpty() && (report.value("action") == "move" || report.value("action") == "tags") && !m_path.isEmpty()) load(m_path);
     refresh(); inspectRecovery(); emit changed(); emit batchFinished();
@@ -90,4 +94,25 @@ void NotesController::acceptBatch(QVariantMap report) {
 void NotesController::recycle(const QString &action,const QVariantList &items) {
     if(busy()||items.isEmpty()||!QStringList{"restore","purge"}.contains(action))return;
     drain([this,action,items]{m_organizing=true;send("trashBatch",{{"action",action},{"items",items}});emit changed();});
+}
+
+// Text and organization share commands and labels; typing after an organization
+// action returns the responder to the editor's own granular history.
+bool NotesController::canUndo() const { return !busy() && !m_session->composing() && ((m_organizationHistory && m_undoState.value("canUndo").toBool()) || (!readOnly() && m_session->canUndo()) || m_undoState.value("canUndo").toBool()); }
+bool NotesController::canRedo() const { return !busy() && !m_session->composing() && ((m_organizationHistory && m_undoState.value("canRedo").toBool()) || (!readOnly() && m_session->canRedo()) || m_undoState.value("canRedo").toBool()); }
+QString NotesController::undoText() const { return (m_organizationHistory || !m_session->canUndo()) && m_undoState.value("canUndo").toBool() ? "撤销" + m_undoState.value("undoLabel").toString() : QString("撤销编辑"); }
+QString NotesController::redoText() const { return (m_organizationHistory || !m_session->canRedo()) && m_undoState.value("canRedo").toBool() ? "重做" + m_undoState.value("redoLabel").toString() : QString("重做编辑"); }
+void NotesController::undo() { replayHistory(false); }
+void NotesController::redo() { replayHistory(true); }
+void NotesController::replayHistory(bool redo) {
+    if(redo ? !canRedo() : !canUndo())return;
+    const bool organization=m_undoState.value(redo?"canRedo":"canUndo").toBool();
+    const bool text=redo?m_session->canRedo():m_session->canUndo();
+    if(!readOnly() && text && (!m_organizationHistory || !organization)) {
+        m_textHistoryReplay=true;
+        if(redo)m_session->redo();else m_session->undo();
+        // Web state arrives asynchronously; reset when that state is published.
+        return;
+    }
+    if(organization)drain([this,redo]{m_organizing=true;send(redo?"redo":"undo");emit changed();});
 }

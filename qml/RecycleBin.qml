@@ -108,7 +108,7 @@ Item {
             }
             contentItem: Column {
                 spacing: 3
-                Label { width: parent.width; text: row.modelData.source.split("/").pop(); textFormat: Text.PlainText; elide: Text.ElideRight; font.pixelSize: 14; font.weight: Font.DemiBold; color: row.highlighted ? "white" : AppTheme.text }
+                Label { width: parent.width; text: row.modelData.title || row.modelData.source.split("/").pop().replace(/\.md$/i, ""); textFormat: Text.PlainText; elide: Text.ElideRight; font.pixelSize: 14; font.weight: Font.DemiBold; color: row.highlighted ? "white" : AppTheme.text }
                 Label { width: parent.width; text: (row.modelData.kind === "folder" ? "文件夹 · " : "") + (row.modelData.purging ? "删除待完成" : "删除于 " + new Date(row.modelData.deletedUtc).toLocaleDateString(Qt.locale(), "M/d")); elide: Text.ElideRight; font.pixelSize: 12; color: row.highlighted ? "white" : AppTheme.mutedText }
             }
             MouseArea {
@@ -133,7 +133,7 @@ Item {
             }
             onClicked: root.activate(modelData)
             Accessible.role: Accessible.ListItem
-            Accessible.name: modelData.source
+            Accessible.name: (modelData.kind === "folder" ? "文件夹 " : "") + (modelData.title || modelData.source.split("/").pop().replace(/\.md$/i, ""))
             Accessible.selected: highlighted
             Accessible.onPressAction: root.activate(modelData)
         }
@@ -144,8 +144,8 @@ Item {
         visible: width > 0
         ColumnLayout {
             anchors.centerIn: parent; width: Math.min(440, parent.width - 52); spacing: 16
-            Label { Layout.fillWidth: true; text: root.currentEntry ? root.currentEntry.source.split("/").pop() : "最近删除"; textFormat: Text.PlainText; wrapMode: Text.Wrap; font.pixelSize: 24; font.weight: Font.DemiBold; color: AppTheme.text }
-            Label { Layout.fillWidth: true; text: root.currentEntry ? root.currentEntry.source + "\n删除于 " + new Date(root.currentEntry.deletedUtc).toLocaleString(Qt.locale()) + (root.currentEntry.purging ? "\n删除待完成" : "") : "选择一个项目以恢复或永久删除。"; textFormat: Text.PlainText; wrapMode: Text.Wrap; color: AppTheme.mutedText }
+            Label { Layout.fillWidth: true; text: root.currentEntry ? (root.currentEntry.title || root.currentEntry.source.split("/").pop().replace(/\.md$/i, "")) : "最近删除"; textFormat: Text.PlainText; wrapMode: Text.Wrap; font.pixelSize: 24; font.weight: Font.DemiBold; color: AppTheme.text }
+            Label { Layout.fillWidth: true; text: root.currentEntry ? (root.currentEntry.kind === "folder" ? "文件夹" : (root.currentEntry.source.includes("/") ? root.currentEntry.source.slice(0, root.currentEntry.source.lastIndexOf("/")).split("/").join(" › ") : "随手记")) + "\n删除于 " + Qt.formatDateTime(new Date(root.currentEntry.deletedUtc), "yyyy/M/d HH:mm") + (root.currentEntry.purging ? "\n删除待完成" : "") : "选择一个项目以恢复或永久删除。"; textFormat: Text.PlainText; wrapMode: Text.Wrap; color: AppTheme.mutedText }
             Flow {
                 Layout.fillWidth: true; spacing: 8; visible: !!root.currentEntry
                 LiquidActionButton { text: "恢复"; materialForm: true; enabled: !!root.currentEntry && !root.currentEntry.purging && !root.controller.busy; onClicked: root.controller.recycle("restore", [root.currentEntry]) }
@@ -165,12 +165,13 @@ Item {
         LiquidPopoverItem { visible: menu.preferredSide !== "right"; height: visible ? implicitHeight : 0; text: "清空最近删除…"; enabled: !!root.items.length && !root.controller.busy; onTriggered: root.confirm(root.items) }
     }
     LiquidDialog {
+        acceptText: "永久删除"; rejectText: "取消"; closeText: "关闭"
         id: purgeDialog; title: "永久删除 " + root.reviewed.length + " 项？"; sourceItem: root.sceneItem
         parent: Overlay.overlay; anchors.centerIn: parent; width: Math.min(520, parent.width - 40); height: Math.min(380, parent.height - 40)
         standardButtons: Dialog.Ok | Dialog.Cancel
         contentItem: ColumnLayout {
             Label { Layout.fillWidth: true; text: "这些笔记和文件夹将无法从最近删除恢复。文件夹内的全部内容也会删除。"; wrapMode: Text.Wrap; color: AppTheme.text }
-            ScrollView { Layout.fillWidth: true; Layout.fillHeight: true; TextArea { readOnly: true; text: root.reviewed.map(i => i.source).join("\n"); wrapMode: Text.Wrap; color: AppTheme.text; background: null } }
+            ScrollView { Layout.fillWidth: true; Layout.fillHeight: true; KosTextArea { readOnly: true; text: root.reviewed.map(i => i.title || i.source.split("/").pop().replace(/\.md$/i, "")).join("\n"); wrapMode: Text.Wrap; color: AppTheme.text; background: null } }
         }
         onAccepted: root.controller.recycle("purge", root.reviewed)
     }

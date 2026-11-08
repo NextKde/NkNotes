@@ -2,7 +2,7 @@
 #include "EditorSession.h"
 #include <QUrl>
 
-void NotesController::inspectKnowledge(){if(!m_path.isEmpty())send("knowledge",{{"path",m_path}});}
+void NotesController::inspectKnowledge(){if(!m_path.isEmpty()&&!externalDocument())send("knowledge",{{"path",m_path}});}
 void NotesController::lookupLinks(const QString &query,int request){if(!m_library.isEmpty())send("linkCandidates",{{"query",query},{"request",request}});}
 void NotesController::setNoteProperty(const QString &key,const QVariant &value,bool remove){
     if(m_path.isEmpty()||busy()||readOnly())return;
@@ -17,12 +17,12 @@ void NotesController::historyVersion(const QString &hash,bool restore){
 }
 void NotesController::saveSmartFolder(const QString &name){if(!busy())send("smartSave",{{"name",name},{"query",m_query},{"filter",m_filter}});}
 void NotesController::deleteSmartFolder(const QString &name){if(!busy())send("smartDelete",{{"name",name}});}
-void NotesController::openSmartFolder(const QString &name){const auto rule=m_smartFolders.value(name).toMap();if(rule.isEmpty())return;setFilter(rule.value("filter","all").toString());setQuery(rule.value("query").toString());}
+void NotesController::openSmartFolder(const QString &name){const auto rule=m_smartFolders.value(name).toMap();if(rule.isEmpty())return;selectCategory(rule.value("filter","all").toString(),rule.value("query").toString());}
 void NotesController::rebuildIndex(){if(!busy())send("reindex");}
 
 void NotesController::inspectTemplates(){if(!m_library.isEmpty())send("templates");}
 void NotesController::saveTemplate(const QString &name,const QString &text){if(!busy())send("templateSave",{{"name",name},{"text",text}});}
-void NotesController::saveCurrentTemplate(const QString &name){if(!busy()&&!m_path.isEmpty())drain([this,name]{send("templateSave",{{"name",name},{"text",m_session->source()}});});}
+void NotesController::saveCurrentTemplate(const QString &name){if(!busy()&&!m_path.isEmpty())drain([this,name]{send("templateSave",{{"name",name},{"text",m_session->source()},{"path",m_path}});});}
 void NotesController::deleteTemplate(const QString &name){if(!busy())send("templateDelete",{{"name",name}});}
 void NotesController::createFromTemplate(const QString &name,const QString &title){if(!busy())drain([this,name,title]{m_organizing=true;send("fromTemplate",{{"name",name},{"title",title},{"folder",m_filter.startsWith("folder:")?m_filter.mid(7):QString()}});emit changed();});}
 void NotesController::createDailyNote(){if(!busy())drain([this]{m_organizing=true;send("dailyNote");emit changed();});}

@@ -36,6 +36,11 @@ public:
                 return;
             }
         }
+        // Bulk imports and scope changes publish one coherent replacement. Thousands
+        // of individual inserts leave QML delegates in a long intermediate layout.
+        if (qMax(rows.size(), m_rows.size()) > 512 || qAbs(rows.size() - m_rows.size()) > 64) {
+            beginResetModel(); m_rows = rows; endResetModel(); return;
+        }
         for (int i = 0; i < rows.size(); ++i) {
             int existing = i;
             while (existing < m_rows.size() && key(m_rows[existing]) != key(rows[i])) ++existing;

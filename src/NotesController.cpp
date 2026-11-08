@@ -2,6 +2,7 @@
 #include "EditorSession.h"
 #include "storage/NotesRepository.h"
 #include <QSettings>
+#include <QStandardPaths>
 #include <QDir>
 #include <QRegularExpression>
 #include <QUrl>
@@ -23,18 +24,27 @@ NotesController::NotesController(EditorSession *session, NotesRepository *reposi
     connect(&m_search, &QTimer::timeout, this, [this]{ refresh(true); });
     connect(session, &EditorSession::sourceChanged, this, [this] {
         if (m_applying || m_path.isEmpty()) return;
+        m_organizationHistory = false;
+        if(!m_textHistoryReplay && m_undoState.value("canRedo").toBool()) { m_undoState.insert("canRedo",false); send("clearRedo"); }
+        m_textHistoryReplay=false;
         ++m_revision;
         m_status = m_conflict ? "冲突 · 本地输入仍保留" : "已修改";
         if (!m_session->composing() && !m_conflict) m_autosave.start();
         emit changed();
     });
     connect(session, &EditorSession::stateChanged, this, [this] {
+        emit changed();
         if (m_session->composing()) m_autosave.stop();
         else if (dirty() && !m_saving && !m_conflict) {
             if (m_transition) save(); else m_autosave.start();
         } else if (m_transition && !m_session->composing()) advance();
     });
     if (repository) {
+        connect(repository, &NotesRepository::operationProgress, this, [this](quint64 id,const QString &,const QVariantMap &value){
+            if(!m_pending.contains(id))return;
+            const bool cancelling=m_operationProgress.value("cancelling").toBool();
+            m_operationProgress=value;if(cancelling)m_operationProgress.insert("cancelling",true);emit changed();
+        });
         connect(repository, &NotesRepository::finished, this, &NotesController::receive);
         connect(repository, &NotesRepository::libraryChanged, this, &NotesController::externalChange);
     }
@@ -67,16 +77,22 @@ void NotesController::advance() {
 }
 void NotesController::restoreWorkspace() {
     if (!m_library.isEmpty() || busy()) return;
-    const QString last = preference("lastLibrary").toString();
-    if (last.isEmpty()) return;
+    const QString storage = preference("managedStorage", QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation) + "/Library").toString();
+    const QString old = preference("lastLibrary").toString();
+    if (!old.isEmpty() && old != storage) setPreference("legacyLibrary", old);
     m_restoreWorkspace = true;
-    selectLibrary(QUrl::fromLocalFile(last));
+    m_loading = true; send("selectLibrary", {{"path", storage}, {"managed", true}}); emit changed();
 }
 void NotesController::selectLibrary(const QUrl &url) {
-    if (!url.isLocalFile()) return;
-    drain([this, url] { m_loading = true; send("selectLibrary", {{"path", url.toLocalFile()}}); });
+    // A directory picker imports a copy; it never replaces the managed space.
+    previewImport({url});
 }
 void NotesController::load(const QString &path, int match) {
+    // A link or history navigation may leave the current category. Keep the
+    // destination visible instead of showing an unselected note outside the list.
+    if (!path.startsWith("external:") && !std::any_of(m_notes.cbegin(),m_notes.cend(),[&](const QVariant &v){ return v.toMap().value("path").toString()==path; }) && (m_filter!="all" || !m_query.isEmpty())) {
+        m_filter="all";m_query.clear();++m_searchSerial;refresh();
+    }
     m_knowledge.clear();m_version.clear();m_versions.clear();
     m_loading = true;
     QString matchQuery=m_query;for(const auto &v:m_notes)if(v.toMap().value("path").toString()==path){matchQuery=v.toMap().value("matchText",m_query).toString();break;}
@@ -90,6 +106,9 @@ void NotesController::openNote(const QString &path, int match) {
 void NotesController::createNote() {
     drain([this] {
         const QString folder = m_filter.startsWith("folder:") ? m_filter.mid(7) + '/' : QString();
+        m_query.clear();
+        if(m_filter != "all" && m_filter != "inbox" && !m_filter.startsWith("folder:"))m_filter="inbox";
+        ++m_searchSerial;
         const QString path = folder + "笔记-" + QUuid::createUuid().toString(QUuid::WithoutBraces).left(8) + ".md";
         m_loading = true; send("create", {{"path", path}, {"text", "# 未命名笔记\n\n"}});
     });
@@ -141,7 +160,7 @@ void NotesController::copyRecovery(const QString &text) {
     send("saveAs", {{"path", "恢复-" + QUuid::createUuid().toString(QUuid::WithoutBraces).left(8) + ".md"}, {"text", text}, {"newIdentity", true}, {"recoveryCopy", true}});
 }
 void NotesController::discardRecovery(const QString &path) { send("discardDraft", {{"path", path}}); }
-void NotesController::openRecoveryDirectory() { if (!m_library.isEmpty()) QDesktopServices::openUrl(QUrl::fromLocalFile(m_library + "/.nextnotes")); }
+void NotesController::openRecoveryDirectory() { if (!m_library.isEmpty()) QDesktopServices::openUrl(QUrl::fromLocalFile(m_library)); }
 void NotesController::discardAndReload() {
     if (m_saving || busy() || m_session->composing()) return;
     // Read first. If it fails the current buffer and draft remain intact.
@@ -169,10 +188,18 @@ void NotesController::openLink(const QString &href) {
     if(href.startsWith("wiki:")){if(!busy())send("resolveWiki",{{"path",m_path},{"target",href.mid(5).section('#',0,0)},{"fragment",href.mid(5).section('#',1)}});return;}
     const QUrl url(href);
     if (url.scheme() == "https" || url.scheme() == "http" || url.scheme() == "mailto") { QDesktopServices::openUrl(url); return; }
-    const QUrl resolved = QUrl::fromLocalFile(m_library + '/' + m_path).resolved(url);
+    const QUrl resolved = documentUrl().resolved(url);
+    if (resolved.isLocalFile() && QFileInfo(resolved.toLocalFile()).suffix().compare("md", Qt::CaseInsensitive) == 0) {
+        if (externalDocument()) { openExternal(resolved); return; }
+        const QString relative = QDir(m_library).relativeFilePath(QDir::cleanPath(resolved.toLocalFile()));
+        if (relative != ".." && !relative.startsWith("../") && !QDir::isAbsolutePath(relative)) {
+            if (!busy()) drain([this, relative, resolved] { if(!std::any_of(m_notes.cbegin(),m_notes.cend(),[&](const QVariant &v){return v.toMap().value("path").toString()==relative;})){m_filter="all";m_query.clear();++m_searchSerial;refresh();} m_loading = true; send("read", {{"path", relative}, {"fragment", resolved.fragment()}}); emit changed(); });
+            return;
+        }
+    }
     if (!resolved.isLocalFile()) return;
     const QString file = QFileInfo(resolved.toLocalFile()).canonicalFilePath();
-    const QString root = QFileInfo(m_library).canonicalFilePath();
+    const QString root = QFileInfo(assetRoot()).canonicalFilePath();
     if (file.isEmpty() || root.isEmpty() || !file.startsWith(root + '/')) {
         m_error = "链接目标不存在或不在当前笔记库中"; emit changed(); return;
     }
@@ -244,6 +271,14 @@ void NotesController::report(const QVariantMap &r) {
         {"attachmentWriteFailed", "附件写入失败，请检查笔记库空间与权限"},
         {"attachmentInUse", "附件仍被笔记引用，不能回收"},
         {"attachmentChanged", "附件回收数据发生变化，已阻止恢复"},
+        {"databaseError", "内部笔记数据库无法读取或保存"},
+        {"databaseVersion", "笔记数据库版本较新，请升级应用"},
+        {"invalidName", "名称无效，请使用普通名称，不要输入路径"},
+        {"invalidBackup", "这个文件不是可用的笔记备份，或备份版本不受支持"},
+        {"backupFailed", "备份或恢复未能完成，原有数据仍保留"},
+        {"backupLocation", "请选择笔记存储之外的位置保存备份"},
+        {"invalidImport", "请重新选择要导入的 Markdown 文件或文件夹"},
+        {"externalDocument", "这是外部文件，请先导入为笔记再整理"},
         {"unknownOperation", "此操作暂不受支持"}
     };
     m_error = messages.value(code, "操作未完成，请检查文件和目录权限") + "。当前编辑输入仍保留；不支持的格式不会覆盖原文。";
@@ -259,10 +294,15 @@ void NotesController::receive(quint64 id, const QString &op, const QVariantMap &
     if (op == "search" && p.args.value("serial").toULongLong() != m_searchSerial) return;
     const bool documentOp = op == "read" || op == "save" || op == "saveAs" || op == "create" || op == "trash" || op == "rename";
     if (documentOp && !p.args.value("recoveryCopy").toBool() && p.epoch != m_epoch) return;
+    if(r.contains("undoState"))m_undoState=r.value("undoState").toMap();
+    if(r.value("historyRecorded").toBool() || op=="undo" || op=="redo")m_organizationHistory=true;
+    if(op=="undo" || op=="redo")m_organizing=false;
     if (op == "save") m_saving = 0;
-    if (op == "createWiki" || op == "tagBatch" || op == "fromTemplate" || op == "dailyNote" || op == "setProperty" || op == "historyVersion" || op == "trashBatch" || op == "batch" || op == "rename" || op == "renameFolder" || op == "removeFolder" || op == "trashFolder" || op == "restoreFolder") m_organizing = false;
+    if (op == "createWiki" || op == "tagBatch" || op == "fromTemplate" || op == "dailyNote" || op == "setProperty" || op == "historyVersion" || op == "trashBatch" || op == "batch" || op == "rename" || op == "renameFolder" || op == "removeFolder" || op == "trashFolder" || op == "restoreFolder" || op == "importPreview" || op == "importNotes" || op == "exportNotes" || op == "renameNote" || op == "backup" || op == "restoreBackup") m_organizing = false;
+    if(op == "importPreview" || op == "importNotes")m_operationProgress.clear();
     if ((documentOp && !p.args.value("recoveryCopy").toBool()) || op == "selectLibrary") m_loading = false;
     if (!r.value("ok").toBool()) {
+        if(op=="undo" || op=="redo") { m_status="无法"+QString(op=="undo"?"撤销":"重做")+"：相关内容已变化，当前笔记仍保留";emit changed();return; }
         if (op == "batch" || op == "trashBatch" || op == "tagBatch") {
             QVariantList failed;
             for (const auto &value : p.args.value("items").toList()) failed.append(QVariantMap{{"path", value.toMap().value("path")}, {"ok", false}, {"error", r.value("error")}});
@@ -271,11 +311,64 @@ void NotesController::receive(quint64 id, const QString &op, const QVariantMap &
         if (op == "read") m_historyTarget = -1;
         if (op == "renameFolder" || op == "removeFolder") { if (r.value("error") == "pendingRelocation") m_readOnly = true; m_status = organizerError(r.value("error").toString()); emit changed(); return; }
         if (op == "importAttachment") emit attachmentReady(p.args.value("request").toString(), p.args.value("webEpoch").toInt(), r);
+        if(QStringList{"backup","restoreBackup","importPreview","importNotes","exportNotes"}.contains(op)) {
+            const auto previousError=m_error;report(r);QString message=m_error.section("。",0,0);m_error=previousError;
+            if(op=="importNotes") { refresh();inspectImports();message+="。已提交的内容仍保留，可从全部笔记查看；再次导入时跳过重复内容继续。"; }
+            else if(op=="importPreview")message+="。当前笔记未改变，请检查所选文件或文件夹。";
+            else if(op=="exportNotes")message+="。原笔记仍保留，请检查保存位置。";
+            else message+="。当前笔记空间保持不变，请检查备份文件或保存位置后重试。";
+            m_status="操作未完成";m_transition=false;m_afterSave={};emit changed();emit libraryOperationFailed(message);return;
+        }
         report(r); if (m_restoreWorkspace) { m_restoreWorkspace = false; m_error.prepend("上次工作区无法恢复，请重新选择笔记库。"); } m_transition = false; m_afterSave = {}; emit changed(); return;
     }
+    if(op=="undo" || op=="redo") {
+        QString target;
+        for(const auto &v:r.value("affected").toList()) {
+            const auto n=v.toMap();
+            if(n.value("id").toString()==m_selectedId) {
+                if(!n.value("deleted").toBool()) { if(n.value("needsRead").toBool())target=n.value("path").toString(); }
+                else {++m_epoch;m_path.clear();m_selectedId.clear();m_base.clear();m_revision=m_savedRevision=0;m_applying=true;m_session->loadPrototype({});m_applying=false;m_conflict=false;m_readOnly=false;}
+            }
+        }
+        if(target.isEmpty() && m_path.isEmpty())for(const auto &v:r.value("affected").toList())if(!v.toMap().value("deleted").toBool()&&v.toMap().value("id")==r.value("primaryId")){target=v.toMap().value("path").toString();break;}
+        if(m_filter.startsWith("folder:")) {
+            const QString current=m_filter.mid(7);
+            for(const auto &v:r.value("folderChanges").toList()) {
+                const auto f=v.toMap();const auto from=f.value("from").toString(),to=f.value("to").toString();
+                if(!from.isEmpty()&&(current==from||current.startsWith(from+'/'))) { m_filter=to.isEmpty()?"all":"folder:"+to+current.mid(from.size());break; }
+            }
+        }
+        ++m_searchSerial;
+        refresh();inspectRecovery();
+        if(!target.isEmpty())load(target);
+        m_status=QString(op=="undo"?"已撤销":"已重做")+r.value("label").toString();emit changed();return;
+    }
+    if (op == "importPreview" && r.value("cancelled").toBool()) { m_importPlan.clear();m_status="已取消读取导入内容";emit changed();return; }
+    if (op == "importPreview") { m_importPlan = r; m_status = "请确认导入内容"; emit changed(); emit importPreviewReady(); return; }
+    if (op == "importNotes") {
+        m_importReport = r; m_importPlan.clear();
+        m_status = QString("已导入 %1 篇笔记、%2 个文件夹 · 跳过 %3 篇，失败 %4 篇").arg(r.value("succeeded").toInt()).arg(r.value("folderCount").toInt()).arg(r.value("skipped").toInt()).arg(r.value("failed").toInt());
+        if(r.value("cancelled").toBool())m_status.prepend("已停止 · ");
+        if (r.value("succeeded").toInt() > 0) { m_filter = "import:" + r.value("id").toString(); m_query.clear(); ++m_searchSerial; }
+        refresh(); inspectImports(); emit changed(); emit importFinished(); return;
+    }
+    if(op == "backup" || op == "restoreBackup") {
+        m_backupResult=r;m_error.clear();
+        if(op=="restoreBackup") {
+            ++m_epoch;m_path.clear();m_selectedId.clear();m_base.clear();m_revision=m_savedRevision=0;
+            m_history.clear();m_historyIndex=-1;m_historyTarget=-1;m_conflict=false;m_readOnly=false;
+            m_query.clear();m_filter="all";++m_searchSerial;m_importPlan.clear();m_importReport.clear();
+            m_knowledge.clear();m_versions.clear();m_version.clear();m_templates.clear();m_missingLink.clear();
+            m_applying=true;m_session->loadPrototype({});m_applying=false;
+            m_status="备份已恢复";refresh();inspectImports();send("recovery",{{"includeCommitText",false}});
+        }else m_status="完整备份已保存";
+        emit changed();emit backupFinished();return;
+    }
+    if (op == "imports") { m_importHistory = r.value("items").toList(); emit changed(); return; }
+    if (op == "exportNotes") { m_status = QString("已导出 %1 篇笔记").arg(r.value("count").toInt()); emit changed();emit notesExported(QUrl::fromLocalFile(r.value("directory").toString()),r.value("count").toInt());return; }
     if(QStringList{"knowledge","history","historyVersion","resolveWiki","createWiki"}.contains(op) && (p.epoch!=m_epoch||p.path!=m_path))return;
     if(op=="templates"||op=="templateSave"||op=="templateDelete"){m_templates=r.value("templates").toMap();emit changed();return;}
-    if(op=="fromTemplate"||op=="dailyNote"){load(r.value("path").toString());refresh();return;}
+    if(op=="fromTemplate"||op=="dailyNote"){m_query.clear();m_filter="all";++m_searchSerial;load(r.value("path").toString());refresh();return;}
     if(op=="knowledge"){m_knowledge=r;m_smartFolders=r.value("smartFolders").toMap();emit changed();return;}
     if(op=="linkCandidates"){if(p.epoch!=m_epoch)return;m_linkCandidates=r.value("items").toList();emit wikiCandidatesReady(p.args.value("request").toInt(),m_linkCandidates);emit changed();return;}
     if(op=="tagPlan"){m_tagPlan=r;emit changed();emit tagRenameReady();return;}
@@ -284,7 +377,7 @@ void NotesController::receive(quint64 id, const QString &op, const QVariantMap &
     if(op=="resolveWiki"){const QString target=r.value("path").toString(),fragment=r.value("fragment").toString();drain([this,target,fragment]{m_loading=true;send("read",{{"path",target},{"fragment",fragment}});emit changed();});return;}
     if(op=="history"){m_versions=r;m_version.clear();emit changed();return;}
     if(op=="historyVersion"){m_version=r;if(p.args.value("restore").toBool()){m_session->execute("replaceSource:"+r.value("text").toString());m_status="历史内容已载入，可撤销；正在自动保存";}emit changed();return;}
-    if(op=="setProperty"){load(m_path);refresh();return;}
+    if(op=="setProperty"||op=="renameNote"){load(m_path);refresh();return;}
     if(op=="smartSave"||op=="smartDelete"){m_smartFolders=r.value("smartFolders").toMap();emit changed();return;}
     if(op=="reindex"){applyListing(r);refresh();inspectKnowledge();m_status="索引已重建";emit changed();return;}
     if (op == "trashFolder" || op == "restoreFolder") {
@@ -334,7 +427,7 @@ void NotesController::receive(quint64 id, const QString &op, const QVariantMap &
     } else if (op == "search" || op == "list") {
         applyListing(r);
         // Manual refresh also detects deletion when watcher resources are exhausted.
-        if (r.contains("allNotes") && !m_path.isEmpty() && !m_saving && !busy()) {
+        if (r.contains("allNotes") && !externalDocument() && !m_path.isEmpty() && !m_saving && !busy()) {
             bool exists = false;
             for (const auto &v : r.value("allNotes").toList()) if (v.toMap().value("path").toString() == m_path) exists = true;
             if (!exists && !m_conflict) {
@@ -465,7 +558,8 @@ void NotesController::receive(quint64 id, const QString &op, const QVariantMap &
         }
     }
     else if (op == "checkpoint") { if (m_conflict) m_error = "外部版本已改变；本地恢复草稿已保存。请另存副本，或在恢复中心保留双方版本。"; }
-    else if (op == "favorite" || op == "createFolder" || op == "restore" || op == "discardDraft") { if (op == "favorite" && p.path == m_path) m_favorite = p.args.value("favorite").toBool(); refresh(); inspectRecovery(); }
+    else if (op == "createFolder") { const auto path=p.args.value("path").toString();m_status="文件夹已创建";selectCategory("folder:"+path);emit folderCreated(path); }
+    else if (op == "favorite" || op == "restore" || op == "discardDraft") { if (op == "favorite" && p.path == m_path) m_favorite = p.args.value("favorite").toBool(); refresh(); inspectRecovery(); }
     emit changed();
 }
 void NotesController::externalChange(const QVariantMap &r) {

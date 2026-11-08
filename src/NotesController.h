@@ -23,9 +23,19 @@ class NotesController final : public QObject {
     Q_PROPERTY(QVariantMap versionData MEMBER m_version NOTIFY changed)
     Q_PROPERTY(QVariantMap smartFolders MEMBER m_smartFolders NOTIFY changed)
     Q_PROPERTY(QVariantList linkCandidates MEMBER m_linkCandidates NOTIFY changed)
+    Q_PROPERTY(QVariantMap operationProgress MEMBER m_operationProgress NOTIFY changed)
+    Q_PROPERTY(QVariantMap backupResult MEMBER m_backupResult NOTIFY changed)
+    Q_PROPERTY(QVariantMap importPlan MEMBER m_importPlan NOTIFY changed)
+    Q_PROPERTY(QVariantMap importReport MEMBER m_importReport NOTIFY changed)
+    Q_PROPERTY(QVariantList importHistory MEMBER m_importHistory NOTIFY changed)
+    Q_PROPERTY(bool externalDocument READ externalDocument NOTIFY changed)
+    Q_PROPERTY(QString assetRoot READ assetRoot NOTIFY changed)
+    Q_PROPERTY(QUrl documentUrl READ documentUrl NOTIFY changed)
+    Q_PROPERTY(QString legacyLibrary READ legacyLibrary NOTIFY changed)
     Q_PROPERTY(QString library MEMBER m_library NOTIFY changed)
     Q_PROPERTY(QString path MEMBER m_path NOTIFY changed)
     Q_PROPERTY(QString selectedId MEMBER m_selectedId NOTIFY changed)
+    Q_PROPERTY(QString noteTitle READ noteTitle NOTIFY changed)
     Q_PROPERTY(QString status MEMBER m_status NOTIFY changed)
     Q_PROPERTY(QString error MEMBER m_error NOTIFY changed)
     Q_PROPERTY(bool dirty READ dirty NOTIFY changed)
@@ -58,10 +68,28 @@ public:
     Q_INVOKABLE void manageFolder(const QString &operation, const QString &path, const QString &target = {});
     void setQuery(const QString &);
     void setFilter(const QString &);
+    Q_INVOKABLE void selectCategory(const QString &filter, const QString &query = {});
     Q_INVOKABLE void restoreWorkspace();
     Q_INVOKABLE void selectLibrary(const QUrl &);
+    Q_INVOKABLE void previewImport(const QList<QUrl> &sources, const QString &folder = {}, bool keepStructure = true);
+    Q_INVOKABLE void confirmImport(bool keepDuplicates = false);
+    Q_INVOKABLE void cancelImport();
+    Q_INVOKABLE void cancelImportOperation();
+    Q_INVOKABLE void createBackup(const QUrl &destination);
+    Q_INVOKABLE void restoreBackup(const QUrl &source);
+    Q_INVOKABLE void inspectImports();
+    Q_INVOKABLE void openExternal(const QUrl &source);
+    Q_INVOKABLE void closeExternal();
+    Q_INVOKABLE void importExternal();
+    Q_INVOKABLE void exportNotes(const QUrl &destination, const QStringList &paths = {}, const QString &folder = {});
+    bool externalDocument() const { return m_path.startsWith("external:"); }
+    QString noteTitle() const;
+    QString assetRoot() const;
+    QUrl documentUrl() const;
+    QString legacyLibrary() const;
     Q_INVOKABLE void openNote(const QString &path, int match = -1);
     Q_INVOKABLE void createNote();
+    Q_INVOKABLE void renameNote(const QString &title);
     Q_INVOKABLE void createFolder(const QString &);
     Q_INVOKABLE void save();
     Q_INVOKABLE void requestClose();
@@ -116,6 +144,16 @@ public:
     Q_INVOKABLE void recoverMove();
     Q_INVOKABLE void recycle(const QString &action, const QVariantList &items);
     Q_INVOKABLE void restoreFolder(const QString &token);
+    Q_PROPERTY(bool canUndo READ canUndo NOTIFY changed)
+    Q_PROPERTY(bool canRedo READ canRedo NOTIFY changed)
+    Q_PROPERTY(QString undoText READ undoText NOTIFY changed)
+    Q_PROPERTY(QString redoText READ redoText NOTIFY changed)
+    bool canUndo() const;
+    bool canRedo() const;
+    QString undoText() const;
+    QString redoText() const;
+    Q_INVOKABLE void undo();
+    Q_INVOKABLE void redo();
     Q_PROPERTY(bool canGoBack READ canGoBack NOTIFY changed)
     Q_PROPERTY(bool canGoForward READ canGoForward NOTIFY changed)
     bool canGoBack() const { return m_historyIndex > 0; }
@@ -132,6 +170,11 @@ public:
     void receive(quint64 id, const QString &operation, const QVariantMap &result);
     void externalChange(const QVariantMap &);
 signals:
+    void importPreviewReady();
+    void importFinished();
+    void backupFinished();
+    void notesExported(const QUrl &directory, int count);
+    void libraryOperationFailed(const QString &message);
     void missingLinkRequested();
     void tagRenameReady();
     void wikiCandidatesReady(int request, const QVariantList &items);
@@ -139,6 +182,7 @@ signals:
     void changed();
     void notesChanged();
     void foldersChanged();
+    void folderCreated(const QString &path);
     void batchFinished();
     void documentAnchorRequested(const QString &heading);
     void documentLoaded(int cursor, double scroll, int matchLength);
@@ -146,6 +190,11 @@ signals:
     void requestSent(quint64 id, const QString &operation, const QVariantMap &arguments);
     void attachmentReady(const QString &request, int webEpoch, const QVariantMap &result);
 private:
+    QVariantMap m_undoState;
+    bool m_organizationHistory = false, m_textHistoryReplay = false;
+    void replayHistory(bool redo);
+    QVariantMap m_importPlan, m_importReport, m_operationProgress, m_backupResult;
+    QVariantList m_importHistory;
     QVariantMap m_missingLink, m_tagPlan;
     QVariantMap m_templates, m_knowledge, m_versions, m_version, m_smartFolders;
     QVariantList m_linkCandidates;
@@ -176,7 +225,7 @@ private:
     bool m_favorite = false, m_recoveryVisible = false;
     bool m_loading = false, m_transition = false, m_applying = false, m_readOnly = false, m_conflict = false;
     QString m_highlightQuery;
-    QString m_library, m_path, m_selectedId, m_base, m_status = QStringLiteral("请选择笔记库"), m_error, m_query, m_filter = "all";
+    QString m_library, m_path, m_selectedId, m_base, m_status = QStringLiteral("正在打开我的笔记…"), m_error, m_query, m_filter = "all";
     QStringList m_duplicateIds;
     QVariantList m_notes, m_folders;
     QVariantMap m_recovery, m_batchReport;

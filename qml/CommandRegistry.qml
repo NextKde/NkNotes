@@ -3,6 +3,7 @@ QtObject {
     required property var session
     required property var editor
     required property var controller
+    property bool historyInputFocused: false
     property bool blocked: false
     signal sidebarRequested()
     signal searchRequested()
@@ -19,8 +20,8 @@ QtObject {
         Shortcut { sequence: "Ctrl+I"; enabled: editable; onActivated: run("italic") },
         Shortcut { sequence: "Ctrl+Shift+X"; enabled: editable; onActivated: run("strike") },
         Shortcut { sequence: "Ctrl+E"; enabled: editable; onActivated: run("code") },
-        Shortcut { sequences: [StandardKey.Undo]; enabled: editable; onActivated: session.undo() },
-        Shortcut { sequences: [StandardKey.Redo]; enabled: editable; onActivated: session.redo() },
+        Shortcut { sequences: [StandardKey.Undo]; enabled: globalEnabled && !historyInputFocused && controller.canUndo; onActivated: controller.undo() },
+        Shortcut { sequences: [StandardKey.Redo]; enabled: globalEnabled && !historyInputFocused && controller.canRedo; onActivated: controller.redo() },
         Shortcut { sequence: "Ctrl+N"; enabled: globalEnabled && !!controller.library; onActivated: newNoteRequested() },
         Shortcut { sequence: "Ctrl+S"; enabled: globalEnabled; onActivated: controller.save() },
         Shortcut { sequence: "Ctrl+H"; enabled: editable; onActivated: replaceRequested() },

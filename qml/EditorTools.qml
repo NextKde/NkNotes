@@ -25,6 +25,7 @@ Item {
         if (width > 600) { outlineVisible = !outlineVisible; controller.setPreference("editorOutline", outlineVisible) }
         else { outlinePanel.anchorItem = anchor; outlinePanel.open() }
     }
+    function showShortcuts(anchor) { helpPanel.anchorItem = anchor; helpPanel.open() }
     function openMenu(anchor) { toolsMenu.anchorItem = anchor; toolsMenu.openAtAnchor() }
     function openContext(x, y, suggestions) {
         caretAnchor.x = Math.max(0, Math.min(width - 30, x)); caretAnchor.y = Math.max(0, Math.min(height - 24, y))
@@ -176,16 +177,12 @@ Item {
         id: toolsMenu; height: Math.min(implicitHeight, Math.max(100, root.height - 16)); sourceItem: root.sceneItem
         LiquidPopoverItem { text: "大纲 / 折叠"; onTriggered: root.toggleOutline(toolsMenu.anchorItem) }
         LiquidPopoverItem { text: "插入自动目录"; enabled: root.editable; onTriggered: root.post("insertToc") }
-        LiquidPopoverItem { text: "插入图片或附件…"; enabled: root.editable; onTriggered: root.post("chooseAttachment") }
+        LiquidPopoverItem { text: "插入图片或附件…"; enabled: root.editable && !root.controller.externalDocument; onTriggered: root.post("chooseAttachment") }
         LiquidPopoverItem { text: "图片属性…"; enabled: !!root.state.image; onTriggered: root.openImage() }
-        LiquidPopoverItem { text: "附件管理…"; onTriggered: { root.controller.inspectAttachments(); attachmentsPanel.anchorItem = toolsMenu.anchorItem; attachmentsPanel.open() } }
+        LiquidPopoverItem { text: "附件管理…"; enabled: !root.controller.externalDocument; onTriggered: { root.controller.inspectAttachments(); attachmentsPanel.anchorItem = toolsMenu.anchorItem; attachmentsPanel.open() } }
         LiquidPopoverItem { text: "数学公式…"; enabled: root.editable; onTriggered: root.openMath() }
         LiquidPopoverItem { text: "插入脚注"; enabled: root.editable; onTriggered: root.post("footnote") }
         LiquidPopoverItem { text: "代码语言与复制…"; enabled: !!root.state.code; onTriggered: root.openCode() }
-        LiquidPopoverItem { text: "导出 PDF…"; enabled: !root.source.exporting && !root.session.composing; onTriggered: root.source.chooseExport("pdf") }
-        LiquidPopoverItem { text: "导出独立 HTML…"; enabled: !root.source.exporting && !root.session.composing; onTriggered: root.source.chooseExport("html") }
-        LiquidPopoverItem { text: "打印预览（PDF）…"; enabled: !root.source.exporting && !root.session.composing; onTriggered: root.source.printPreview() }
-        LiquidPopoverItem { text: "键盘快捷键…"; onTriggered: { helpPanel.anchorItem = toolsMenu.anchorItem; helpPanel.open() } }
     }
     LiquidContentPopover {
         id: mathPanel; sourceItem: root.sceneItem; preferredSide: "bottom"; width: 370
@@ -193,7 +190,8 @@ Item {
         function submit() { if (!formula.inputMethodComposing && formula.text.trim()) { root.post("setMath", {pos: targetPos, source: formula.text, display: mathMode.currentIndex === 1}); close(); source.editor.forceActiveFocus() } }
         contentItem: ColumnLayout {
             Label { text: "数学公式"; font.bold: true; color: AppTheme.text }
-            LiquidSelect { id: mathMode; model: ["行内公式", "独立公式"]; materialForm: true; Accessible.name: "公式显示方式"; onActivated: function(index) { mathMode.currentIndex = index } }
+            LiquidSelect {
+                    appearanceMode: AppTheme.appearanceMode; id: mathMode; model: ["行内公式", "独立公式"]; materialForm: true; Accessible.name: "公式显示方式"; onActivated: function(index) { mathMode.currentIndex = index } }
             LiquidTextField { id: formula; Layout.fillWidth: true; materialForm: true; placeholderText: "例如 \\frac{a}{b} 或 E=mc^2"; Accessible.name: "LaTeX 公式"; onAccepted: mathPanel.submit() }
             LiquidActionButton { text: "应用公式"; materialForm: true; enabled: root.editable && !!formula.text.trim() && !formula.inputMethodComposing; onClicked: mathPanel.submit() }
         }
@@ -203,7 +201,8 @@ Item {
         property int targetPos: 0
         contentItem: ColumnLayout {
             Label { text: "代码块"; font.bold: true; color: AppTheme.text }
-            LiquidSelect { id: language; Layout.fillWidth: true; materialForm: true; model: ["plain", "cpp", "python", "javascript", "typescript", "json", "bash", "qml", "html", "css", "sql", "markdown", "yaml", "mermaid"]; Accessible.name: "代码语言"; enabled: root.editable; onActivated: function(index) { language.currentIndex = index; root.post("codeLanguage", {pos: codePanel.targetPos, language: model[index] === "plain" ? "" : model[index]}) } }
+            LiquidSelect {
+                    appearanceMode: AppTheme.appearanceMode; id: language; Layout.fillWidth: true; materialForm: true; model: ["plain", "cpp", "python", "javascript", "typescript", "json", "bash", "qml", "html", "css", "sql", "markdown", "yaml", "mermaid"]; Accessible.name: "代码语言"; enabled: root.editable; onActivated: function(index) { language.currentIndex = index; root.post("codeLanguage", {pos: codePanel.targetPos, language: model[index] === "plain" ? "" : model[index]}) } }
             LiquidActionButton { text: "复制代码"; materialForm: true; onClicked: root.post("copyCode", {pos: codePanel.targetPos}) }
             Label { Layout.fillWidth: true; text: "选择 mermaid 显示图表预览；源码仍可直接编辑。"; wrapMode: Text.WordWrap; font.pixelSize: 11; color: AppTheme.mutedText }
         }
@@ -233,7 +232,8 @@ Item {
         id: attachmentsPanel; sourceItem: root.sceneItem; preferredSide: "bottom"; width: 440
         contentItem: ColumnLayout {
             Label { text: "附件管理"; font.bold: true; color: AppTheme.text }
-            LiquidSelect { id: attachmentTab; materialForm: true; model: ["库内附件", "附件回收区"]; onActivated: function(index) { attachmentTab.currentIndex = index } }
+            LiquidSelect {
+                    appearanceMode: AppTheme.appearanceMode; id: attachmentTab; materialForm: true; model: ["库内附件", "附件回收区"]; onActivated: function(index) { attachmentTab.currentIndex = index } }
             ListView {
                 Layout.fillWidth: true; Layout.preferredHeight: Math.min(330, root.height - 140); clip: true
                 model: (attachmentTab.currentIndex ? root.controller.attachments.removed : root.controller.attachments.items) || []
@@ -250,7 +250,7 @@ Item {
                 Label { anchors.centerIn: parent; visible: !parent.count; text: "这里暂无附件"; color: AppTheme.mutedText; font.pixelSize: 12 }
                 ScrollBar.vertical: ScrollBar {}
             }
-            Label { Layout.fillWidth: true; text: "只回收磁盘上无引用的文件，可在附件回收区恢复。"; wrapMode: Text.WordWrap; color: AppTheme.mutedText; font.pixelSize: 11 }
+            Label { Layout.fillWidth: true; text: "只回收未被笔记引用的附件，可在附件回收区恢复。"; wrapMode: Text.WordWrap; color: AppTheme.mutedText; font.pixelSize: 11 }
         }
     }
     LiquidContentPopover {

@@ -82,6 +82,7 @@ int main(int argc, char **argv) {
     }
     QCommandLineParser parser;
     parser.addHelpOption();
+    parser.addPositionalArgument("file", "Open an external Markdown file.", "[file]");
     parser.addOption({"settings-dir", "Store NextNotes preferences in this directory.", "directory"});
     parser.process(app);
     if (parser.isSet("settings-dir")) {
@@ -94,11 +95,20 @@ int main(int argc, char **argv) {
     EditorSession session;
     NotesRepository repository;
     NotesController controller(&session, &repository);
+    if (parser.isSet("settings-dir")) controller.setPreference("managedStorage", QDir(parser.value("settings-dir")).absoluteFilePath("Library"));
+    bool pendingExternal = !parser.positionalArguments().isEmpty();
+    QObject::connect(&controller, &NotesController::changed, &controller, [&] {
+        if (pendingExternal && !controller.property("library").toString().isEmpty() && !controller.busy()) {
+            pendingExternal = false;
+            const QUrl file = QUrl::fromLocalFile(QFileInfo(parser.positionalArguments().first()).absoluteFilePath());
+            QMetaObject::invokeMethod(&controller, [&controller, file] { controller.openExternal(file); }, Qt::QueuedConnection);
+        }
+    });
     EditorRequests requests;
     EditorAssets assets;
     QQuickWebEngineProfile::defaultProfile()->installUrlSchemeHandler("nkasset", &assets);
-    QObject::connect(&controller, &NotesController::changed, &assets, [&] { assets.library = controller.property("library").toString(); });
-    QObject::connect(&controller, &NotesController::changed, &requests, [&] { requests.setLibrary(controller.property("library").toString()); });
+    QObject::connect(&controller, &NotesController::changed, &assets, [&] { assets.library = controller.assetRoot(); });
+    QObject::connect(&controller, &NotesController::changed, &requests, [&] { requests.setLibrary(controller.assetRoot()); });
     QQuickWebEngineProfile::defaultProfile()->setUrlRequestInterceptor(&requests);
     QQuickWebEngineProfile::defaultProfile()->setSpellCheckEnabled(true);
     QQuickWebEngineProfile::defaultProfile()->setSpellCheckLanguages({"en-US"});

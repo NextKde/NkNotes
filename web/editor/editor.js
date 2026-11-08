@@ -397,6 +397,15 @@ async function start(){
   bridge.focusRequested.connect(focusEditor);
   bridge.ready();
  });
+ // Route editor, source and code-block history through the same application
+ // responder. Native text fields retain their own local undo.
+ document.addEventListener('keydown',event=>{
+  if(event.isComposing || !(event.ctrlKey||event.metaKey) || event.altKey)return;
+  const key=event.key.toLowerCase();
+  if(!['z','y'].includes(key) || event.target.closest('input,textarea'))return;
+  event.preventDefault();event.stopImmediatePropagation();
+  bridge.history(key==='y'||event.shiftKey);
+ },true);
  window.addEventListener('scroll',()=>{scheduleReport();tools.ui();},{passive:true});
  window.addEventListener('resize',()=>tools.ui());
 }

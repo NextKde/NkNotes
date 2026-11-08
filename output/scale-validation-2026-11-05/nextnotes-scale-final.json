@@ -1,0 +1,14 @@
+{
+    "backlinksMs": 91,
+    "burst1000ConvergeMs": 2119,
+    "heartbeatTicks": 849,
+    "indexedQueries30Ms": 650,
+    "initialScanMs": 10724,
+    "longBytes": 2132903,
+    "longReadMs": 31,
+    "notes": 10001,
+    "ok": true,
+    "peakRssKiB": 274724,
+    "watchNotifications": 1,
+    "workerWaitMainThreadMaxGapMs": 33
+}

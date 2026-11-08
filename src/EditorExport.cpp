@@ -65,7 +65,7 @@ QString NotesController::exportDocument(const QString &body, const QString &titl
     QString html = body;
     const QRegularExpression images("<img\\b[^>]*\\bsrc=\"([^\"]+)\"[^>]*>", QRegularExpression::CaseInsensitiveOption);
     auto matches = images.globalMatch(body);
-    const QString root = QFileInfo(m_library).canonicalFilePath();
+    const QString root = QFileInfo(assetRoot()).canonicalFilePath();
     while (matches.hasNext()) {
         const auto match = matches.next();
         const QString encoded = match.captured(1);

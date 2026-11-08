@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Dialogs
 import QtQuick.Controls
 import QtWebEngine
 import QtWebChannel
@@ -24,16 +23,18 @@ Item {
     property string notification: ""
     function notify(text) { notification = text; noticeTimer.restart() }
     function action(name, args) { if (webReady) bridge.actionRequested({epoch: session.webDocument().epoch, name: name, args: args || {}}) }
+    function showShortcuts(anchor) { tools.showShortcuts(anchor) }
     function openTools(anchor) { if (!session.sourceMode) tools.openMenu(anchor) }
     function toggleOutline(anchor) { tools.toggleOutline(anchor) }
     function correctSpelling(word) { web.replaceMisspelledWord(word); editorFacade.forceActiveFocus() }
-    function chooseExport(format) { if (!webReady || session.sourceMode || session.composing || exporting) return; exportDialog.format = format; exportDialog.currentFolder = "file://" + root.controller.library.split("/").map(encodeURIComponent).join("/"); exportDialog.selectedFile = exportDialog.currentFolder + "/" + encodeURIComponent(root.controller.path.split("/").pop().replace(/\.md$/i, "") + "." + format); exportDialog.open() }
+    function exportBaseName() { return String(root.controller.noteTitle || "笔记").replace(/[\\/:*?"<>|\u0000-\u001f]/g, "-").replace(/[. ]+$/g, "").slice(0,100) || "笔记" }
+    function chooseExport(format) { if (!webReady || session.sourceMode || session.composing || exporting) return; exportDialog.format = format; exportDialog.selectedFile = String(exportDialog.currentFolder) + "/" + encodeURIComponent(root.exportBaseName() + "." + format); exportDialog.open() }
     function beginExport(format, target, printing) {
         if (!webReady || session.sourceMode || session.composing || exporting) return
         const path = printing ? controller.printPreviewPath() : controller.outputPath(target, format)
         if (!path) { notify("请选择有效的输出路径"); return }
         exporting = true
-        pendingExport = {token: ++exportSequence, epoch: session.webDocument().epoch, format: format, target: target, path: path, printing: !!printing}
+        pendingExport = {token: ++exportSequence, epoch: session.webDocument().epoch, format: format, target: target, path: path, title: root.controller.noteTitle, printing: !!printing}
         bridge.prepareExportRequested(pendingExport.token)
     }
     function printPreview() { beginExport("pdf", "", true) }
@@ -87,6 +88,7 @@ Item {
             const value = JSON.parse(json)
             if (value.epoch === root.session.webDocument().epoch) { root.editorState = value; if (value.tableWidths) root.controller.setTableWidths(value.tableWidths) }
         }
+        function history(redo) { if (redo) root.controller.redo(); else root.controller.undo() }
         function notice(text) { root.notify(text) }
         function dismissSlash() { tools.closeSlash() }
         function requestTool(name) { if (name === "math") tools.openMath(); else if (name === "image") tools.openImage() }
@@ -99,9 +101,9 @@ Item {
             if (!value || token !== value.token) return
             if (generation !== value.epoch || generation !== root.session.webDocument().epoch) { root.pendingExport = null; root.exporting = false; root.notify("笔记已切换，请重新导出"); return }
             if (value.format === "html") {
-                root.controller.exportHtml(value.target, body, root.controller.path)
+                root.controller.exportHtml(value.target, body, value.title)
                 root.pendingExport = null; root.exporting = false
-            } else root.controller.exportPdf(value.path, body, root.controller.path, value.printing)
+            } else root.controller.exportPdf(value.path, body, value.title, value.printing)
         }
         function ready() {
             root.lastOptions = ""
@@ -165,21 +167,27 @@ Item {
         anchors.fill: parent
         source: root; session: root.session; controller: root.controller; sceneItem: root.sceneItem
     }
-    FileDialog {
+    LiquidFilePicker {
+        sourceItem: root.sceneItem; acceptText: "选择"; rejectText: "取消"
+        locationPlaceholder: "输入文件夹路径"; fileNamePlaceholder: "文件名"; emptyText: "此文件夹中没有可选文件"
+        overwriteTitle: "替换这个文件？"; overwriteText: "目标位置已有同名文件，替换后将覆盖原内容。"; overwriteAcceptText: "替换"; unavailableText: "文件夹不存在或无法访问";
         id: attachmentDialog
         title: "导入图片或附件"
-        nameFilters: ["图片 (*.png *.jpg *.jpeg *.gif *.webp *.svg)", "所有文件 (*)"]
+        nameFilters: ["*"]
         property string request: ""
         property int generation: 0
         onAccepted: root.controller.importAttachment(request, generation, selectedFile)
         onRejected: bridge.attachmentResult(request, generation, {ok: false, error: "cancelled"})
     }
-    FileDialog {
+    LiquidFilePicker {
+        sourceItem: root.sceneItem; acceptText: "导出"; rejectText: "取消"
+        locationPlaceholder: "输入文件夹路径"; fileNamePlaceholder: "文件名"; emptyText: "此文件夹中没有可选文件"
+        overwriteTitle: "替换这个文件？"; overwriteText: "目标位置已有同名文件，替换后将覆盖原内容。"; overwriteAcceptText: "替换"; unavailableText: "文件夹不存在或无法访问";
         id: exportDialog
         property string format: "pdf"
         title: format === "pdf" ? "导出 PDF" : "导出独立 HTML"
-        fileMode: FileDialog.SaveFile
-        nameFilters: format === "pdf" ? ["PDF 文档 (*.pdf)"] : ["HTML 文档 (*.html)"]
+        mode: "saveFile"
+        nameFilters: format === "pdf" ? ["*.pdf"] : ["*.html"]
         defaultSuffix: format
         onAccepted: root.beginExport(format, selectedFile, false)
     }
@@ -209,9 +217,9 @@ Item {
         target: root.session
         function onWebLoadRequested(document) {
             if (!root.webReady) return
-            document.library = root.controller.library
+            document.library = root.controller.assetRoot
             document.tableWidths = root.controller.tableWidths()
-            document.baseUrl = "file://" + (root.controller.library + "/" + root.controller.path).split("/").map(encodeURIComponent).join("/")
+            document.baseUrl = root.controller.documentUrl.toString()
             bridge.loadRequested(document)
         }
         function onWebCommandRequested(command) { if (root.webReady) bridge.commandRequested(command) }

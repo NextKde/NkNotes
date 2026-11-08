@@ -1,4 +1,5 @@
 #include "NotesRepository.h"
+#include "ManagedStore.h"
 #include "MarkdownFile.h"
 #include "SafeCommit.h"
 #include "LinkPaths.h"
@@ -63,16 +64,23 @@ class RepositoryWorker final : public QObject {
     Q_OBJECT
 public:
     explicit RepositoryWorker(QObject *parent = nullptr) : QObject(parent) {}
-    void execute(quint64 id, const QString &op, const QVariantMap &args) {
+    void execute(quint64 id, const QString &op, const QVariantMap &args, std::shared_ptr<std::atomic_bool> cancelled) {
+        currentCancellation = std::move(cancelled);
+        currentProgress = [this,id,op](const QVariantMap &value) { emit operationProgress(id,op,value); };
         QVariantMap result = dispatch(op, args);
+        currentProgress = {}; currentCancellation.reset();
         result.insert("library", root);
         result.insert("generation", generation);
         emit finished(id, op, result);
     }
 signals:
     void finished(quint64, const QString &, const QVariantMap &);
+    void operationProgress(quint64, const QString &, const QVariantMap &);
     void changed(const QVariantMap &);
 private:
+    std::unique_ptr<ManagedStore> managed;
+    std::function<void(const QVariantMap &)> currentProgress;
+    std::shared_ptr<std::atomic_bool> currentCancellation;
     bool editingTags = false;
     Knowledge::Index index;
     QVariantMap cachedListing;
@@ -222,6 +230,20 @@ private:
 QVariantMap RepositoryWorker::dispatch(const QString &op, const QVariantMap &a)
 {
     QString error;
+    if (op == "selectLibrary" && a.value("managed").toBool()) {
+        try {
+            auto next = std::make_unique<ManagedStore>(a.value("path").toString());
+            auto result = next->dispatch("list", {});
+            if (!result.value("ok").toBool()) return result;
+            managed = std::move(next); root = managed->directory(); ++generation;
+            delete watcher; watcher = nullptr; delete debounce; debounce = nullptr; lock.reset();
+            return result;
+        } catch (...) { return failure("databaseError", "无法打开内部笔记存储；未修改原笔记目录。"); }
+    }
+    if (managed) {
+        if (a.contains("generation") && a.value("generation").toULongLong() != generation) return failure("staleGeneration");
+        return managed->dispatch(op, a, currentProgress, currentCancellation);
+    }
     if (op == "selectLibrary") {
         if (!memoryDrafts.isEmpty()) return failure("pendingDrafts", "Save or explicitly discard in-memory drafts before switching libraries.");
         QFileInfo selected(a.value("path").toString());
@@ -862,6 +884,7 @@ NotesRepository::NotesRepository(QObject *parent) : QObject(parent), m_worker(ne
     m_worker->moveToThread(&m_thread);
     connect(&m_thread, &QThread::finished, m_worker, &QObject::deleteLater);
     connect(m_worker, &RepositoryWorker::finished, this, &NotesRepository::finished);
+    connect(m_worker, &RepositoryWorker::operationProgress, this, &NotesRepository::operationProgress);
     connect(m_worker, &RepositoryWorker::changed, this, &NotesRepository::libraryChanged);
     m_thread.start();
 }
@@ -874,7 +897,10 @@ NotesRepository::~NotesRepository()
 quint64 NotesRepository::request(const QString &operation, const QVariantMap &arguments)
 {
     const quint64 id = ++m_nextRequest;
-    QMetaObject::invokeMethod(m_worker, [worker = m_worker, id, operation, arguments] { worker->execute(id, operation, arguments); }, Qt::QueuedConnection);
+    auto cancelled = std::make_shared<std::atomic_bool>(false);
+    if (operation == "importPreview" || operation == "importNotes") m_cancelled = cancelled;
+    QMetaObject::invokeMethod(m_worker, [worker = m_worker, id, operation, arguments, cancelled] { worker->execute(id, operation, arguments, cancelled); }, Qt::QueuedConnection);
     return id;
 }
+void NotesRepository::cancelOperation() { if (m_cancelled) m_cancelled->store(true); }
 #include "NotesRepository.moc"

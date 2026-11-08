@@ -1,0 +1,773 @@
+#include "ManagedStore.h"
+#include "MarkdownFile.h"
+#include "KnowledgeIndex.h"
+#include <sqlite3.h>
+#include <QDir>
+#include <QDirIterator>
+#include <QFile>
+#include <QSaveFile>
+#include <QFileInfo>
+#include <QDateTime>
+#include <QJsonDocument>
+#include <QJsonArray>
+#include <QJsonObject>
+#include <QRegularExpression>
+#include <QUrl>
+#include <QUuid>
+#include <QMimeDatabase>
+#include <QLockFile>
+#include <algorithm>
+#include <QTemporaryDir>
+#include <QElapsedTimer>
+#include <QThread>
+
+namespace {
+struct StoreError { QString code, detail; };
+QString uid() { return QUuid::createUuid().toString(QUuid::WithoutBraces); }
+QString utc() { return QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs); }
+QString hashText(const QString &text) { return MarkdownFile::digest(text.toUtf8()); }
+QVariantMap ok() { return {{"ok", true}}; }
+void require(bool value, const QString &code, const QString &detail = {}) { if (!value) throw StoreError{code, detail}; }
+QString parentFolder(const QString &path) { const auto folder = QFileInfo(path).path(); return folder == "." ? QString() : folder; }
+QString relativeManagedPath(const QString &source, const QString &target) {
+    return QDir("/" + parentFolder(source)).relativeFilePath("/" + target);
+}
+bool validPath(const QString &path, bool empty = false) {
+    if (path.isEmpty()) return empty;
+    if (QDir::isAbsolutePath(path) || path.contains('\\') || path.contains(QChar::Null)) return false;
+    for (const auto &part : path.split('/')) if (part.isEmpty() || part == "." || part == ".." || part == ".nextnotes" || part == ".git") return false;
+    return true;
+}
+QByteArray bytesAt(const QString &path, qint64 max = 64 * 1024 * 1024) {
+    QFile f(path); require(QFileInfo(path).isFile() && QFileInfo(path).size() <= max, "readFailed", path);
+    require(f.open(QIODevice::ReadOnly), "readFailed", path); auto bytes = f.read(max + 1); require(f.error() == QFileDevice::NoError && bytes.size() <= max && f.atEnd(), "readFailed", path); return bytes;
+}
+void writeBytes(const QString &path, const QByteArray &bytes) {
+    require(QDir().mkpath(QFileInfo(path).absolutePath()), "writeFailed", path);
+    QSaveFile f(path); f.setDirectWriteFallback(false);
+    require(f.open(QIODevice::WriteOnly) && f.write(bytes) == bytes.size() && f.commit(), "writeFailed", path);
+}
+QString noteSummary(QString text) {
+    if (text.startsWith("---\n")) { int end = text.indexOf("\n---", 3); if (end >= 0) text = text.mid(end + 4); }
+    text = text.trimmed(); if (text.startsWith("# ")) { int end = text.indexOf('\n'); if (end >= 0) text = text.mid(end + 1); }
+    return text.simplified().left(150);
+}
+}
+
+struct ManagedStore::Impl {
+    sqlite3 *db = nullptr;
+    struct Change { QString table, id; QVariantMap before, after; };
+    struct Command { QString label; QList<Change> changes; QString primaryId; };
+    QList<Command> undoStack, redoStack;
+    void initializeUndo();
+    void beginCapture();
+    Command finishCapture(const QString &label);
+    QVariantMap historyState() const;
+    QVariantMap applyHistory(bool redo);
+    QString commandLabel(const QString &op, const QVariantMap &a) const;
+
+    std::function<void(const QVariantMap &)> progress;
+    std::shared_ptr<std::atomic_bool> cancelled;
+    bool stopping() const { return cancelled && cancelled->load(); }
+    void notify(const QString &phase, int done, int total = 0) { if (progress) progress({{"phase",phase},{"completed",done},{"total",total}}); }
+    QString root;
+    Knowledge::Index index;
+    QHash<QString, MarkdownFile::Document> external;
+    std::unique_ptr<QLockFile> lock;
+    ~Impl() { if (db) sqlite3_close(db); }
+    QVariantList query(const QString &sql, const QVariantList &args = {}) {
+        sqlite3_stmt *raw = nullptr;
+        const auto statement = sql.toUtf8();
+        require(sqlite3_prepare_v2(db, statement.constData(), -1, &raw, nullptr) == SQLITE_OK, "databaseError", QString::fromUtf8(sqlite3_errmsg(db)));
+        std::unique_ptr<sqlite3_stmt, decltype(&sqlite3_finalize)> guard(raw, sqlite3_finalize);
+        for (int i = 0; i < args.size(); ++i) {
+            int result;
+            if (!args[i].isValid()) result = sqlite3_bind_null(raw, i + 1);
+            else if (args[i].metaType().id() == QMetaType::QByteArray) { const auto b = args[i].toByteArray(); result = sqlite3_bind_blob(raw, i + 1, b.constData(), b.size(), SQLITE_TRANSIENT); }
+            else if (args[i].metaType().id() == QMetaType::Bool || args[i].metaType().id() == QMetaType::Int || args[i].metaType().id() == QMetaType::LongLong) result = sqlite3_bind_int64(raw, i + 1, args[i].toLongLong());
+            else { const auto b = args[i].toString().toUtf8(); result = sqlite3_bind_text(raw, i + 1, b.constData(), b.size(), SQLITE_TRANSIENT); }
+            require(result == SQLITE_OK, "databaseError", QString::fromUtf8(sqlite3_errmsg(db)));
+        }
+        QVariantList result; int state;
+        while ((state = sqlite3_step(raw)) == SQLITE_ROW) {
+            QVariantMap row;
+            for (int c = 0; c < sqlite3_column_count(raw); ++c) {
+                const auto name = QString::fromUtf8(sqlite3_column_name(raw, c));
+                switch (sqlite3_column_type(raw, c)) {
+                case SQLITE_INTEGER: row.insert(name, qlonglong(sqlite3_column_int64(raw, c))); break;
+                case SQLITE_BLOB: row.insert(name, QByteArray(static_cast<const char *>(sqlite3_column_blob(raw, c)), sqlite3_column_bytes(raw, c))); break;
+                case SQLITE_NULL: row.insert(name, QVariant()); break;
+                default: row.insert(name, QString::fromUtf8(reinterpret_cast<const char *>(sqlite3_column_text(raw, c)), sqlite3_column_bytes(raw, c))); break;
+                }
+            }
+            result.append(row);
+        }
+        require(state == SQLITE_DONE, "databaseError", QString::fromUtf8(sqlite3_errmsg(db))); return result;
+    }
+    QVariantMap one(const QString &sql, const QVariantList &args = {}) { const auto rows = query(sql, args); return rows.isEmpty() ? QVariantMap() : rows.first().toMap(); }
+    QVariantMap note(const QString &path, bool deleted = false) {
+        auto n = one("SELECT * FROM notes WHERE path=? AND (deleted='' OR ?=1)", {path, deleted}); require(!n.isEmpty(), "notFound", path); return n;
+    }
+    QVariantMap settings(const QString &kind) {
+        QVariantMap result; for (const auto &v : query("SELECT name,value FROM settings WHERE kind=?", {kind})) { auto r = v.toMap(); result.insert(r["name"].toString(), QJsonDocument::fromJson(r["value"].toByteArray()).object().value("value").toVariant()); } return result;
+    }
+    void setSetting(const QString &kind, const QString &name, const QVariant &value) {
+        query("INSERT INTO settings(kind,name,value) VALUES(?,?,?) ON CONFLICT(kind,name) DO UPDATE SET value=excluded.value", {kind,name,QJsonDocument(QJsonObject{{"value",QJsonValue::fromVariant(value)}}).toJson(QJsonDocument::Compact)});
+    }
+    void folder(const QString &path) {
+        require(validPath(path, true), "invalidName", path); if (path.isEmpty()) return;
+        require(one("SELECT id FROM folders WHERE path=? AND deleted<>''", {path}).isEmpty(), "alreadyExists", path);
+        QString current; for (const auto &part : path.split('/')) { current += (current.isEmpty() ? "" : "/") + part; require(one("SELECT id FROM folders WHERE path=? AND deleted<>''",{current}).isEmpty(),"alreadyExists",current); query("INSERT OR IGNORE INTO folders(id,path,deleted,trash_token) VALUES(?,?,'','')", {uid(),current}); }
+    }
+    QString available(QString path) {
+        require(validPath(path), "invalidName", path); const auto base = path;
+        for (int count = 2; !one("SELECT id FROM notes WHERE path=?", {path}).isEmpty(); ++count) path = base.left(base.size() - 3) + " " + QString::number(count) + ".md";
+        return path;
+    }
+    void version(const QVariantMap &n) {
+        query("INSERT OR IGNORE INTO versions(note_id,hash,text,time) VALUES(?,?,?,?)", {n["id"],n["hash"],n["text"],utc()});
+        query("DELETE FROM versions WHERE note_id=? AND rowid NOT IN (SELECT rowid FROM versions WHERE note_id=? ORDER BY rowid DESC LIMIT 50)", {n["id"],n["id"]});
+    }
+    void updateText(const QVariantMap &n, const QString &text) {
+        version(n); query("UPDATE notes SET text=?,hash=?,modified=? WHERE id=?", {text,hashText(text),utc(),n["id"]});
+        version(note(n["path"].toString(), true));
+    }
+    QVariantMap document(const QVariantMap &n) { return {{"ok",true},{"path",n["path"]},{"text",n["text"]},{"id",n["id"]},{"baseHash",n["hash"]},{"favorite",n["favorite"].toBool()},{"readOnly",!MarkdownFile::formatError(n["text"].toString()).isEmpty()},{"readOnlyReason",MarkdownFile::formatError(n["text"].toString())}}; }
+    QVariantMap insert(const QString &requested, const QString &text, const QString &source = {}, const QString &sourceHash = {}, const QString &batch = {}) {
+        require(MarkdownFile::formatError(text).isEmpty(), "unsupportedFormat", source);
+        const auto path = available(requested); folder(parentFolder(path)); const auto id = uid(), time = utc();
+        query("INSERT INTO notes(id,path,text,hash,created,modified,source,source_hash,import_batch) VALUES(?,?,?,?,?,?,?,?,?)", {id,path,text,hashText(text),time,time,source,sourceHash,batch});
+        auto n = note(path); version(n); return document(n);
+    }
+    void refreshIndex() {
+        QSet<QString> present;
+        for (const auto &v : query("SELECT path,text,hash FROM notes WHERE deleted=''")) { const auto n=v.toMap(); const auto path=n["path"].toString(); present.insert(path); index.put(path,n["text"].toString(),n["hash"].toString(),MarkdownFile::title(n["text"].toString(),QFileInfo(path).completeBaseName())); }
+        const auto keys = index.documents.keys(); for (const auto &path : keys) if (!present.contains(path)) index.remove(path);
+    }
+    QVariantMap listing(const QVariantMap &a = {}) {
+        refreshIndex(); QVariantList all, matches, folders;
+        for (const auto &v : query("SELECT path FROM folders WHERE deleted='' ORDER BY path")) folders.append(v.toMap()["path"]);
+        QString queryText=a.value("query").toString().trimmed(); const auto filter=a.value("filter").toString();
+        QStringList tags; QVariantMap props; QString scope; bool favorite = false;
+        static const QRegularExpression terms(R"rx((?:^|\s)(tag|folder|is|prop):("(?:[^"\\]|\\.)*"|'[^']*'|[^\s]+))rx");
+        auto hits=terms.globalMatch(queryText); QList<QPair<int,int>> spans;
+        while(hits.hasNext()) { const auto m=hits.next(); auto value=Knowledge::scalar(m.captured(2)); const auto key=m.captured(1); if(key=="tag")tags.append(value); if(key=="folder")scope=value; if(key=="is"&&value=="favorite")favorite=true; if(key=="prop"&&value.contains('='))props.insert(value.section('=',0,0),value.section('=',1)); spans.append({int(m.capturedStart()),int(m.capturedLength())}); }
+        for(auto it=spans.crbegin();it!=spans.crend();++it)queryText.remove(it->first,it->second);queryText=queryText.trimmed();
+        const auto candidates=index.candidates(queryText);
+        for(const auto &v:query("SELECT * FROM notes WHERE deleted=''")) {
+            const auto n=v.toMap(); const auto path=n["path"].toString(); const auto d=index.documents.value(path);
+            QVariantMap row{{"id",n["id"]},{"path",path},{"title",d.title},{"summary",noteSummary(d.text)},{"baseHash",n["hash"]},{"pinned",n["pinned"].toBool()},{"favorite",n["favorite"].toBool()},{"createdUtc",n["created"]},{"modifiedUtc",n["modified"]},{"displayModifiedUtc",n["modified"]},{"tags",d.props.value("tags")},{"properties",d.props},{"source",n["source"]},{"importBatch",n["import_batch"]}};
+            all.append(row);
+            if(filter=="favorite"&&!n["favorite"].toBool())continue;
+            if(filter=="inbox"&&!parentFolder(path).isEmpty())continue;
+            if(filter.startsWith("folder:")&&parentFolder(path)!=filter.mid(7))continue;
+            if(filter.startsWith("import:")&&n["import_batch"].toString()!=filter.mid(7))continue;
+            if(!candidates.contains(path)||(!queryText.isEmpty()&&!d.text.contains(queryText,Qt::CaseInsensitive)&&!d.title.contains(queryText,Qt::CaseInsensitive)))continue;
+            bool accept=true;for(const auto &tag:tags)if(!d.props.value("tags").toStringList().contains(tag))accept=false;
+            for(auto it=props.begin();it!=props.end();++it)if(d.props.value(it.key()).toString()!=it.value().toString())accept=false;
+            if(!accept||(!scope.isEmpty()&&parentFolder(path)!=scope)||(favorite&&!n["favorite"].toBool()))continue;
+            const int pos=queryText.isEmpty() ? -1 : d.text.indexOf(queryText,0,Qt::CaseInsensitive);
+            row.insert("match",pos);row.insert("matchText",queryText);
+            if(pos>=0) {
+                int bodyStart=0;
+                if(d.text.startsWith("---\n")) {
+                    const auto end=QRegularExpression("(?m)^(?:---|\\.\\.\\.)[ \\t]*$").match(d.text,4);
+                    if(end.hasMatch())bodyStart=end.capturedEnd();
+                }
+                row.insert("summary",d.text.mid(qMax(bodyStart,qMax(0,pos-32)),150).simplified());
+            }
+            matches.append(row);
+        }
+        const auto sort=a.value("sort","modified").toString();const bool ascending=a.value("ascending").toBool();
+        std::stable_sort(matches.begin(),matches.end(),[&](const QVariant &l,const QVariant &r){auto x=l.toMap(),y=r.toMap();if(x["pinned"].toBool()!=y["pinned"].toBool())return x["pinned"].toBool();const auto field=sort=="title"?"title":sort=="created"?"createdUtc":"displayModifiedUtc";int c=QString::localeAwareCompare(x[field].toString(),y[field].toString());return c==0?x["id"].toString()<y["id"].toString():ascending?c<0:c>0;});
+        return {{"ok",true},{"notes",matches},{"allNotes",all},{"folders",folders},{"smartFolders",settings("smart")},{"duplicateIds",QVariantList()},{"unwatchedPaths",QStringList()},{"indexDocuments",index.documents.size()},{"indexUpdates",index.updates}};
+    }
+    void relocate(const QString &oldPath,const QString &newPath,bool tree) {
+        require(validPath(newPath),"invalidName");
+        require(!tree||(!newPath.startsWith(oldPath+'/')&&newPath!=oldPath),"invalidName");
+        QHash<QString,QString> moved;
+        for(const auto &v:query("SELECT path FROM notes")){auto p=v.toMap()["path"].toString();if(p==oldPath||(tree&&p.startsWith(oldPath+'/')))moved.insert(p,newPath+p.mid(oldPath.size()));}
+        for(auto it=moved.begin();it!=moved.end();++it)require(one("SELECT id FROM notes WHERE path=?",{it.value()}).isEmpty(),"alreadyExists",it.value());
+        // Preserve path-based Markdown links while identities remain unchanged.
+        refreshIndex();
+        for(const auto &v:query("SELECT * FROM notes")) {
+            auto n=v.toMap(); const auto old=n["path"].toString(),next=moved.value(old,old);QString text=n["text"].toString();
+            const bool rewritable=LinkPaths::rewrite(text,[&](const QString &target,bool wiki){if(wiki){auto paths=index.resolve(old,target,true);if(paths.size()!=1||!moved.contains(paths[0]))return target;auto result=relativeManagedPath(next,moved.value(paths[0]));return result;}
+                const auto resolved=LinkPaths::resolve(old,target);if(resolved.isEmpty())return target;
+                const auto destination=moved.value(resolved,resolved);if(next==old&&destination==resolved)return target;
+                QUrl url(target);const auto fragment=url.fragment(QUrl::FullyEncoded),queryString=url.query(QUrl::FullyEncoded);QString result=relativeManagedPath(next,destination);result=QString::fromUtf8(QUrl::toPercentEncoding(result,"/"));if(!queryString.isEmpty())result+='?'+queryString;if(!fragment.isEmpty())result+='#'+fragment;return result;});
+            require(rewritable,"unsupportedLinks",old);
+            if(text!=n["text"].toString())updateText(n,text);
+        }
+        if(tree){
+            require(one("SELECT id FROM folders WHERE path=?",{newPath}).isEmpty(),"alreadyExists",newPath);folder(parentFolder(newPath));
+            const auto rows=query("SELECT id,path FROM folders");for(const auto &v:rows){auto n=v.toMap();auto p=n["path"].toString();if(p==oldPath||p.startsWith(oldPath+'/'))query("UPDATE folders SET path=? WHERE id=?",{newPath+p.mid(oldPath.size()),n["id"]});}
+        }else folder(parentFolder(newPath));
+        for(auto it=moved.begin();it!=moved.end();++it){query("UPDATE drafts SET path=? WHERE path=?",{it.value(),it.key()});query("UPDATE notes SET path=? WHERE path=?",{it.value(),it.key()});}
+    }
+    QString asset(const QByteArray &bytes,const QString &name) {
+        QString suffix=QFileInfo(name).suffix().toLower();if(!QRegularExpression("^[a-z0-9]{1,8}$").match(suffix).hasMatch())suffix="bin";
+        const auto path="assets/"+MarkdownFile::digest(bytes)+'.'+suffix;
+        query("INSERT OR IGNORE INTO assets(path,data,name,deleted) VALUES(?,?,?,'')",{path,bytes,name});
+        // Materialized attachment cache is disposable; the BLOB is authoritative.
+        if(!QFileInfo::exists(root+'/'+path))writeBytes(root+'/'+path,bytes);return path;
+    }
+    QString rebaseText(QString text,const QString &source,const QString &destination) {
+        refreshIndex();
+        require(LinkPaths::rewrite(text,[&](const QString &target,bool wiki){
+            QString resolved;
+            if(wiki) { const auto choices=index.resolve(source,target,true);if(choices.size()!=1)return target;resolved=choices[0]; }
+            else resolved=LinkPaths::resolve(source,target);
+            if(resolved.isEmpty())return target;
+            auto next=relativeManagedPath(destination,resolved);
+            if(wiki)return next;
+            const QUrl url(target);next=QString::fromUtf8(QUrl::toPercentEncoding(next,"/"));
+            if(!url.query().isEmpty())next+='?'+url.query(QUrl::FullyEncoded);
+            if(!url.fragment().isEmpty())next+='#'+url.fragment(QUrl::FullyEncoded);
+            return next;
+        }),"unsupportedLinks");
+        return text;
+    }
+    QVariantMap run(const QString &op,const QVariantMap &a);
+    QVariantMap importPreview(const QVariantMap &a);
+    QVariantMap importItems(const QVariantMap &a);
+    QVariantMap exportItems(const QVariantMap &a);
+    QVariantMap backup(const QVariantMap &a);
+    QVariantMap restoreBackup(const QVariantMap &a);
+};
+
+ManagedStore::ManagedStore(const QString &directory) : d(std::make_unique<Impl>()) {
+    d->root=QDir(directory).absolutePath();
+    require(QDir().mkpath(d->root),"metadataUnavailable",d->root);
+    d->lock=std::make_unique<QLockFile>(d->root+"/managed.lock");d->lock->setStaleLockTime(0);require(d->lock->tryLock(),"libraryLocked");
+    require(sqlite3_open_v2(QFile::encodeName(d->root+"/notes.sqlite3").constData(),&d->db,SQLITE_OPEN_READWRITE|SQLITE_OPEN_CREATE|SQLITE_OPEN_FULLMUTEX,nullptr)==SQLITE_OK,"databaseError");
+    sqlite3_busy_timeout(d->db,5000);
+    d->query("PRAGMA journal_mode=WAL");d->query("PRAGMA synchronous=FULL");d->query("PRAGMA foreign_keys=ON");
+    require(d->one("PRAGMA user_version").value("user_version").toInt()<=1,"databaseVersion","This database was created by a newer version.");
+    d->query("CREATE TABLE IF NOT EXISTS notes(id TEXT PRIMARY KEY,path TEXT NOT NULL UNIQUE,text TEXT NOT NULL,hash TEXT NOT NULL,created TEXT NOT NULL,modified TEXT NOT NULL,pinned INTEGER NOT NULL DEFAULT 0,favorite INTEGER NOT NULL DEFAULT 0,deleted TEXT NOT NULL DEFAULT '',trash_token TEXT NOT NULL DEFAULT '',source TEXT NOT NULL DEFAULT '',source_hash TEXT NOT NULL DEFAULT '',import_batch TEXT NOT NULL DEFAULT '')");
+    d->query("CREATE TABLE IF NOT EXISTS folders(id TEXT PRIMARY KEY,path TEXT NOT NULL UNIQUE,deleted TEXT NOT NULL DEFAULT '',trash_token TEXT NOT NULL DEFAULT '')");
+    d->query("CREATE TABLE IF NOT EXISTS drafts(path TEXT PRIMARY KEY,text TEXT NOT NULL,base_hash TEXT NOT NULL,time TEXT NOT NULL)");
+    d->query("CREATE TABLE IF NOT EXISTS versions(note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,hash TEXT NOT NULL,text TEXT NOT NULL,time TEXT NOT NULL,PRIMARY KEY(note_id,hash))");
+    d->query("CREATE TABLE IF NOT EXISTS assets(path TEXT PRIMARY KEY,data BLOB NOT NULL,name TEXT NOT NULL,deleted TEXT NOT NULL DEFAULT '')");
+    d->query("CREATE TABLE IF NOT EXISTS imports(id TEXT PRIMARY KEY,name TEXT NOT NULL,time TEXT NOT NULL,report BLOB NOT NULL)");
+    d->query("CREATE TABLE IF NOT EXISTS settings(kind TEXT NOT NULL,name TEXT NOT NULL,value BLOB NOT NULL,PRIMARY KEY(kind,name))");
+    d->query("CREATE INDEX IF NOT EXISTS notes_source ON notes(source,source_hash)");d->query("CREATE INDEX IF NOT EXISTS notes_state ON notes(deleted,modified)");d->query("PRAGMA user_version=1");
+    d->initializeUndo();
+    for(const auto &v:d->query("SELECT path FROM assets WHERE deleted=''")){const auto path=v.toMap()["path"].toString();if(!QFileInfo::exists(d->root+'/'+path))writeBytes(d->root+'/'+path,d->one("SELECT data FROM assets WHERE path=?",{path})["data"].toByteArray());}
+}
+void ManagedStore::Impl::initializeUndo() {
+    query("CREATE TEMP TABLE capture_keys(table_name TEXT,id TEXT,PRIMARY KEY(table_name,id))");
+    query("CREATE TEMP TABLE capture_enabled(value INTEGER)");
+    query("INSERT INTO capture_enabled VALUES(0)");
+    for (const auto &table : {QString("notes"), QString("folders")}) {
+        query("CREATE TEMP TABLE capture_" + table + " AS SELECT * FROM " + table + " WHERE 0");
+        QStringList oldColumns;
+        for (const auto &v : query("PRAGMA table_info(" + table + ")")) oldColumns << "OLD." + v.toMap()["name"].toString();
+        const QString first = " NOT EXISTS(SELECT 1 FROM capture_keys WHERE table_name='" + table + "' AND id=OLD.id)";
+        for (const auto &event : {QString("UPDATE"), QString("DELETE")})
+            query("CREATE TEMP TRIGGER capture_" + table + event + " BEFORE " + event + " ON main." + table +
+                  " WHEN (SELECT value FROM capture_enabled)=1 BEGIN INSERT INTO capture_" + table + " SELECT " + oldColumns.join(',') + " WHERE" + first +
+                  "; INSERT OR IGNORE INTO capture_keys VALUES('" + table + "',OLD.id); END");
+        query("CREATE TEMP TRIGGER capture_" + table + "INSERT AFTER INSERT ON main." + table +
+              " WHEN (SELECT value FROM capture_enabled)=1 BEGIN INSERT OR IGNORE INTO capture_keys VALUES('" + table + "',NEW.id); END");
+    }
+}
+void ManagedStore::Impl::beginCapture() {
+    query("DELETE FROM capture_keys"); query("DELETE FROM capture_notes"); query("DELETE FROM capture_folders");
+    query("UPDATE capture_enabled SET value=1");
+}
+ManagedStore::Impl::Command ManagedStore::Impl::finishCapture(const QString &label) {
+    query("UPDATE capture_enabled SET value=0");
+    Command command{label, {}};
+    for (const auto &v : query("SELECT * FROM capture_keys")) {
+        const auto key = v.toMap(); const auto table = key["table_name"].toString(), id = key["id"].toString();
+        auto before = one("SELECT * FROM capture_" + table + " WHERE id=?", {id});
+        auto after = one("SELECT * FROM " + table + " WHERE id=?", {id});
+        if (before != after) command.changes.append({table,id,before,after});
+    }
+    query("DELETE FROM capture_keys"); query("DELETE FROM capture_notes"); query("DELETE FROM capture_folders");
+    return command;
+}
+QString ManagedStore::Impl::commandLabel(const QString &op, const QVariantMap &a) const {
+    if (op=="batch" || op=="tagBatch") {
+        const QHash<QString,QString> labels{{"move","移动笔记"},{"trash","删除笔记"},{"duplicate","创建副本"},{"pin","置顶"},{"unpin","取消置顶"},{"favorite","收藏"},{"unfavorite","取消收藏"}};
+        return op=="tagBatch" ? "修改标签" : labels.value(a.value("action").toString());
+    }
+    if (op=="trashBatch") return a.value("action")=="restore" ? "恢复笔记" : QString();
+    const QHash<QString,QString> labels{{"createFolder","新建文件夹"},{"renameFolder","整理文件夹"},{"trashFolder","删除文件夹"},{"renameNote","修改标题"},{"setProperty","修改笔记信息"},{"favorite","收藏"},{"pin","置顶"},{"restore","恢复笔记"},{"restoreFolder","恢复文件夹"},{"create","新建笔记"},{"createWiki","新建笔记"},{"fromTemplate","从模板新建笔记"},{"dailyNote","新建每日笔记"},{"saveAs","创建副本"},{"rename","移动笔记"},{"trash","删除笔记"}};
+    return labels.value(op);
+}
+QVariantMap ManagedStore::Impl::historyState() const {
+    return {{"canUndo",!undoStack.isEmpty()},{"canRedo",!redoStack.isEmpty()},
+            {"undoLabel",undoStack.isEmpty()?QString():undoStack.last().label},
+            {"redoLabel",redoStack.isEmpty()?QString():redoStack.last().label}};
+}
+QVariantMap ManagedStore::Impl::applyHistory(bool redo) {
+    auto &from = redo ? redoStack : undoStack;
+    require(!from.isEmpty(),"emptyHistory");
+    const auto &command = from.last();
+    // Validate only the columns this command changes. Later body edits survive
+    // an unrelated pin/move; a changed body touched by this command conflicts.
+    for (const auto &c : command.changes) {
+        const auto expected = redo ? c.before : c.after, desired = redo ? c.after : c.before;
+        const auto current = one("SELECT * FROM " + c.table + " WHERE id=?",{c.id});
+        require(current.isEmpty()==expected.isEmpty(),"undoConflict");
+        if (expected.isEmpty()) continue;
+        for (auto it=expected.begin();it!=expected.end();++it)
+            if (it.key()!="modified" && (desired.isEmpty() || desired.value(it.key())!=it.value()))
+                require(current.value(it.key())==it.value(),"undoConflict");
+    }
+    QVariantList affected, folderChanges;
+    // Avoid transient UNIQUE path collisions when restoring a whole hierarchy.
+    for (const auto &c : command.changes) {
+        const auto expected=redo?c.before:c.after, desired=redo?c.after:c.before;
+        if (!expected.isEmpty() && (desired.isEmpty() || desired.value("path")!=expected.value("path")))
+            query("UPDATE " + c.table + " SET path=? WHERE id=?",{".undo-"+uid(),c.id});
+    }
+    for (const auto &c : command.changes) {
+        const auto expected=redo?c.before:c.after, desired=redo?c.after:c.before;
+        if (desired.isEmpty()) query("DELETE FROM " + c.table + " WHERE id=?",{c.id});
+        else if (expected.isEmpty()) {
+            QStringList fields, placeholders; QVariantList values;
+            for (auto it=desired.begin();it!=desired.end();++it) { fields<<it.key();placeholders<<"?";values<<it.value(); }
+            query("INSERT INTO " + c.table + "("+fields.join(',')+") VALUES("+placeholders.join(',')+")",values);
+            if(c.table=="notes")version(desired);
+        } else {
+            QStringList fields; QVariantList values;
+            for(auto it=desired.begin();it!=desired.end();++it) if(it.value()!=expected.value(it.key())){fields<<it.key()+"=?";values<<it.value();}
+            if(!fields.isEmpty()){values<<c.id;query("UPDATE "+c.table+" SET "+fields.join(',')+" WHERE id=?",values);}
+        }
+        if(c.table=="notes") affected.append(QVariantMap{{"id",c.id},{"path",desired.value("path")},{"needsRead",expected.value("text")!=desired.value("text") || expected.value("path")!=desired.value("path") || expected.value("deleted")!=desired.value("deleted")},{"deleted",desired.isEmpty()||!desired.value("deleted").toString().isEmpty()}});
+        else folderChanges.append(QVariantMap{{"from",expected.value("path")},{"to",desired.isEmpty()||!desired.value("deleted").toString().isEmpty()?QString():desired.value("path").toString()}});
+    }
+    // A folder created by an earlier command may now contain imported notes.
+    // Do not orphan those notes by undoing its creation.
+    QSet<QString> activeFolders;
+    for(const auto &v:query("SELECT path FROM folders WHERE deleted=''"))activeFolders.insert(v.toMap()["path"].toString());
+    for(const auto &v:query("SELECT path FROM notes WHERE deleted='' UNION SELECT path FROM folders WHERE deleted=''")) {
+        const auto parent=parentFolder(v.toMap()["path"].toString());
+        require(parent.isEmpty()||activeFolders.contains(parent),"undoConflict");
+    }
+    return {{"ok",true},{"affected",affected},{"primaryId",command.primaryId},{"folderChanges",folderChanges},{"label",command.label}};
+}
+ManagedStore::~ManagedStore() = default;
+QString ManagedStore::directory() const { return d->root; }
+QVariantMap ManagedStore::dispatch(const QString &op,const QVariantMap &a, std::function<void(const QVariantMap &)> progress, std::shared_ptr<std::atomic_bool> cancelled) {
+    d->progress = std::move(progress); d->cancelled = std::move(cancelled);
+    const bool outer=sqlite3_get_autocommit(d->db);
+    try {
+        const bool ownTransaction = outer && op != "backup" && op != "restoreBackup" && op != "importNotes";
+        if(ownTransaction)d->query("BEGIN IMMEDIATE");
+        const auto label=d->commandLabel(op,a);
+        if(!label.isEmpty())d->beginCapture();
+        auto result = op=="undo" || op=="redo" ? d->applyHistory(op=="redo") : d->run(op,a);
+        Impl::Command command;
+        if(!label.isEmpty()) {
+            command=d->finishCapture(label);
+            QString primary=a.value("path").toString();
+            if(primary.isEmpty()&&!a.value("items").toList().isEmpty())primary=a.value("items").toList().first().toMap().value("path").toString();
+            if(primary.isEmpty())primary=result.value("path").toString();
+            for(const auto &c:command.changes)if(c.table=="notes"&&(c.before.value("path").toString()==primary||c.after.value("path").toString()==primary)){command.primaryId=c.id;break;}
+        }
+        if(ownTransaction)d->query("COMMIT");
+        if(op=="undo" || op=="redo") {
+            auto &from=op=="redo"?d->redoStack:d->undoStack;
+            auto &to=op=="redo"?d->undoStack:d->redoStack;
+            to.append(from.takeLast());
+        } else if(!command.changes.isEmpty()) {
+            d->undoStack.append(std::move(command)); d->redoStack.clear();
+            auto retainedBytes=[&] { qint64 bytes=0;for(const auto &entry:d->undoStack)for(const auto &c:entry.changes)bytes+=2*(c.before.value("text").toString().size()+c.after.value("text").toString().size());return bytes; };
+            // Keep recent organization commands bounded, including rewritten links.
+            while(d->undoStack.size()>50 || (d->undoStack.size()>1 && retainedBytes()>64*1024*1024))d->undoStack.removeFirst();
+            result.insert("historyRecorded",true);
+        } else if(op=="clearRedo") d->redoStack.clear();
+        else if(op=="importNotes" || op=="restoreBackup" || (op=="trashBatch"&&a.value("action")=="purge")) {d->undoStack.clear();d->redoStack.clear();}
+        result.insert("undoState",d->historyState());return result;
+    }catch(const StoreError &e){if(outer)sqlite3_exec(d->db,"ROLLBACK",nullptr,nullptr,nullptr);d->index=Knowledge::Index();return {{"ok",false},{"error",e.code},{"detail",e.detail}};}
+}
+
+QVariantMap ManagedStore::Impl::run(const QString &op,const QVariantMap &a) {
+    const auto path=a.value("path").toString();
+    if(op=="list"||op=="search"||op=="selectLibrary"||op=="reindex")return listing(a);
+    if(op=="clearRedo")return ok();
+    if(op=="backup")return backup(a);
+    if(op=="restoreBackup")return restoreBackup(a);
+    if(op=="importPreview")return importPreview(a);
+    if(op=="importNotes")return importItems(a);
+    if(op=="exportNotes")return exportItems(a);
+    if(op=="imports") {QVariantList items;for(const auto &v:query("SELECT id,name,time,report FROM imports ORDER BY time DESC")){auto r=v.toMap();r.insert("report",QJsonDocument::fromJson(r["report"].toByteArray()).toVariant());items.append(r);}return {{"ok",true},{"items",items}};}
+    // External documents are deliberately absent from notes, folders and the index.
+    if(path.startsWith("external:")) {
+        const auto file=path.mid(9);
+        if(op=="read") {auto d=MarkdownFile::decode(bytesAt(file));external.insert(path,d);return {{"ok",true},{"path",path},{"id",path},{"text",d.text},{"baseHash",d.hash},{"readOnly",!d.readOnlyReason.isEmpty()},{"readOnlyReason",d.readOnlyReason}};}
+        if(op=="save") {
+            require(external.contains(path),"unknownBase");auto d=external.value(path);
+            require(d.readOnlyReason.isEmpty(),"readOnly");require(MarkdownFile::digest(bytesAt(file))==a.value("baseHash").toString(),"conflict");
+            const auto bytes=MarkdownFile::encode(d,a.value("text").toString());writeBytes(file,bytes);external.insert(path,MarkdownFile::decode(bytes));query("DELETE FROM drafts WHERE path=?",{path});return {{"ok",true},{"baseHash",MarkdownFile::digest(bytes)}};
+        }
+        if(op!="checkpoint"&&op!="discardDraft"&&op!="saveAs")return {{"ok",false},{"error","externalDocument"}};
+    }
+    if(op=="read")return document(note(path));
+    if(op=="create"||op=="saveAs") {
+        auto result=insert(path,a.value("text").toString());result.insert("listing",listing());return result;
+    }
+    if(op=="save") {
+        auto n=note(path);require(n["hash"].toString()==a.value("baseHash").toString(),"conflict");
+        require(MarkdownFile::formatError(a.value("text").toString()).isEmpty(),"unsupportedFormat");
+        updateText(n,a.value("text").toString());query("DELETE FROM drafts WHERE path=?",{path});auto result=document(note(path));result.insert("listing",listing());return result;
+    }
+    if(op=="checkpoint") {query("INSERT INTO drafts(path,text,base_hash,time) VALUES(?,?,?,?) ON CONFLICT(path) DO UPDATE SET text=excluded.text,base_hash=excluded.base_hash,time=excluded.time",{path,a.value("text"),a.value("baseHash"),utc()});return {{"ok",true},{"recoveryDurable",true}};}
+    if(op=="discardDraft"){query("DELETE FROM drafts WHERE path=?",{path});return ok();}
+    if(op=="createFolder") {require(validPath(path),"invalidName");require(one("SELECT id FROM folders WHERE path=?",{path}).isEmpty(),"alreadyExists");folder(path);return ok();}
+    if(op=="renameFolder") {require(!one("SELECT id FROM folders WHERE path=? AND deleted=''",{path}).isEmpty(),"notFound");auto target=a.value("target").toString();relocate(path,target,true);return {{"ok",true},{"newPath",target}};}
+    if(op=="removeFolder") {
+        require(one("SELECT id FROM notes WHERE path LIKE ? ESCAPE '\\'",{QString(path).replace('\\',"\\\\").replace('%',"\\%").replace('_',"\\_")+"/%"}).isEmpty(),"folderNotEmpty");
+        for(const auto &v:query("SELECT path FROM folders"))require(!v.toMap()["path"].toString().startsWith(path+'/'),"folderNotEmpty");query("DELETE FROM folders WHERE path=?",{path});return ok();
+    }
+    if(op=="rename") {note(path);auto target=a.value("target").toString();relocate(path,target,false);return {{"ok",true},{"newPath",target},{"listing",listing()}};}
+    if(op=="trash"||op=="trashFolder") {
+        const auto token=uid(),time=utc();if(op=="trash") {const auto n=note(path);require(a.value("baseHash").toString()==n["hash"].toString(),"conflict");query("UPDATE notes SET deleted=?,trash_token=? WHERE id=?",{time,token,n["id"]});query("DELETE FROM drafts WHERE path=?",{path});}
+        else {require(!one("SELECT id FROM folders WHERE path=? AND deleted=''",{path}).isEmpty(),"notFound");for(const auto &v:query("SELECT path FROM folders WHERE deleted=''")){auto p=v.toMap()["path"].toString();if(p==path||p.startsWith(path+'/'))query("UPDATE folders SET deleted=?,trash_token=? WHERE path=?",{time,token,p});}for(const auto &v:query("SELECT path FROM notes WHERE deleted=''")){auto p=v.toMap()["path"].toString();if(p.startsWith(path+'/')){query("UPDATE notes SET deleted=?,trash_token=? WHERE path=?",{time,token,p});query("DELETE FROM drafts WHERE path=?",{p});}}}
+        return {{"ok",true},{"trashToken",token},{"listing",listing()}};
+    }
+    if(op=="recovery") {
+        QVariantList trash,drafts;
+        for(const auto &v:query("SELECT * FROM notes WHERE deleted<>''")){auto n=v.toMap();if(!one("SELECT id FROM folders WHERE trash_token=?",{n["trash_token"]}).isEmpty())continue;trash.append(QVariantMap{{"kind","note"},{"token",n["trash_token"]},{"source",n["path"]},{"deletedUtc",n["deleted"]},{"fingerprint",n["hash"]},{"title",MarkdownFile::title(n["text"].toString(),QFileInfo(n["path"].toString()).completeBaseName())}});}
+        QSet<QString> seen;
+        for(const auto &v:query("SELECT * FROM folders WHERE deleted<>'' ORDER BY length(path)")){auto n=v.toMap();const auto token=n["trash_token"].toString();if(seen.contains(token))continue;seen.insert(token);trash.append(QVariantMap{{"kind","folder"},{"token",token},{"source",n["path"]},{"deletedUtc",n["deleted"]},{"fingerprint",token}});}
+        for(const auto &v:query("SELECT * FROM drafts")){auto n=v.toMap();auto stored=one("SELECT hash FROM notes WHERE path=?",{n["path"]});drafts.append(QVariantMap{{"title",MarkdownFile::title(n["text"].toString(),"未命名笔记")},{"path",n["path"]},{"text",n["text"]},{"baseHash",n["base_hash"]},{"updatedUtc",n["time"]},{"matchesBase",stored["hash"]==n["base_hash"]}});}
+        return {{"ok",true},{"trashItems",trash},{"drafts",drafts},{"commits",QVariantList()},{"memoryDrafts",QVariantList()}};
+    }
+    if(op=="restore"||op=="restoreFolder") {
+        const auto token=a.value("token").toString(),target=a.value("target").toString();auto n=one("SELECT * FROM notes WHERE trash_token=? AND deleted<>''",{token});
+        if(!target.isEmpty()){require(!n.isEmpty(),"notFound");return insert(target,n["text"].toString());}
+        require(!n.isEmpty()||!one("SELECT id FROM folders WHERE trash_token=?",{token}).isEmpty(),"notFound");
+        const auto rows=query("SELECT path FROM notes WHERE trash_token=?",{token});
+        query("UPDATE folders SET deleted='',trash_token='' WHERE trash_token=?",{token});
+        for(const auto &v:rows)folder(parentFolder(v.toMap()["path"].toString()));
+        query("UPDATE notes SET deleted='',trash_token='' WHERE trash_token=?",{token});return ok();
+    }
+    if(op=="trashBatch") {
+        QVariantList results;int succeeded=0;const auto action=a.value("action").toString();require(action=="restore"||action=="purge","invalidBatch");
+        for(const auto &v:a.value("items").toList()) {
+            const auto item=v.toMap();const auto token=item.value("token").toString();query("SAVEPOINT item");
+            try {auto n=one("SELECT * FROM notes WHERE trash_token=? AND deleted<>''",{token});auto f=one("SELECT * FROM folders WHERE trash_token=? AND deleted<>''",{token});require(!n.isEmpty()||!f.isEmpty(),"trashChanged");require(item.value("fingerprint").toString()==(item.value("kind")=="folder"?token:n["hash"].toString()),"trashChanged");
+                if(action=="restore")run("restore",{{"token",token}});else{query("DELETE FROM notes WHERE trash_token=?",{token});query("DELETE FROM folders WHERE trash_token=?",{token});}query("RELEASE item");++succeeded;results.append(QVariantMap{{"path",item.value("source")},{"ok",true}});
+            }catch(const StoreError &e){query("ROLLBACK TO item");query("RELEASE item");results.append(QVariantMap{{"path",item.value("source")},{"ok",false},{"error",e.code},{"detail",e.detail}});}
+        }
+        return {{"ok",true},{"action",action},{"results",results},{"succeeded",succeeded},{"failed",results.size()-succeeded}};
+    }
+    if(op=="pin"||op=="favorite") {auto n=note(path);query(op=="pin"?"UPDATE notes SET pinned=? WHERE id=?":"UPDATE notes SET favorite=? WHERE id=?",{a.value(op=="pin"?"pinned":"favorite").toBool(),n["id"]});return ok();}
+    if(op=="batch"||op=="tagBatch") {
+        const auto action=a.value("action").toString();const auto items=a.value("items").toList();require(!items.isEmpty()&&items.size()<=200,"invalidBatch");
+        require(op=="tagBatch"||QStringList{"pin","unpin","favorite","unfavorite","trash","move","duplicate"}.contains(action),"invalidBatch");
+        QVariantList results;int succeeded=0;QSet<QString> seen;QHash<QString,QString> baselines;
+        for(const auto &v:items){const auto p=v.toMap().value("path").toString();baselines.insert(p,one("SELECT hash FROM notes WHERE path=? AND deleted=''",{p}).value("hash").toString());}
+        for(const auto &v:items){auto item=v.toMap();auto p=item.value("path").toString();query("SAVEPOINT item");try {
+            require(!seen.contains(p),"duplicateRequest");seen.insert(p);auto n=note(p);require(!baselines.value(p).isEmpty()&&item.value("baseHash").toString()==baselines.value(p),"conflict");QVariantMap result=ok();
+            if(op=="tagBatch") {auto tags=Knowledge::properties(n["text"].toString()).value("tags").toStringList();for(const auto &v:a.value("tags").toStringList()){if(action=="remove"||action=="rename")tags.removeAll(v);else if(!tags.contains(v))tags.append(v);}if(action=="rename")tags.append(a.value("replacement").toString());tags.removeDuplicates();updateText(n,Knowledge::update(n["text"].toString(),"tags",tags));}
+            else if(action=="trash")run("trash",{{"path",p},{"baseHash",n["hash"]}});
+            else if(action=="duplicate"){auto copy=insert(parentFolder(p)+(parentFolder(p).isEmpty()?"":"/")+QFileInfo(p).completeBaseName()+" 副本.md",Knowledge::update(n["text"].toString(),"title",MarkdownFile::title(n["text"].toString(),QFileInfo(p).completeBaseName())+" 副本"));result.insert("newPath",copy["path"]);}
+            else if(action=="move"){const auto dest=a.value("folder").toString();require(dest.isEmpty()||!one("SELECT id FROM folders WHERE path=? AND deleted=''",{dest}).isEmpty(),"missingFolder");const auto next=(dest.isEmpty()?QString():dest+'/')+QFileInfo(p).fileName();if(next!=p)relocate(p,next,false);result.insert("newPath",next);}
+            else run(action=="pin"||action=="unpin"?"pin":"favorite",{{"path",p},{"pinned",action=="pin"},{"favorite",action=="favorite"}});
+            query("RELEASE item");result.insert("path",p);results.append(result);++succeeded;
+        }catch(const StoreError &e){query("ROLLBACK TO item");query("RELEASE item");results.append(QVariantMap{{"path",p},{"ok",false},{"error",e.code},{"detail",e.detail}});}}
+        return {{"ok",true},{"action",op=="tagBatch"?"tags":action},{"results",results},{"succeeded",succeeded},{"failed",results.size()-succeeded}};
+    }
+    if(op=="renameNote") {
+        auto n=note(path);require(n["hash"].toString()==a.value("baseHash").toString(),"conflict");const auto title=a.value("title").toString().trimmed();require(!title.isEmpty()&&title.size()<=300&&!title.contains('\n'),"invalidName");
+        refreshIndex();
+        for(const auto &v:query("SELECT * FROM notes WHERE deleted=''")) {auto linked=v.toMap();const auto source=linked["path"].toString();QString text=linked["text"].toString();LinkPaths::rewrite(text,[&](const QString &target,bool wiki){if(!wiki)return target;const auto choices=index.resolve(source,target,true);if(choices.size()!=1||choices[0]!=path)return target;return relativeManagedPath(source,path);});if(text!=linked["text"].toString())updateText(linked,text);}
+        n=note(path);QString text=n["text"].toString();int start=0;
+        if(text.startsWith("---\n")) {
+            const auto end=QRegularExpression("(?m)^(?:---|\\.\\.\\.)[ \\t]*$").match(text,4);
+            if(end.hasMatch())start=end.capturedEnd();
+        }
+        while(start<text.size() && (text[start]=='\n' || text[start]=='\r'))++start;
+        const auto heading=QRegularExpression(" {0,3}#[ \\t]+[^\n]*").match(text,start);
+        if(heading.hasMatch() && heading.capturedStart()==start) {
+            QString escaped;for(const auto c:title){if(QString("\\`*_{}[]<>~#").contains(c))escaped+='\\';escaped+=c;}
+            text.replace(start,heading.capturedLength(),"# "+escaped);
+        }
+        updateText(n,Knowledge::update(text,"title",title));return ok();
+    }
+    if(op=="setProperty") {auto n=note(path);require(n["hash"].toString()==a.value("baseHash").toString(),"conflict");const auto key=a.value("key").toString();require(QRegularExpression("^[A-Za-z_][A-Za-z0-9_-]*$").match(key).hasMatch()&&key!="nextnotes_id","invalidProperty");updateText(n,Knowledge::update(n["text"].toString(),key,a.value("value"),a.value("remove").toBool()));return ok();}
+    if(op=="tagPlan") {refreshIndex();QVariantList items;const auto tags=a.value("tags").toStringList();for(auto it=index.documents.begin();it!=index.documents.end();++it)for(const auto &tag:tags)if(it->props.value("tags").toStringList().contains(tag)){items.append(QVariantMap{{"path",it.key()},{"baseHash",it->hash}});break;}return {{"ok",true},{"action",a.value("action")},{"tags",tags},{"replacement",a.value("replacement")},{"items",items},{"count",items.size()}};}
+    if(op=="history") {auto n=note(path);QVariantList versions;for(const auto &v:query("SELECT hash,time FROM versions WHERE note_id=? ORDER BY rowid DESC",{n["id"]})){auto r=v.toMap();r.insert("current",r["hash"]==n["hash"]);versions.append(r);}return {{"ok",true},{"versions",versions}};}
+    if(op=="historyVersion") {auto n=note(path);auto v=one("SELECT text,hash,time FROM versions WHERE note_id=? AND hash=?",{n["id"],a.value("hash")});require(!v.isEmpty(),"notFound");v.insert("ok",true);return v;}
+    if(op=="templates")return {{"ok",true},{"templates",settings("templates")}};
+    if(op=="templateSave"||op=="templateDelete"||op=="smartSave"||op=="smartDelete") {
+        auto name=a.value("name").toString().trimmed();require(!name.isEmpty()&&name.size()<=100,"invalidName");auto kind=op.startsWith("template")?QString("templates"):QString("smart");
+        if(op.endsWith("Delete"))query("DELETE FROM settings WHERE kind=? AND name=?",{kind,name});else {
+            auto value=kind=="templates"?a.value("text"):QVariant(QVariantMap{{"query",a.value("query")},{"filter",a.value("filter")}});
+            if(kind=="templates"&&!path.isEmpty())value=rebaseText(value.toString(),path,"template.md");
+            setSetting(kind,name,value);
+        }
+        return {{"ok",true},{kind=="templates"?"templates":"smartFolders",settings(kind)}};
+    }
+    if(op=="fromTemplate"||op=="dailyNote") {
+        const bool daily=op=="dailyNote";const auto date=QDate::currentDate().toString(Qt::ISODate),title=a.value("title",date).toString();const auto templates=settings("templates");const auto name=daily?QString("每日笔记"):a.value("name").toString();require(daily||templates.contains(name),"notFound");
+        auto text=templates.value(name,"# {{title}}\n\n").toString();text.replace("{{date}}",date).replace("{{time}}",QTime::currentTime().toString("HH:mm")).replace("{{title}}",title);
+        const auto dest=daily?QString("日记"):a.value("folder").toString();const auto p=(dest.isEmpty()?QString():dest+'/')+(daily?date:uid())+".md";if(daily&&!one("SELECT id FROM notes WHERE path=? AND deleted=''",{p}).isEmpty())return {{"ok",true},{"path",p}};return insert(p,rebaseText(text,"template.md",p));
+    }
+    if(op=="knowledge"||op=="linkCandidates"||op=="resolveWiki"||op=="createWiki") {
+        refreshIndex();
+        if(op=="linkCandidates"){QVariantList items;const auto q=a.value("query").toString();for(auto it=index.documents.begin();it!=index.documents.end();++it){if(!it->title.contains(q,Qt::CaseInsensitive)&&!it.key().contains(q,Qt::CaseInsensitive))continue;items.append(QVariantMap{{"path",it.key()},{"title",it->title},{"headings",it->headings}});if(items.size()>=100)break;}return {{"ok",true},{"items",items}};}
+        if(op=="resolveWiki"||op=="createWiki") {
+            const auto target=a.value("target").toString();auto choices=index.resolve(path,target,true);require(choices.size()<=1,"ambiguousLink");
+            if(choices.size()==1)return {{"ok",true},{"path",choices[0]},{"fragment",a.value("fragment")}};
+            QString targetPath=target.contains('/')?QDir::cleanPath(parentFolder(path)+'/'+target):target;if(!targetPath.endsWith(".md",Qt::CaseInsensitive))targetPath+=".md";require(validPath(targetPath),"invalidName");
+            if(op=="createWiki")return insert(targetPath,"# "+QFileInfo(targetPath).completeBaseName()+"\n\n");
+            return {{"ok",true},{"missing",true},{"path",path},{"target",target},{"targetPath",targetPath},{"fragment",a.value("fragment")}};
+        }
+        const auto doc=index.documents.value(path);QVariantList outgoing,backlinks;QStringList tags;
+        for(const auto &v:doc.links){
+            auto l=v.toMap();const auto target=l["target"].toString();const bool wiki=l["wiki"].toBool();
+            const auto resolved=index.resolve(path,target,wiki);const QUrl url(target);
+            const bool remote=!wiki&&!url.isRelative()&&!url.isLocalFile();
+            const bool anchor=!wiki&&target.startsWith('#');
+            const auto local=LinkPaths::resolve(path,target);
+            const bool attachment=!wiki&&!local.isEmpty()&&!one("SELECT path FROM assets WHERE path=? AND deleted=''",{local}).isEmpty();
+            l.insert("resolved",resolved.size()==1||remote||anchor||attachment);
+            if(resolved.size()==1) {
+                const auto &linked=index.documents[resolved[0]];
+                l.insert("kind","note");l.insert("path",resolved[0]);l.insert("title",linked.title);
+            }else if(attachment) {
+                l.insert("kind","attachment");l.insert("title",one("SELECT name FROM assets WHERE path=?",{local})["name"]);
+            }else if(remote) { l.insert("kind","web");l.insert("title",url.host().isEmpty()?url.path():url.host()); }
+            else if(anchor) { l.insert("kind","anchor");l.insert("title",url.fragment().isEmpty()?QString("本篇笔记"):url.fragment()); }
+            else { l.insert("kind","missing");l.insert("title",QFileInfo(QUrl::fromPercentEncoding(target.toUtf8())).completeBaseName()); }
+            outgoing.append(l);
+        }
+        for(auto it=index.documents.begin();it!=index.documents.end();++it){tags.append(it->props.value("tags").toStringList());for(const auto &v:it->links){auto l=v.toMap();if(index.resolve(it.key(),l["target"].toString(),l["wiki"].toBool()).contains(path)){backlinks.append(QVariantMap{{"path",it.key()},{"title",it->title},{"summary",l["context"]}});break;}}}
+        tags.removeDuplicates();tags.sort();return {{"ok",true},{"properties",doc.props},{"tags",tags},{"backlinks",backlinks},{"outgoing",outgoing},{"smartFolders",settings("smart")}};
+    }
+    if(op=="importAttachment") {
+        note(path);QByteArray bytes;QString name=a.value("name").toString();const QUrl source(a.value("source").toString());if(source.isLocalFile()){name=QFileInfo(source.toLocalFile()).fileName();bytes=bytesAt(source.toLocalFile(),32*1024*1024);}else{auto decoded=QByteArray::fromBase64Encoding(a.value("data").toByteArray(),QByteArray::AbortOnBase64DecodingErrors);require(bool(decoded),"invalidAttachment");bytes=decoded.decoded;}
+        require(!bytes.isEmpty()&&bytes.size()<=32*1024*1024,"attachmentTooLarge");auto rel=asset(bytes,name);return {{"ok",true},{"path",rel},{"name",name},{"url",QUrl::fromLocalFile(root+'/'+rel).toString()},{"mime",QMimeDatabase().mimeTypeForData(bytes).name()},{"image",QMimeDatabase().mimeTypeForData(bytes).name().startsWith("image/")}};
+    }
+    if(op=="attachments") {
+        QVariantList items,removed;
+        const auto notes=query("SELECT text FROM notes");
+        for(const auto &v:query("SELECT path,name,length(data) AS size,deleted FROM assets")) {
+            auto n=v.toMap();const auto p=n["path"].toString();int references=0;
+            for(const auto &doc:notes)if(doc.toMap()["text"].toString().contains(p))++references;
+            n.insert("references",references);n.insert("bytes",n["size"]);n.insert("relative",p);n.insert("token",p);n.insert("removedUtc",n["deleted"]);
+            if(n["deleted"].toString().isEmpty())items.append(n);else removed.append(n);
+        }
+        return {{"ok",true},{"items",items},{"removed",removed}};
+    }
+    if(op=="quarantineAttachment"||op=="restoreAttachment") {
+        const auto rel=op=="quarantineAttachment"?a.value("relative",a.value("path")).toString():a.value("token").toString();require(!one("SELECT path FROM assets WHERE path=?",{rel}).isEmpty(),"notFound");if(op=="quarantineAttachment")for(const auto &v:query("SELECT text FROM notes"))require(!v.toMap()["text"].toString().contains(rel),"attachmentInUse");query("UPDATE assets SET deleted=? WHERE path=?",{op=="quarantineAttachment"?utc():QString(),rel});return ok();
+    }
+    if(op=="recoverMove")return ok();
+    throw StoreError{"unknownOperation",op};
+}
+
+QVariantMap ManagedStore::Impl::importPreview(const QVariantMap &a) {
+    notify("scanning",0);
+    const auto sources=a.value("sources").toStringList();require(!sources.isEmpty(),"invalidImport");
+    const auto target=a.value("folder").toString();require(validPath(target,true),"invalidName");
+    QVariantList files,dirs,problems;int duplicate=0;bool hasFolders=false;
+    const bool preserve=a.value("keepStructure",true).toBool();
+    for(const auto &value:sources) {
+        const QUrl url(value);QFileInfo source(url.isLocalFile()?url.toLocalFile():value);require(source.exists()&&!source.isSymLink(),"readFailed",source.absoluteFilePath());
+        if(source.isDir()) {
+            hasFolders=true;
+            const auto base=source.canonicalFilePath();QString top=(target.isEmpty()?QString():target+'/')+source.fileName();if(source.fileName().isEmpty())top=(target.isEmpty()?QString():target+'/')+"导入的笔记";
+            if(preserve)dirs.append(top);
+            QStringList pending{base};
+            while(!pending.isEmpty()) {
+                if(stopping())return {{"ok",true},{"cancelled",true}};
+                const auto current=pending.takeLast();
+                for(const auto &fi:QDir(current).entryInfoList(QDir::Files|QDir::Dirs|QDir::NoDotAndDotDot,QDir::Name)) {
+                    if(stopping())return {{"ok",true},{"cancelled",true}};
+                    if(fi.isSymLink()||fi.fileName()==".git"||fi.fileName()==".nextnotes"||fi.fileName()==".obsidian")continue;
+                    const auto relative=QDir(base).relativeFilePath(fi.absoluteFilePath());
+                    if(fi.isDir()){pending.append(fi.absoluteFilePath());if(preserve)dirs.append(top+'/'+relative);continue;}
+                    if(fi.suffix().compare("md",Qt::CaseInsensitive))continue;
+                    files.append(QVariantMap{{"source",fi.canonicalFilePath()},{"boundary",base},{"target",preserve?top+'/'+relative:(target.isEmpty()?QString():target+'/')+fi.fileName()},{"size",fi.size()}});
+                }
+            }
+        }else if(source.suffix().compare("md",Qt::CaseInsensitive)==0)files.append(QVariantMap{{"source",source.canonicalFilePath()},{"boundary",source.canonicalPath()},{"target",(target.isEmpty()?QString():target+'/')+source.fileName()},{"size",source.size()}});
+        else problems.append(QVariantMap{{"source",source.absoluteFilePath()},{"message","仅支持 Markdown 文件"}});
+    }
+    int reviewed=0;
+    for(auto &v:files){if(stopping())return {{"ok",true},{"cancelled",true}};if(reviewed % 25 == 0)notify("reviewing",reviewed,files.size());++reviewed;auto file=v.toMap();try{const auto bytes=bytesAt(file["source"].toString());const auto hash=MarkdownFile::digest(bytes);file.insert("sourceHash",hash);const auto existing=one("SELECT id,path FROM notes WHERE source=? AND source_hash=? AND deleted=''",{file["source"],hash});file.insert("duplicate",!existing.isEmpty());file.insert("existingPath",existing["path"]);if(!existing.isEmpty())++duplicate;auto d=MarkdownFile::decode(bytes);require(d.readOnlyReason.isEmpty(),"unsupportedFormat");}catch(const StoreError &e){file.insert("error",e.code);problems.append(QVariantMap{{"source",file["source"]},{"message",e.code=="unsupportedFormat"?"编码或换行格式不受支持，原文件保留":"无法读取文件，原文件保留"}});}v=file;}
+    return {{"ok",true},{"sources",sources},{"folder",target},{"keepStructure",preserve},{"hasFolders",hasFolders},{"files",files},{"directories",dirs},{"count",files.size()},{"folderCount",dirs.size()},{"duplicates",duplicate},{"problems",problems},{"name",sources.size()==1?QFileInfo(QUrl(sources[0]).isLocalFile()?QUrl(sources[0]).toLocalFile():sources[0]).fileName():QString("%1 个文件").arg(sources.size())}};
+}
+QVariantMap ManagedStore::Impl::importItems(const QVariantMap &a) {
+    // Revalidate reviewed files, rather than importing files added after preview.
+    const auto plan=a.value("plan").toMap();const auto batch=uid();const auto duplicatePolicy=a.value("duplicates","skip").toString();
+    require(!plan.isEmpty(),"invalidImport");require(duplicatePolicy=="skip"||duplicatePolicy=="copy","invalidImport");
+    const int originalFolders=one("SELECT count(*) AS count FROM folders WHERE deleted=''")["count"].toInt();
+    QVariantList results,prepared,warnings;QHash<QString,QString> mappings;QSet<QString> reserved;int skipped=0,failed=0,succeeded=0;
+    auto reserve=[&](QString path){const auto base=path;for(int i=2;reserved.contains(path)||!one("SELECT id FROM notes WHERE path=?",{path}).isEmpty();++i)path=base.left(base.size()-3)+" "+QString::number(i)+".md";reserved.insert(path);return path;};
+    const auto plannedFiles=plan.value("files").toList();
+    int checked=0;
+    for(const auto &value:plannedFiles) {
+        if(stopping())break;
+        if(checked % 25 == 0)notify("preparing",checked,plannedFiles.size());++checked;
+        auto file=value.toMap();const auto source=file["source"].toString();
+        try {require(file["error"].toString().isEmpty(),"unsupportedFormat");require(QFileInfo(source).canonicalFilePath()==source&&!QFileInfo(source).isSymLink(),"unsafePath");auto bytes=bytesAt(source);require(MarkdownFile::digest(bytes)==file["sourceHash"].toString(),"sourceChanged");
+            const auto existing=one("SELECT path FROM notes WHERE source=? AND source_hash=? AND deleted=''",{source,file["sourceHash"]});
+            if(duplicatePolicy=="skip"&&!existing.isEmpty()){++skipped;mappings.insert(source,existing["path"].toString());results.append(QVariantMap{{"source",source},{"status","skipped"},{"message","已导入相同内容"},{"path",existing["path"]}});continue;}
+            auto d=MarkdownFile::decode(bytes);require(d.readOnlyReason.isEmpty(),"unsupportedFormat");auto dest=reserve(file["target"].toString());file.insert("destination",dest);prepared.append(file);mappings.insert(source,dest);
+        }catch(const StoreError &e){++failed;results.append(QVariantMap{{"source",source},{"status","failed"},{"message",e.code=="sourceChanged"?"预览后文件已改变，请重新预览":e.code=="unsupportedFormat"?"编码或格式暂不支持":"无法读取文件"}});}
+    }
+    int processed=0,folderCount=0;
+    const auto persistPartial=[&] {
+        QVariantMap partial{{"id",batch},{"name",plan.value("name")},{"time",utc()},{"succeeded",succeeded},{"skipped",skipped},{"failed",failed},{"results",results},{"warnings",warnings},{"interrupted",true},{"remaining",plannedFiles.size()-succeeded-skipped-failed}};
+        query("INSERT INTO imports(id,name,time,report) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET report=excluded.report",{batch,partial["name"],partial["time"],QJsonDocument::fromVariant(partial).toJson(QJsonDocument::Compact)});
+    };
+    query("BEGIN IMMEDIATE");
+    for(const auto &v:prepared) {
+        if(stopping())break;
+        if(processed % 25 == 0)notify("importing",processed,prepared.size());
+        auto file=v.toMap();const auto source=file["source"].toString(),dest=file["destination"].toString(),boundary=file["boundary"].toString();query("SAVEPOINT imported_note");
+        try {
+            const auto bytes=bytesAt(source);require(MarkdownFile::digest(bytes)==file["sourceHash"].toString(),"sourceChanged");
+            QString text=MarkdownFile::decode(bytes).text;
+            const bool supportedLinks=LinkPaths::rewrite(text,[&](const QString &target,bool wiki){
+                if(wiki) {
+                    QString candidate=QDir(QFileInfo(source).absolutePath()).absoluteFilePath(target);
+                    if(!candidate.endsWith(".md",Qt::CaseInsensitive))candidate+=".md";
+                    const auto mapped=mappings.value(QFileInfo(candidate).canonicalFilePath());
+                    if(!mapped.isEmpty())return relativeManagedPath(dest,mapped);
+                    return target;
+                }
+                QUrl url(target);if(url.path().isEmpty()||(!url.isRelative()&&!url.isLocalFile()))return target;
+                const auto original=url.isLocalFile()?url.toLocalFile():QDir(QFileInfo(source).absolutePath()).absoluteFilePath(QUrl::fromPercentEncoding(url.path(QUrl::FullyEncoded).toUtf8()));
+                const auto canonical=QFileInfo(original).canonicalFilePath();
+                if(canonical.isEmpty()||!(canonical==boundary||canonical.startsWith(boundary+'/'))||QFileInfo(original).isSymLink()){warnings.append(QVariantMap{{"source",source},{"message","关联文件不存在或位于导入范围之外："+target}});return target;}
+                QString managed=mappings.value(canonical);
+                if(managed.isEmpty()&&QFileInfo(canonical).suffix().compare("md",Qt::CaseInsensitive)==0){warnings.append(QVariantMap{{"source",source},{"message","链接笔记未导入："+target}});return target;}
+                if(managed.isEmpty()){managed=asset(bytesAt(canonical,32*1024*1024),QFileInfo(canonical).fileName());}
+                const auto relative=relativeManagedPath(dest,managed);
+                QString result=QString::fromUtf8(QUrl::toPercentEncoding(relative,"/"));if(!url.query().isEmpty())result+='?'+url.query(QUrl::FullyEncoded);if(!url.fragment().isEmpty())result+='#'+url.fragment(QUrl::FullyEncoded);return result;
+            });
+            if(!supportedLinks)warnings.append(QVariantMap{{"source",source},{"message","包含 HTML 链接或图片：正文已保留，这类关联资源暂未自动收集。"}});
+            auto result=insert(dest,text,source,file["sourceHash"].toString(),batch);query("RELEASE imported_note");++succeeded;results.append(QVariantMap{{"source",source},{"status","imported"},{"path",result["path"]},{"message","已导入"}});
+        }catch(const StoreError &e){query("ROLLBACK TO imported_note");query("RELEASE imported_note");++failed;results.append(QVariantMap{{"source",source},{"status","failed"},{"message","笔记或关联附件无法导入，原文件保留"},{"detail",e.detail}});}
+        ++processed;
+        if(processed % 50 == 0){persistPartial();query("COMMIT");query("BEGIN IMMEDIATE");}
+    }
+    const bool wasCancelled=stopping();
+    if(!wasCancelled)for(const auto &v:plan.value("directories").toList())folder(v.toString());
+    folderCount=one("SELECT count(*) AS count FROM folders WHERE deleted=''")["count"].toInt()-originalFolders;
+    if(wasCancelled && succeeded > 0)warnings.append(QVariantMap{{"message","已保留完成的笔记。如有指向尚未导入笔记的链接，可能暂时不可用。再次导入并跳过重复内容可继续收集。"}});
+    QVariantMap report{{"cancelled",wasCancelled},{"remaining",plannedFiles.size()-succeeded-skipped-failed},{"id",batch},{"name",plan.value("name")},{"folderCount",folderCount},{"time",utc()},{"succeeded",succeeded},{"skipped",skipped},{"failed",failed},{"results",results},{"warnings",warnings},{"folder",plan.value("folder")}};
+    query("INSERT INTO imports(id,name,time,report) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET report=excluded.report",{batch,report["name"],report["time"],QJsonDocument::fromVariant(report).toJson(QJsonDocument::Compact)});
+    query("COMMIT");
+    notify("finished",succeeded+skipped+failed,plannedFiles.size());
+    report.insert("ok",true);return report;
+}
+QVariantMap ManagedStore::Impl::exportItems(const QVariantMap &a) {
+    const QUrl url(a.value("destination").toString());const auto directory=url.isLocalFile()?url.toLocalFile():a.value("destination").toString();require(QFileInfo(directory).isDir(),"writeFailed");
+    const auto chosen=a.value("paths").toStringList();const auto scope=a.value("folder").toString();QVariantList exported;
+    auto top=QDir(directory).filePath("笔记导出-"+QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss")+'-'+uid().left(6));require(!QFileInfo::exists(top)&&QDir().mkpath(top),"writeFailed");
+    QSet<QString> assets;const auto allAssets=query("SELECT path,data FROM assets");
+    if(chosen.isEmpty())for(const auto &v:query("SELECT path FROM folders WHERE deleted=''")){const auto p=v.toMap()["path"].toString();if(scope.isEmpty()||p==scope||p.startsWith(scope+'/')){require(validPath(p),"unsafePath");require(QDir().mkpath(top+'/'+p),"writeFailed",p);}}
+    for(const auto &v:query("SELECT * FROM notes WHERE deleted=''")) {
+        auto n=v.toMap();const auto path=n["path"].toString();if(!chosen.isEmpty()&&!chosen.contains(path))continue;if(!scope.isEmpty()&&!path.startsWith(scope+'/'))continue;
+        require(validPath(path),"unsafePath");auto text=n["text"].toString();
+        LinkPaths::rewrite(text,[&](const QString &target,bool wiki){if(wiki)return target;QUrl url(target);QString resolved=url.isLocalFile()?QDir(root).relativeFilePath(url.toLocalFile()):LinkPaths::resolve(path,target);if(resolved.startsWith("assets/")){assets.insert(resolved);auto rel=relativeManagedPath(path,resolved);QString result=QString::fromUtf8(QUrl::toPercentEncoding(rel,"/"));if(!url.fragment().isEmpty())result+='#'+url.fragment(QUrl::FullyEncoded);return result;}return target;});
+        writeBytes(top+'/'+path,text.toUtf8());exported.append(path);
+    }
+    for(const auto &v:allAssets){auto n=v.toMap();if(assets.contains(n["path"].toString()))writeBytes(top+'/'+n["path"].toString(),n["data"].toByteArray());}
+    return {{"ok",true},{"directory",top},{"count",exported.size()}};
+}
+
+namespace {
+using Database = std::unique_ptr<sqlite3, decltype(&sqlite3_close)>;
+Database openDatabase(const QString &path, int flags) {
+    sqlite3 *raw = nullptr;
+    const int rc = sqlite3_open_v2(QFile::encodeName(path).constData(), &raw, flags, nullptr);
+    Database result(raw, sqlite3_close);
+    require(rc == SQLITE_OK, "invalidBackup", path);
+    sqlite3_busy_timeout(raw, 5000);
+    return result;
+}
+void copyDatabase(sqlite3 *destination, sqlite3 *source) {
+    auto *copy = sqlite3_backup_init(destination, "main", source, "main");
+    require(copy, "backupFailed");
+    int state;
+    QElapsedTimer timer; timer.start();
+    do {
+        state = sqlite3_backup_step(copy, 256);
+        if (state == SQLITE_BUSY || state == SQLITE_LOCKED) QThread::msleep(20);
+    } while (state == SQLITE_OK || ((state == SQLITE_BUSY || state == SQLITE_LOCKED) && timer.elapsed() < 5000));
+    const int finish = sqlite3_backup_finish(copy);
+    require(state == SQLITE_DONE && finish == SQLITE_OK, "backupFailed");
+}
+void streamCopy(const QString &source, const QString &destination) {
+    QFile in(source); require(in.open(QIODevice::ReadOnly), "readFailed", source);
+    QSaveFile out(destination); out.setDirectWriteFallback(false);
+    require(out.open(QIODevice::WriteOnly), "writeFailed", destination);
+    while (!in.atEnd()) {
+        const auto chunk = in.read(1024 * 1024);
+        require(in.error() == QFileDevice::NoError && out.write(chunk) == chunk.size(), "writeFailed", destination);
+    }
+    require(out.commit(), "writeFailed", destination);
+}
+}
+QVariantMap ManagedStore::Impl::backup(const QVariantMap &a) {
+    const auto destination = QUrl(a.value("destination").toString()).toLocalFile();
+    require(!destination.isEmpty() && !QFileInfo(destination).isDir(), "writeFailed");
+    require(!QFileInfo(destination).isSymLink(),"backupLocation");
+    const auto canonicalParent = QFileInfo(destination).absoluteDir().canonicalPath();
+    require(!canonicalParent.isEmpty() && !(canonicalParent == root || canonicalParent.startsWith(root + '/')),
+            "backupLocation", "Choose a folder outside the managed storage.");
+    QTemporaryDir temporary; require(temporary.isValid(), "writeFailed");
+    const auto snapshot = temporary.filePath("snapshot.sqlite3");
+    {
+        auto target = openDatabase(snapshot, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE);
+        copyDatabase(target.get(), db);
+        require(sqlite3_exec(target.get(), "PRAGMA application_id=1313558065; PRAGMA journal_mode=DELETE", nullptr,nullptr,nullptr) == SQLITE_OK, "backupFailed");
+    }
+    streamCopy(snapshot,destination);
+    return {{"ok",true},{"file",destination}};
+}
+QVariantMap ManagedStore::Impl::restoreBackup(const QVariantMap &a) {
+    const auto source = QUrl(a.value("source").toString()).toLocalFile();
+    require(QFileInfo(source).isFile() && !QFileInfo(source).isSymLink(), "invalidBackup");
+    QTemporaryDir temporary; require(temporary.isValid(), "writeFailed");
+    const auto snapshot = temporary.filePath("restore.sqlite3");
+    streamCopy(source,snapshot);
+    auto incoming = openDatabase(snapshot, SQLITE_OPEN_READONLY);
+    // Validate a private copy, including every schema column used by this app.
+    Impl inspection; inspection.db = incoming.release();
+    try {
+    require(inspection.one("PRAGMA application_id").value("application_id").toInt()==1313558065 &&
+            inspection.one("PRAGMA user_version").value("user_version").toInt()==1, "invalidBackup");
+    require(inspection.one("PRAGMA quick_check").value("quick_check").toString()=="ok" && inspection.query("PRAGMA foreign_key_check").isEmpty(),"invalidBackup");
+    const QStringList columns{
+        "notes:id,path,text,hash,created,modified,pinned,favorite,deleted,trash_token,source,source_hash,import_batch",
+        "folders:id,path,deleted,trash_token", "drafts:path,text,base_hash,time", "versions:note_id,hash,text,time",
+        "assets:path,data,name,deleted", "imports:id,name,time,report", "settings:kind,name,value"};
+    for(const auto &spec:columns)inspection.query("SELECT "+spec.section(':',1)+" FROM "+spec.section(':',0,0)+" LIMIT 0");
+    for(const auto &v:inspection.query("SELECT name,type FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'")) {
+        const auto row=v.toMap();
+        require(row["type"]=="table"||row["type"]=="index","invalidBackup");
+    }
+    for(const auto &v:inspection.query("SELECT path FROM assets")) {
+        const auto path=v.toMap()["path"].toString();
+        require(validPath(path)&&path.startsWith("assets/")&&!QFileInfo(root+'/'+path).isSymLink(),"invalidBackup");
+    }
+    } catch (const StoreError &) { throw StoreError{"invalidBackup", "备份内容或结构无法读取"}; }
+    // Keep an independent, user-accessible rollback copy before replacing anything.
+    const auto safetyFolder=QDir::cleanPath(QDir(root).absoluteFilePath("../Backups"));
+    require(QDir().mkpath(safetyFolder),"writeFailed");
+    const auto safety=QDir(safetyFolder).filePath("恢复前-"+QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss")+'-'+uid().left(6)+".nkbackup");
+    backup({{"destination",QUrl::fromLocalFile(safety).toString()}});
+    copyDatabase(db,inspection.db);
+    index=Knowledge::Index();external.clear();
+    int cacheFailures=0;
+    // Cache refresh failures do not undo or misreport a committed database restore.
+    for(const auto &v:query("SELECT path FROM assets WHERE deleted=''")) {
+        const auto asset=one("SELECT path,data FROM assets WHERE path=?",{v.toMap()["path"]});
+        try { writeBytes(root+'/'+asset["path"].toString(),asset["data"].toByteArray()); }
+        catch(const StoreError &) { ++cacheFailures; }
+    }
+    return {{"ok",true},{"safetyCopy",safety},{"cacheFailures",cacheFailures}};
+}
