@@ -1,0 +1,79 @@
+name: Prepare Flatpak release draft
+on:
+  workflow_dispatch:
+    inputs:
+      build_run:
+        description: Successful Build Flatpak run ID from main
+        required: true
+        type: string
+permissions:
+  actions: read
+  contents: write
+jobs:
+  draft:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      BUILD_RUN: ${{ inputs.build_run }}
+    steps:
+      - name: Check build provenance
+        shell: bash
+        run: |
+          [[ "$BUILD_RUN" =~ ^[0-9]+$ ]]
+          gh api "repos/$GH_REPO/actions/runs/$BUILD_RUN" > run.json
+          python3 - <<'PY'
+          import json, os
+          run = json.load(open('run.json'))
+          assert run['conclusion'] == 'success'
+          assert run['head_branch'] == 'main'
+          assert run['head_repository']['full_name'] == os.environ['GH_REPO']
+          assert run['path'] == '.github/workflows/flatpak.yml'
+          PY
+      - uses: actions/download-artifact@v4
+        with:
+          name: nextnotes-flatpak-x86_64
+          path: dist
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.build_run }}
+      - name: Check exact artifact set and revision
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, re
+          from pathlib import Path
+          run = json.loads(Path('run.json').read_text())
+          manifest = json.loads(Path('dist/org.nextks.notes.flatpak-release.json').read_text())
+          assert manifest['revision'] == run['head_sha']
+          version = manifest['version']
+          assert re.fullmatch(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)', version)
+          assert manifest['appId'] == 'org.nextks.notes'
+          expected = {
+              f'org.nextks.notes-{version}-x86_64.flatpak',
+              f'org.nextks.notes.Sources-{version}-x86_64.flatpak',
+              'org.nextks.notes.flatpak-release.json', 'org.nextks.notes.flatpak-metadata.ini',
+              'org.nextks.notes.build-info.json', 'org.nextks.notes.build-manifest.json',
+              'org.nextks.notes.validation.tar.gz', 'SHA256SUMS'}
+          assert {p.name for p in Path('dist').iterdir()} == expected
+          Path('version').write_text(version)
+          Path('revision').write_text(run['head_sha'])
+          PY
+          (cd dist && sha256sum -c SHA256SUMS)
+          mkdir review
+          tar -xzf dist/org.nextks.notes.validation.tar.gz -C review
+          cp dist/*.json dist/*.ini dist/SHA256SUMS review/
+          cat review/evidence/acceptance.txt
+      - name: Upload complete release draft
+        shell: bash
+        run: |
+          version=$(cat version)
+          revision=$(cat revision)
+          gh release create "v$version" dist/* --draft --target "$revision" \
+            --title "NextNotes $version" \
+            --notes "Validated build: https://github.com/$GH_REPO/actions/runs/$BUILD_RUN"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nextnotes-release-review
+          path: review/
+          retention-days: 14
