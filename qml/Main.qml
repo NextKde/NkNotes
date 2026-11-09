@@ -321,6 +321,21 @@ ApplicationWindow {
         implicitHeight: tokens.headerButtonHeight
         iconSize: tokens.headerIconSize
     }
+    component ListNavigationActions: LiquidActionButtonGroup {
+        id: listActions
+        buttonSize: tokens.headerButtonHeight
+        materialForm: false; backdrop: readingBackdrop
+        icons: root.currentFolder ? ["back", "more"] : ["more"]
+        labels: root.currentFolder
+            ? ["返回" + (organizer.parentFolder(root.currentFolder) ? organizer.parentFolder(root.currentFolder).split("/").pop() : "全部笔记"), "笔记列表操作"]
+            : ["笔记列表操作"]
+        enabledActions: root.currentFolder ? [!controller.busy, true] : [true]
+        onTriggered: function(index) {
+            if (root.currentFolder && index === 0) root.browseParentFolder()
+            else if (root.trashView) recycleBin.openMenu(listActions, null)
+            else organizer.openMenu(listActions, "")
+        }
+    }
     property bool searchOpen: false
     property string searchPreviousFilter: ""
     property bool searchPreviousTrash: false
@@ -471,7 +486,7 @@ ApplicationWindow {
                 implicitWidth: 52; implicitHeight: 26; materialForm: true
                 onClicked: root.trashView ? recycleBin.clearSelection() : organizer.clearSelection()
             }
-            HeaderAction { iconName: "more"; help: "笔记列表操作"; onClicked: root.trashView ? recycleBin.openMenu(this, null) : organizer.openMenu(this, "") }
+            ListNavigationActions {}
         }
         RowLayout {
             id: headerActions
@@ -699,25 +714,14 @@ ApplicationWindow {
                     }
                     text: "文件夹"; materialForm: true; onClicked: { folderPanel.openFromButton(smallFolderButton) } }
                 LiquidActionButton { visible: root.width < 800 && (root.trashView ? recycleBin.selectionMode : organizer.selectionMode); text: "取消选择"; materialForm: true; onClicked: root.trashView ? recycleBin.clearSelection() : organizer.clearSelection() }
-                ToolbarAction { visible: root.width < 800; iconName: "more"; help: "列表操作"; onClicked: root.trashView ? recycleBin.openMenu(this, null) : organizer.openMenu(this, "") }
-            }
-            RowLayout {
-                visible: !!root.currentFolder; Layout.fillWidth: true
-                LiquidActionButton {
-                    text: "‹ 返回"
-                    materialForm: true; enabled: !controller.busy
-                    Accessible.name: "返回" + (organizer.parentFolder(root.currentFolder) ? organizer.parentFolder(root.currentFolder).split("/").pop() : "全部笔记")
-                    onClicked: root.browseParentFolder()
-                }
-                Label { text: root.listTitle; Layout.fillWidth: true; elide: Text.ElideRight; font.weight: Font.DemiBold; color: AppTheme.text }
-                ToolbarAction { id: currentFolderMenu; iconName: "more"; help: root.listTitle + "的文件夹操作"; enabled: !controller.busy; onClicked: organizer.openFolderMenu(root.currentFolder, currentFolderMenu) }
+                ListNavigationActions { visible: root.width < 800 }
             }
             Item {
                 id: childFolderSection
                 visible: !!root.currentFolder && (root.childFolders.length > 0 || organizer.dragKind === "folder")
                 Layout.fillWidth: true
                 Layout.preferredHeight: root.childFoldersExpanded
-                    ? Math.min(childFolderHeading.implicitHeight + 22 + childFolderList.contentHeight, Math.max(76, noteColumnLayout.height * 0.35))
+                    ? Math.min(childFolderHeading.implicitHeight + 6 + childFolderList.contentHeight, Math.max(100, noteColumnLayout.height * 0.35))
                     : childFolderHeading.implicitHeight
                 ColumnLayout {
                     anchors.fill: parent; spacing: 6
@@ -749,23 +753,67 @@ ApplicationWindow {
                             onClicked: root.childFoldersExpanded = !root.childFoldersExpanded
                         }
                     }
-                    Rectangle {
+                    Item {
                         visible: root.childFoldersExpanded
                         Layout.fillWidth: true; Layout.fillHeight: true
-                        radius: 10; color: AppTheme.withAlpha(AppTheme.text, AppTheme.dark ? 0.05 : 0.03)
                         KeyboardList {
                             id: childFolderList
                             visible: childFolderSection.visible && root.childFoldersExpanded
-                            anchors.fill: parent; anchors.margins: 8
-                            clip: true; spacing: 2
+                            anchors.fill: parent
+                            clip: true; spacing: 4
                             model: root.childFolders
                             Accessible.name: "子文件夹"
-                            delegate: FolderEntry {
+                            delegate: ItemDelegate {
+                                id: childFolderRow
                                 required property string modelData
                                 required property int index
-                                folderPath: modelData; width: childFolderList.width; height: implicitHeight
-                                showMenuButton: false
-                                keyboardView: childFolderList; rowIndex: index
+                                readonly property var details: controller.folderDetails[modelData] || ({})
+                                readonly property string folderIcon: controller.folderIcons[modelData] || "folder"
+                                readonly property string iconUrl: FolderIcons.source(folderIcon, tokens.primaryYellow)
+                                readonly property string summary: (details.createdUtc
+                                    ? new Date(details.createdUtc).toLocaleDateString(Qt.locale(), "yyyy/M/d") + " 创建"
+                                    : "创建日期未记录") + " · " + (details.noteCount || 0) + " 篇笔记"
+                                width: childFolderList.width; height: tokens.noteRowHeight
+                                leftPadding: 12; rightPadding: 12; topPadding: 12; bottomPadding: 12
+                                focusPolicy: Qt.StrongFocus; activeFocusOnTab: false
+                                function activate() { root.browseCategory("folder:" + modelData) }
+                                function openContext(position) { organizer.openFolderMenu(modelData, childFolderRow, position || Qt.point(width / 2, height / 2)) }
+                                Keys.onPressed: function(event) { childFolderList.handleKey(event) }
+                                onActiveFocusChanged: if (activeFocus) { childFolderList.currentIndex = index; childFolderList.cursorKey = modelData }
+                                background: Rectangle {
+                                    radius: 10; border.width: 0
+                                    color: childFolderRow.hovered ? AppTheme.controlBackground : "transparent"
+                                }
+                                contentItem: Column {
+                                    spacing: 3
+                                    Row {
+                                        width: parent.width; spacing: 6
+                                        Item {
+                                            width: 16; height: 18
+                                            VectorIcon { anchors.centerIn: parent; visible: !childFolderRow.iconUrl; name: childFolderRow.folderIcon; size: 16; color: tokens.primaryYellow }
+                                            Image { anchors.centerIn: parent; visible: !!childFolderRow.iconUrl; source: childFolderRow.iconUrl; width: 16; height: 16; sourceSize: Qt.size(32, 32) }
+                                        }
+                                        Label {
+                                            width: parent.width - 22
+                                            text: childFolderRow.modelData.split("/").pop(); textFormat: Text.PlainText
+                                            elide: Text.ElideRight; font.pixelSize: 14; font.weight: Font.DemiBold; color: AppTheme.text
+                                        }
+                                    }
+                                    Label { width: parent.width; text: childFolderRow.summary; elide: Text.ElideRight; font.pixelSize: 12; color: AppTheme.mutedText }
+                                }
+                                OrganizePointer {
+                                    folderPath: childFolderRow.modelData; enabled: !controller.busy
+                                    onClickedItem: function(button, modifiers, position) {
+                                        childFolderRow.forceActiveFocus(Qt.MouseFocusReason)
+                                        if (button === Qt.RightButton) childFolderRow.openContext(position)
+                                        else childFolderRow.activate()
+                                    }
+                                }
+                                FolderDropTarget { folderPath: childFolderRow.modelData }
+                                onClicked: activate()
+                                Accessible.role: Accessible.ListItem
+                                Accessible.name: "文件夹 " + modelData.split("/").pop() + "，" + summary
+                                Accessible.onPressAction: activate()
                             }
                             footer: Item {
                                 width: childFolderList.width
@@ -831,6 +879,7 @@ ApplicationWindow {
                     background: Rectangle {
                         y: noteRow.groupHeight; height: noteRow.height - y
                         radius: 10; color: noteRow.highlighted ? tokens.notesYellow : noteRow.hovered ? AppTheme.controlBackground : "transparent"
+                        border.width: 0
                     }
                     readonly property string thumbnail: ""
                     Image {
@@ -858,14 +907,11 @@ ApplicationWindow {
                             else if (!organizer.click(noteRow.modelData, noteRow.index, modifiers)) noteRow.activate()
                         }
                     }
-                    LiquidCheckBox {
+                    NotesSelectionBox {
                         id: noteSelectionBox
                         visible: organizer.selectionMode
                         x: 6; y: noteRow.groupHeight + noteRow.contentTopInset; width: 24; height: 24
                         padding: 4
-                        Binding { target: noteSelectionBox.indicator; property: "implicitWidth"; value: 16 }
-                        Binding { target: noteSelectionBox.indicator; property: "implicitHeight"; value: 16 }
-                        Binding { target: noteSelectionBox.indicator; property: "radius"; value: 5 }
                         checked: noteRow.bulkSelected; text: ""
                         Accessible.name: "选择笔记 " + noteRow.modelData.title + "，" + root.noteLocation(noteRow.modelData.path)
                         onClicked: organizer.toggle(noteRow.modelData.path)

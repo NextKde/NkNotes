@@ -35,6 +35,39 @@ class NotesRepositoryTest : public QObject {
         return {{"ok", false}, {"error", "missingRequest"}};
     }
 private slots:
+    void managedFolderSummariesTrackNotesAndPreserveCreation() {
+        QTemporaryDir d;
+        QVariant created;
+        {
+            ManagedStore store(d.path());
+            QVERIFY(store.dispatch("createFolder", {{"path", "Parent/Child"}}).value("ok").toBool());
+            const auto details = [&store](const QString &path, const QVariantMap &filter = QVariantMap()) {
+                return store.dispatch("list", filter).value("folderDetails").toMap().value(path).toMap();
+            };
+            created = details("Parent/Child").value("createdUtc");
+            QVERIFY(QDateTime::fromString(created.toString(), Qt::ISODateWithMs).isValid());
+            QCOMPARE(details("Parent/Child").value("noteCount").toInt(), 0);
+            for (const auto &path : {QString("Parent/Child/a.md"), QString("Parent/Child/b.md"), QString("Parent/Child/Nested/c.md"), QString("Parent/ChildOther/d.md")})
+                QVERIFY(store.dispatch("create", {{"path", path}, {"text", "# Note\n"}}).value("ok").toBool());
+            QCOMPARE(details("Parent/Child", {{"query", "no matches"}, {"filter", "favorite"}}).value("noteCount").toInt(), 2);
+            QCOMPARE(details("Parent").value("noteCount").toInt(), 0);
+            const auto note = store.dispatch("read", {{"path", "Parent/Child/a.md"}});
+            QVERIFY(store.dispatch("trash", {{"path", "Parent/Child/a.md"}, {"baseHash", note.value("baseHash")}}).value("ok").toBool());
+            QCOMPARE(details("Parent/Child").value("noteCount").toInt(), 1);
+            QVERIFY(store.dispatch("undo", {}).value("ok").toBool());
+            QCOMPARE(details("Parent/Child").value("noteCount").toInt(), 2);
+            QVERIFY(store.dispatch("editFolder", {{"path", "Parent/Child"}, {"target", "Parent/Renamed"}, {"icon", "folder"}}).value("ok").toBool());
+            QCOMPARE(details("Parent/Renamed").value("createdUtc"), created);
+            QCOMPARE(details("Parent/Renamed").value("noteCount").toInt(), 2);
+            QVERIFY(store.dispatch("undo", {}).value("ok").toBool());
+            QCOMPARE(details("Parent/Child").value("createdUtc"), created);
+            QVERIFY(store.dispatch("redo", {}).value("ok").toBool());
+        }
+        ManagedStore reopened(d.path());
+        const auto summary = reopened.dispatch("list", {}).value("folderDetails").toMap().value("Parent/Renamed").toMap();
+        QCOMPARE(summary.value("createdUtc"), created);
+        QCOMPARE(summary.value("noteCount").toInt(), 2);
+    }
     void managedDirectNoteDeletionIsPermanentAndScoped() {
         QTemporaryDir d;
         {
@@ -214,6 +247,8 @@ private slots:
         const auto folders = listing.value("folders").toList();
         QVERIFY(folders.indexOf(QString("A")) < folders.indexOf(QString("Z")));
         QCOMPARE(listing.value("folderIcons").toMap().value("Z").toString(), QString("heart"));
+        QVERIFY(listing.value("folderDetails").toMap().value("Z").toMap().value("createdUtc").toString().isEmpty());
+        QCOMPARE(listing.value("folderDetails").toMap().value("Z").toMap().value("noteCount").toInt(), 0);
         QVERIFY(store.dispatch("moveFolder", {{"path", "Z"}, {"folder", ""}, {"sibling", "A"}}).value("ok").toBool());
         const auto reordered = store.dispatch("list", {}).value("folders").toList();
         QVERIFY(reordered.indexOf(QString("Z")) < reordered.indexOf(QString("A")));

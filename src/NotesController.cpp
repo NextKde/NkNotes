@@ -227,8 +227,9 @@ void NotesController::applyListing(const QVariantMap &r) {
     if (r.contains("folders")) {
         const auto folders = r.value("folders").toList();
         const auto icons = r.value("folderIcons").toMap();
-        if (m_folders != folders || m_folderIcons != icons) {
-            m_folders = folders; m_folderIcons = icons; emit foldersChanged();
+        const auto details = r.value("folderDetails").toMap();
+        if (m_folders != folders || m_folderIcons != icons || m_folderDetails != details) {
+            m_folders = folders; m_folderIcons = icons; m_folderDetails = details; emit foldersChanged();
         }
     }
     if (r.contains("notes") && m_notes != r.value("notes").toList()) {

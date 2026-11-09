@@ -69,6 +69,8 @@ struct ManagedStore::Impl {
         if (!columns.contains("icon")) query("ALTER TABLE folders ADD COLUMN icon TEXT NOT NULL DEFAULT 'folder'");
         // Equal initial ranks retain the old alphabetical order until rearranged.
         if (!columns.contains("sort_order")) query("ALTER TABLE folders ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0");
+        // Legacy folders have no reliable creation date; leave it unknown.
+        if (!columns.contains("created")) query("ALTER TABLE folders ADD COLUMN created TEXT NOT NULL DEFAULT ''");
     }
     void initializeFolders();
     void initializeUndo();
@@ -129,7 +131,7 @@ struct ManagedStore::Impl {
     void folder(const QString &path) {
         require(validPath(path, true), "invalidName", path); if (path.isEmpty()) return;
         require(one("SELECT id FROM folders WHERE path=? AND deleted<>''", {path}).isEmpty(), "alreadyExists", path);
-        QString current; for (const auto &part : path.split('/')) { current += (current.isEmpty() ? "" : "/") + part; require(one("SELECT id FROM folders WHERE path=? AND deleted<>''",{current}).isEmpty(),"alreadyExists",current); query("INSERT OR IGNORE INTO folders(id,path,deleted,trash_token,sort_order) VALUES(?,?,'','',(SELECT COALESCE(MAX(sort_order),-1)+1 FROM folders))", {uid(),current}); }
+        QString current; for (const auto &part : path.split('/')) { current += (current.isEmpty() ? "" : "/") + part; require(one("SELECT id FROM folders WHERE path=? AND deleted<>''",{current}).isEmpty(),"alreadyExists",current); query("INSERT OR IGNORE INTO folders(id,path,deleted,trash_token,sort_order,created) VALUES(?,?,'','',(SELECT COALESCE(MAX(sort_order),-1)+1 FROM folders),?)", {uid(),current,utc()}); }
     }
     QString available(QString path, const QSet<QString> &reserved = {}) {
         require(validPath(path), "invalidName", path); const auto base = path;
@@ -157,10 +159,14 @@ struct ManagedStore::Impl {
         const auto keys = index.documents.keys(); for (const auto &path : keys) if (!present.contains(path)) index.remove(path);
     }
     QVariantMap listing(const QVariantMap &a = {}) {
-        refreshIndex(); QVariantList all, matches, folders; QVariantMap folderIcons;
-        for (const auto &v : query("SELECT path,icon FROM folders WHERE deleted='' ORDER BY sort_order,path")) {
+        refreshIndex(); QVariantList all, matches, folders; QVariantMap folderIcons, folderDetails;
+        QHash<QString, int> folderNoteCounts;
+        for (const auto &v : query("SELECT path FROM notes WHERE deleted=''"))
+            ++folderNoteCounts[parentFolder(v.toMap().value("path").toString())];
+        for (const auto &v : query("SELECT path,icon,created FROM folders WHERE deleted='' ORDER BY sort_order,path")) {
             const auto folder = v.toMap(); folders.append(folder["path"]);
             folderIcons.insert(folder["path"].toString(), folder["icon"]);
+            folderDetails.insert(folder["path"].toString(), QVariantMap{{"createdUtc", folder["created"]}, {"noteCount", folderNoteCounts.value(folder["path"].toString())}});
         }
         QString queryText=a.value("query").toString().trimmed(); const auto filter=a.value("filter").toString();
         QStringList tags; QVariantMap props; QString scope; bool favorite = false;
@@ -195,7 +201,7 @@ struct ManagedStore::Impl {
         }
         const auto sort=a.value("sort","modified").toString();const bool ascending=a.value("ascending").toBool();
         std::stable_sort(matches.begin(),matches.end(),[&](const QVariant &l,const QVariant &r){auto x=l.toMap(),y=r.toMap();if(x["pinned"].toBool()!=y["pinned"].toBool())return x["pinned"].toBool();const auto field=sort=="title"?"title":sort=="created"?"createdUtc":"displayModifiedUtc";int c=QString::localeAwareCompare(x[field].toString(),y[field].toString());return c==0?x["id"].toString()<y["id"].toString():ascending?c<0:c>0;});
-        return {{"ok",true},{"notes",matches},{"allNotes",all},{"folders",folders},{"folderIcons",folderIcons},{"smartFolders",settings("smart")},{"initializationNotice",initializationNotice},{"duplicateIds",QVariantList()},{"unwatchedPaths",QStringList()},{"indexDocuments",index.documents.size()},{"indexUpdates",index.updates}};
+        return {{"ok",true},{"notes",matches},{"allNotes",all},{"folders",folders},{"folderIcons",folderIcons},{"folderDetails",folderDetails},{"smartFolders",settings("smart")},{"initializationNotice",initializationNotice},{"duplicateIds",QVariantList()},{"unwatchedPaths",QStringList()},{"indexDocuments",index.documents.size()},{"indexUpdates",index.updates}};
     }
     void rewriteRelocatedLinks(const QHash<QString,QString> &moved) {
         // Preserve path-based Markdown links while identities remain unchanged.

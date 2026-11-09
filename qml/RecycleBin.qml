@@ -97,7 +97,8 @@ Item {
             Keys.onPressed: event => list.handleKey(event)
             background: Rectangle {
                 radius: 10; color: row.highlighted ? AppTheme.dark ? "#bc8b16" : "#ffb921" : row.hovered ? AppTheme.controlBackground : "transparent"
-                border.width: row.activeFocus ? 2 : 0; border.color: AppTheme.focusRing
+                // Keep keyboard focus without drawing a focus border on items.
+                border.width: 0
             }
             Rectangle {
                 x: row.leftPadding; y: row.height - 1
@@ -118,14 +119,11 @@ Item {
                     else root.click(row.modelData, row.index, mouse.modifiers)
                 }
             }
-            LiquidCheckBox {
+            NotesSelectionBox {
                 id: trashSelectionBox
                 x: 6; y: 12; width: 24; height: 24; text: ""
                 padding: 4
                 visible: root.selectionMode
-                Binding { target: trashSelectionBox.indicator; property: "implicitWidth"; value: 16 }
-                Binding { target: trashSelectionBox.indicator; property: "implicitHeight"; value: 16 }
-                Binding { target: trashSelectionBox.indicator; property: "radius"; value: 5 }
                 checked: row.bulkSelected
                 Accessible.name: "选择回收项 " + row.modelData.source
                 onClicked: root.toggle(row.modelData)
