@@ -1,6 +1,9 @@
 name: Build Flatpak
 on:
   workflow_dispatch:
+defaults:
+  run:
+    shell: bash
 permissions:
   contents: read
 jobs:
@@ -17,7 +20,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y flatpak flatpak-builder ostree python3-gi gir1.2-flatpak-1.0 xvfb xdotool dbus-x11 imagemagick
           flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-          flatpak install --user --noninteractive --assumeyes flathub org.kde.Sdk//6.11 org.kde.Platform//6.11
+          flatpak install --user --noninteractive --assumeyes flathub org.kde.Sdk//6.11 org.kde.Platform//6.11 io.qt.qtwebengine.BaseApp//6.11
       - name: Pin source and record environment
         run: |
           mkdir -p tmp/evidence dist
@@ -28,8 +31,7 @@ jobs:
           manifest['modules'][-1]['sources'] = [{'type': 'git', 'url': 'https://github.com/NextKde/NkNotes.git', 'commit': os.environ['GITHUB_SHA']}]
           Path('tmp/org.nextks.notes.json').write_text(json.dumps(manifest, indent=2) + '\n')
           environment = {'revision': os.environ['GITHUB_SHA']}
-          for name in ('Platform', 'Sdk'):
-              ref = f'org.kde.{name}/x86_64/6.11'
+          for name, ref in (('Platform', 'org.kde.Platform/x86_64/6.11'), ('Sdk', 'org.kde.Sdk/x86_64/6.11'), ('WebEngine', 'io.qt.qtwebengine.BaseApp/x86_64/6.11')):
               environment[name] = {'ref': ref, 'commit': subprocess.check_output(['flatpak', 'info', '--user', '--show-commit', ref], text=True).strip()}
           Path('tmp/evidence/environment.json').write_text(json.dumps(environment, indent=2) + '\n')
           PY
@@ -42,14 +44,15 @@ jobs:
         run: |
           repository_test=$(find "$PWD/tmp/state/build" -type f -name notes-repository-test -print -quit)
           controller_test=$(find "$PWD/tmp/state/build" -type f -name notes-controller-test -print -quit)
-          test -n "$repository_test" && test -n "$controller_test"
-          flatpak-builder --user --run tmp/build tmp/org.nextks.notes.json "$repository_test" \
+          test -n "$repository_test"
+          test -n "$controller_test"
+          flatpak-builder --run tmp/build tmp/org.nextks.notes.json "$repository_test" \
             managedFolderSummariesTrackNotesAndPreserveCreation managedLegacyFoldersGainOrderWithoutLosingIcons \
             managedFolderMoveKeepsContentsAndRejectsInvalidDrops managedFolderOrderPersistsAndReplays \
             managedDirectNoteDeletionIsPermanentAndScoped managedDirectNoteDeletionPreservesFailedItems \
             managedDirectFolderDeletionIsPermanentAndScoped managedDirectFolderDeletionProtectsRecoveryDrafts \
             2>&1 | tee tmp/evidence/repository-tests.log
-          flatpak-builder --user --run tmp/build tmp/org.nextks.notes.json env QT_QPA_PLATFORM=offscreen "$controller_test" \
+          flatpak-builder --run tmp/build tmp/org.nextks.notes.json env QT_QPA_PLATFORM=offscreen "$controller_test" \
             directNoteDeletionSavesBeforeRemovingCurrentDocument failedDirectNoteDeletionKeepsCurrentDocument \
             directFolderDeletionDrainsAndClearsTheOpenDocument failedDirectFolderDeletionKeepsTheOpenDocument \
             2>&1 | tee tmp/evidence/controller-tests.log
@@ -59,7 +62,7 @@ jobs:
           cp tmp/org.nextks.notes.json dist/org.nextks.notes.build-manifest.json
           cp tmp/evidence/environment.json dist/org.nextks.notes.build-info.json
           ostree --repo=tmp/repo ls -R app/org.nextks.notes/x86_64/stable > tmp/evidence/runtime-files.txt
-          if grep -E '/files/lib/.*libQt6' tmp/evidence/runtime-files.txt; then
+          if grep -E '/files/lib/.*libQt6(Core|Gui|Qml|Quick|Network|Widgets|DBus)\.so' tmp/evidence/runtime-files.txt; then
             echo 'Unexpected private Qt runtime in application bundle' >&2
             exit 1
           fi
@@ -67,7 +70,7 @@ jobs:
           import json, subprocess
           from pathlib import Path
           environment = json.loads(Path('tmp/evidence/environment.json').read_text())
-          for name in ('Platform', 'Sdk'):
+          for name in ('Platform', 'Sdk', 'WebEngine'):
               entry = environment[name]
               assert subprocess.check_output(['flatpak', 'info', '--user', '--show-commit', entry['ref']], text=True).strip() == entry['commit']
           PY

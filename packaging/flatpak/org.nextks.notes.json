@@ -10,7 +10,9 @@
     "--socket=wayland",
     "--socket=fallback-x11",
     "--device=dri",
-    "--env=QT_QPA_PLATFORMTHEME=xdgdesktopportal"
+    "--env=QT_QPA_PLATFORMTHEME=xdgdesktopportal",
+    "--env=QTWEBENGINEPROCESS_PATH=/app/bin/QtWebEngineProcess",
+    "--talk-name=org.freedesktop.Flatpak"
   ],
   "modules": [
     {
@@ -20,7 +22,27 @@
         "-DCMAKE_BUILD_TYPE=Release",
         "-DNEXTNOTES_BUILD_TESTS=ON"
       ],
-      "sources": [{"type": "dir", "path": "../..", "skip": [".git", "build", "output", "tmp", ".flatpak-builder", ".agents", ".codex", ".aws"]}]
+      "sources": [
+        {
+          "type": "dir",
+          "path": "../..",
+          "skip": [
+            ".git",
+            "build",
+            "output",
+            "tmp",
+            ".flatpak-builder",
+            ".agents",
+            ".codex",
+            ".aws"
+          ]
+        }
+      ]
     }
+  ],
+  "base": "io.qt.qtwebengine.BaseApp",
+  "base-version": "6.11",
+  "cleanup-commands": [
+    "/app/cleanup-BaseApp.sh"
   ]
 }

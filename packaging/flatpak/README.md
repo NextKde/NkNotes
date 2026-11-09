@@ -3,7 +3,12 @@
 Application ID: `org.nextks.notes`; executable: `nextnotes`; branch: `stable`.
 The first supported architecture is `x86_64`. The app shares
 `org.kde.Platform//6.11` with KOS Apps and builds with the matching `org.kde.Sdk`.
-Qt is supplied by the runtime, never copied from the build host into `/app`.
+Core Qt libraries are supplied by the shared runtime. The editor additionally
+needs QtWebEngine, absent from that runtime; `io.qt.qtwebengine.BaseApp//6.11`
+supplies that application-specific module and its sandbox support. No host Qt
+libraries are copied into `/app`. BaseApp build metadata is retained alongside
+the app evidence. Upstream source/build definitions are available at
+https://github.com/flathub/io.qt.qtwebengine.BaseApp/tree/branch/6.11.
 
 Run **Build Flatpak** on `main` in GitHub Actions. It pins the application's Git
 commit (including its pinned Kos.Ui submodule), records SDK/runtime commits,
