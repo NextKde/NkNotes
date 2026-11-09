@@ -11,8 +11,7 @@
     "--socket=fallback-x11",
     "--device=dri",
     "--env=QT_QPA_PLATFORMTHEME=xdgdesktopportal",
-    "--env=QTWEBENGINEPROCESS_PATH=/app/bin/QtWebEngineProcess",
-    "--talk-name=org.freedesktop.Flatpak"
+    "--env=QTWEBENGINEPROCESS_PATH=/app/bin/QtWebEngineProcess"
   ],
   "modules": [
     {
