@@ -49,6 +49,7 @@ jobs:
           test -n "$repository_test"
           test -n "$controller_test"
           flatpak-builder --run tmp/build tmp/org.nextks.notes.json "$repository_test" \
+            managedSandboxLockRecoversAndRejectsConcurrentWriters \
             managedFolderSummariesTrackNotesAndPreserveCreation managedLegacyFoldersGainOrderWithoutLosingIcons \
             managedFolderMoveKeepsContentsAndRejectsInvalidDrops managedFolderOrderPersistsAndReplays \
             managedDirectNoteDeletionIsPermanentAndScoped managedDirectNoteDeletionPreservesFailedItems \

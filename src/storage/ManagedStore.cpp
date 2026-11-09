@@ -21,6 +21,10 @@
 #include <QElapsedTimer>
 #include <QThread>
 #include <QSet>
+#ifdef Q_OS_LINUX
+#include <sys/file.h>
+#include <cerrno>
+#endif
 
 namespace {
 struct StoreError { QString code, detail; };
@@ -88,6 +92,7 @@ struct ManagedStore::Impl {
     Knowledge::Index index;
     QHash<QString, MarkdownFile::Document> external;
     std::unique_ptr<QLockFile> lock;
+    std::unique_ptr<QFile> instanceLock;
     ~Impl() { if (db) sqlite3_close(db); }
     QVariantList query(const QString &sql, const QVariantList &args = {}) {
         sqlite3_stmt *raw = nullptr;
@@ -265,7 +270,24 @@ struct ManagedStore::Impl {
 ManagedStore::ManagedStore(const QString &directory) : d(std::make_unique<Impl>()) {
     d->root=QDir(directory).absolutePath();
     require(QDir().mkpath(d->root),"metadataUnavailable",d->root);
-    d->lock=std::make_unique<QLockFile>(d->root+"/managed.lock");d->lock->setStaleLockTime(0);require(d->lock->tryLock(),"libraryLocked");
+#ifdef Q_OS_LINUX
+    {
+        // Flatpak may reuse PID 2 for each launch. A persistent PID lock then
+        // mistakes a crashed predecessor for this live process. flock follows
+        // the open file description, survives namespace boundaries and is
+        // released by the kernel even on SIGKILL. Never unlink this lock inode.
+        d->instanceLock = std::make_unique<QFile>(d->root + "/managed.instance.lock");
+        require(d->instanceLock->open(QIODevice::ReadWrite), "metadataUnavailable");
+        int result;
+        do { result = flock(d->instanceLock->handle(), LOCK_EX | LOCK_NB); } while (result < 0 && errno == EINTR);
+        require(result == 0, "libraryLocked");
+    }
+    // Keep the legacy native lock as well for compatibility with older builds.
+    if (!QFileInfo::exists("/.flatpak-info"))
+#endif
+    {
+        d->lock=std::make_unique<QLockFile>(d->root+"/managed.lock");d->lock->setStaleLockTime(0);require(d->lock->tryLock(),"libraryLocked");
+    }
     require(sqlite3_open_v2(QFile::encodeName(d->root+"/notes.sqlite3").constData(),&d->db,SQLITE_OPEN_READWRITE|SQLITE_OPEN_CREATE|SQLITE_OPEN_FULLMUTEX,nullptr)==SQLITE_OK,"databaseError");
     sqlite3_busy_timeout(d->db,5000);
     d->query("PRAGMA journal_mode=WAL");d->query("PRAGMA synchronous=FULL");d->query("PRAGMA foreign_keys=ON");

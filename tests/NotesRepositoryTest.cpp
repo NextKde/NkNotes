@@ -16,6 +16,7 @@
 #include <sqlite3.h>
 #ifdef Q_OS_LINUX
 #include <sys/statvfs.h>
+#include <unistd.h>
 #endif
 
 class NotesRepositoryTest : public QObject {
@@ -35,6 +36,40 @@ class NotesRepositoryTest : public QObject {
         return {{"ok", false}, {"error", "missingRequest"}};
     }
 private slots:
+    void managedSandboxLockCrashHelper() {
+#ifdef Q_OS_LINUX
+        const auto path = qEnvironmentVariable("NKNOTES_LOCK_TEST_DIR");
+        if (path.isEmpty() || !QFileInfo::exists("/.flatpak-info")) QSKIP("Only invoked by the isolated sandbox lock regression");
+        ManagedStore store(path);
+        const bool created = store.dispatch("create", {{"path", "survives.md"}, {"text", "# Survives a crash\n"}}).value("ok").toBool();
+        // Deliberately bypass all destructors, as a killed application does.
+        ::_exit(created ? 0 : 1);
+#else
+        QSKIP("Linux Flatpak regression");
+#endif
+    }
+    void managedSandboxLockRecoversAndRejectsConcurrentWriters() {
+        if (!QFileInfo::exists("/.flatpak-info")) QSKIP("Run inside the Flatpak SDK");
+        QTemporaryDir d;
+        // A previous sandbox can leave exactly this PID in the old lock file.
+        QVERIFY(write(d.filePath("managed.lock"), QByteArray::number(QCoreApplication::applicationPid()) + "\nnextnotes\n"));
+        QProcess child;
+        auto environment = QProcessEnvironment::systemEnvironment();
+        environment.insert("NKNOTES_LOCK_TEST_DIR", d.path());
+        child.setProcessEnvironment(environment);
+        child.start(QCoreApplication::applicationFilePath(), {"managedSandboxLockCrashHelper"});
+        QVERIFY(child.waitForFinished(10000));
+        QCOMPARE(child.exitCode(), 0);
+        {
+            ManagedStore first(d.path());
+            QVERIFY(first.dispatch("read", {{"path", "survives.md"}}).value("ok").toBool());
+            bool rejected = false;
+            try { ManagedStore second(d.path()); } catch (...) { rejected = true; }
+            QVERIFY(rejected);
+        }
+        ManagedStore reopened(d.path());
+        QVERIFY(reopened.dispatch("read", {{"path", "survives.md"}}).value("ok").toBool());
+    }
     void managedFolderSummariesTrackNotesAndPreserveCreation() {
         QTemporaryDir d;
         QVariant created;

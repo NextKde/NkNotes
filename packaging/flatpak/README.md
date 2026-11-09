@@ -14,7 +14,10 @@ Run **Build Flatpak** on `main` in GitHub Actions. It pins the application's Git
 commit (including its pinned Kos.Ui submodule), records SDK/runtime commits,
 builds in the SDK, runs targeted repository/controller regressions, and tests
 installation, offline launch, reinstall and data-preserving uninstall in the
-disposable runner. No test or graphical acceptance runs on the developer host.
+disposable runner. Linux uses a kernel-held library lock so a killed Flatpak
+process cannot leave a false live-PID lock when the next sandbox reuses its PID.
+Reinstall acceptance creates another note after reopening, not merely checking
+that the old database file exists. No test or graphical acceptance runs on the developer host.
 
 The resulting `nextnotes-flatpak-x86_64` artifact contains the application and
 Sources bundles, a schema-2 `org.nextks.notes.flatpak-release.json`, byte-exact

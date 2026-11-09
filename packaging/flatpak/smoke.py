@@ -71,9 +71,10 @@ bundle = next(Path("dist").glob("org.nextks.notes-*.flatpak"))
 subprocess.run(["flatpak", "uninstall", "--user", "--noninteractive", "--assumeyes", app], check=True)
 assert database() and note_count() == count
 subprocess.run(["flatpak", "install", "--user", "--noninteractive", "--assumeyes", "--no-deps", str(bundle)], check=True)
-launch("reinstall-offline-launch")
-assert note_count() == count
+launch("reinstall-offline-launch", create=True)
+assert note_count() == count + 1
+count = note_count()
 subprocess.run(["flatpak", "uninstall", "--user", "--noninteractive", "--assumeyes", app], check=True)
 assert database() and note_count() == count
 subprocess.run(["flatpak", "info", "--user", "org.kde.Platform//6.11"], check=True)
-(evidence / "acceptance.txt").write_text("PASS: install, offline launch, note creation, reinstall, offline relaunch, uninstall preserves notes and shared runtime.\n")
+(evidence / "acceptance.txt").write_text("PASS: install, offline launch, note creation, forced termination, reinstall, offline relaunch with another successful note creation, uninstall preserves notes and shared runtime.\n")
