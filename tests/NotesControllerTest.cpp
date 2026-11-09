@@ -17,7 +17,8 @@ class NotesControllerTest : public QObject {
         QSignalSpy requests{&controller, &NotesController::requestSent};
         Fixture() {
             session.attachDocument(&document);
-            controller.selectLibrary(QUrl::fromLocalFile("/virtual/library"));
+            controller.setPreference("managedStorage", "/virtual/library");
+            controller.restoreWorkspace();
             answer("selectLibrary", {{"notes", QVariantList{QVariantMap{{"id", "A"}, {"path", "a.md"}, {"baseHash", "base"}}}}, {"folders", QVariantList{}}});
             controller.openNote("a.md");
             answer("read", {{"path", "a.md"}, {"id", "A"}, {"text", "原文"}, {"baseHash", "base"}});
@@ -28,7 +29,8 @@ class NotesControllerTest : public QObject {
             return {};
         }
         void answer(const QString &op, QVariantMap result = {}) {
-            const auto request = take(op); Q_ASSERT(!request.isEmpty());
+            const auto request = take(op);
+            if (request.isEmpty()) qFatal("Missing mock request: %s", qPrintable(op));
             result.insert("ok", result.value("ok", true));
             result.insert("library", "/virtual/library"); result.insert("generation", 1);
             controller.receive(request[0].toULongLong(), op, result);
@@ -37,6 +39,62 @@ class NotesControllerTest : public QObject {
         int count(const QString &op) { int n = 0; for (const auto &r : requests) if (r[1] == op) ++n; return n; }
     };
 private slots:
+    void directNoteDeletionSavesBeforeRemovingCurrentDocument() {
+        Fixture f;
+        f.type(" changed");
+        f.controller.organize("purgeNotes", {"a.md"});
+        QCOMPARE(f.count("batch"), 0);
+        f.answer("save", {{"baseHash", "saved"}});
+        QCOMPARE(f.count("batch"), 1);
+        QVariantMap pending;
+        for (const auto &request : f.requests) if (request[1] == "batch") pending = request[2].toMap();
+        QCOMPARE(pending.value("items").toList().first().toMap().value("baseHash").toString(), QString("saved"));
+        f.answer("batch", {{"action", "purgeNotes"}, {"results", QVariantList{QVariantMap{{"path", "a.md"}, {"ok", true}}}}, {"succeeded", 1}, {"failed", 0},
+                           {"undoState", QVariantMap{{"canUndo", false}, {"canRedo", false}}}});
+        QVERIFY(f.controller.property("path").toString().isEmpty());
+        QVERIFY(f.document.toPlainText().isEmpty());
+        QVERIFY(!f.controller.canUndo()); QVERIFY(!f.controller.canRedo());
+        QVERIFY(!f.controller.busy());
+    }
+    void failedDirectNoteDeletionKeepsCurrentDocument() {
+        Fixture f;
+        f.controller.organize("purgeNotes", {"a.md"});
+        f.answer("batch", {{"action", "purgeNotes"}, {"results", QVariantList{QVariantMap{{"path", "a.md"}, {"ok", false}, {"error", "pendingDrafts"}}}}, {"succeeded", 0}, {"failed", 1}});
+        QCOMPARE(f.controller.property("path").toString(), QString("a.md"));
+        QCOMPARE(f.document.toPlainText(), QString("原文"));
+        QVERIFY(!f.controller.busy());
+        const auto result = f.controller.property("batchReport").toMap().value("results").toList().first().toMap();
+        QVERIFY(!result.value("message").toString().isEmpty());
+    }
+    void directFolderDeletionDrainsAndClearsTheOpenDocument() {
+        Fixture f;
+        f.controller.openNote("Folder/Child/note.md");
+        f.answer("read", {{"path", "Folder/Child/note.md"}, {"id", "N"}, {"text", "# Note"}, {"baseHash", "n"}});
+        QSignalSpy deleted(&f.controller, &NotesController::folderDeleted);
+        f.type(" edited");
+        f.controller.manageFolder("purgeFolder", "Folder");
+        QCOMPARE(f.count("purgeFolder"), 0);
+        f.answer("save", {{"baseHash", "saved"}});
+        QCOMPARE(f.count("purgeFolder"), 1);
+        f.answer("purgeFolder", {{"undoState", QVariantMap{{"canUndo", false}, {"canRedo", false}}}});
+        QCOMPARE(deleted.size(), 1); QVERIFY(deleted[0][0].toBool());
+        QVERIFY(f.controller.property("path").toString().isEmpty());
+        QVERIFY(f.document.toPlainText().isEmpty());
+        QVERIFY(!f.controller.busy());
+        QVERIFY(!f.controller.canUndo());
+        QVERIFY(!f.controller.canRedo());
+        QVERIFY(!f.controller.canGoForward());
+    }
+    void failedDirectFolderDeletionKeepsTheOpenDocument() {
+        Fixture f;
+        QSignalSpy deleted(&f.controller, &NotesController::folderDeleted);
+        f.controller.manageFolder("purgeFolder", "Folder");
+        f.answer("purgeFolder", {{"ok", false}, {"error", "pendingDrafts"}});
+        QCOMPARE(deleted.size(), 1); QVERIFY(!deleted[0][0].toBool());
+        QVERIFY(!deleted[0][1].toString().isEmpty());
+        QCOMPARE(f.controller.property("path").toString(), QString("a.md"));
+        QVERIFY(!f.controller.busy());
+    }
     void normalSaveRefreshesRecoveryWithoutVersionBodies() {
         Fixture f; f.type("changed"); f.controller.save();
         f.answer("save", {{"baseHash", "saved"}});

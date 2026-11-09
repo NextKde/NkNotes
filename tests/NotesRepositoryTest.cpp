@@ -4,6 +4,7 @@
 #include <QFile>
 #include <QDir>
 #include "NotesRepository.h"
+#include "ManagedStore.h"
 #include "MarkdownFile.h"
 #include "SafeCommit.h"
 #include "RepositoryTestHooks.h"
@@ -12,6 +13,7 @@
 #include <cstdlib>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <sqlite3.h>
 #ifdef Q_OS_LINUX
 #include <sys/statvfs.h>
 #endif
@@ -33,6 +35,189 @@ class NotesRepositoryTest : public QObject {
         return {{"ok", false}, {"error", "missingRequest"}};
     }
 private slots:
+    void managedDirectNoteDeletionIsPermanentAndScoped() {
+        QTemporaryDir d;
+        {
+            ManagedStore store(d.path());
+            for (const QString &path : {QString("Folder/remove.md"), QString("Folder/keep.md"), QString("Folder/old.md")})
+                QVERIFY(store.dispatch("create", {{"path", path}, {"text", "# Note\n"}}).value("ok").toBool());
+            const auto old = store.dispatch("read", {{"path", "Folder/old.md"}});
+            QVERIFY(store.dispatch("trash", {{"path", "Folder/old.md"}, {"baseHash", old.value("baseHash")}}).value("ok").toBool());
+            const auto trash = store.dispatch("recovery", {}).value("trashItems");
+            const auto note = store.dispatch("read", {{"path", "Folder/remove.md"}});
+            QVERIFY(store.dispatch("createFolder", {{"path", "UndoProbe"}}).value("ok").toBool());
+            QVERIFY(store.dispatch("undo", {}).value("ok").toBool());
+            const auto result = store.dispatch("batch", {{"action", "purgeNotes"}, {"items", QVariantList{QVariantMap{{"path", "Folder/remove.md"}, {"baseHash", note.value("baseHash")}}}}});
+            QCOMPARE(result.value("succeeded").toInt(), 1);
+            QCOMPARE(result.value("failed").toInt(), 0);
+            QVERIFY(!result.value("undoState").toMap().value("canUndo").toBool());
+            QVERIFY(!result.value("undoState").toMap().value("canRedo").toBool());
+            QVERIFY(!store.dispatch("read", {{"path", "Folder/remove.md"}}).value("ok").toBool());
+            QVERIFY(!store.dispatch("history", {{"path", "Folder/remove.md"}}).value("ok").toBool());
+            QVERIFY(store.dispatch("read", {{"path", "Folder/keep.md"}}).value("ok").toBool());
+            QVERIFY(store.dispatch("list", {}).value("folders").toList().contains(QString("Folder")));
+            QCOMPARE(store.dispatch("recovery", {}).value("trashItems"), trash);
+        }
+        ManagedStore reopened(d.path());
+        QVERIFY(!reopened.dispatch("read", {{"path", "Folder/remove.md"}}).value("ok").toBool());
+        QVERIFY(reopened.dispatch("read", {{"path", "Folder/keep.md"}}).value("ok").toBool());
+    }
+    void managedDirectNoteDeletionPreservesFailedItems() {
+        QTemporaryDir d;
+        ManagedStore store(d.path());
+        QVariantList items;
+        for (const QString &path : {QString("delete.md"), QString("draft.md"), QString("stale.md")}) {
+            const auto note = store.dispatch("create", {{"path", path}, {"text", "# Keep\n"}});
+            QVERIFY(note.value("ok").toBool());
+            items.append(QVariantMap{{"path", path}, {"baseHash", path == "stale.md" ? QVariant("wrong") : note.value("baseHash")}});
+        }
+        QVERIFY(store.dispatch("checkpoint", {{"path", "draft.md"}, {"text", "Recovery text"}, {"baseHash", "old"}}).value("ok").toBool());
+        const auto drafts = store.dispatch("recovery", {}).value("drafts");
+        const auto result = store.dispatch("batch", {{"action", "purgeNotes"}, {"items", items}});
+        QCOMPARE(result.value("succeeded").toInt(), 1);
+        QCOMPARE(result.value("failed").toInt(), 2);
+        const auto results = result.value("results").toList();
+        QCOMPARE(results[1].toMap().value("error").toString(), QString("pendingDrafts"));
+        QCOMPARE(results[2].toMap().value("error").toString(), QString("conflict"));
+        QVERIFY(!store.dispatch("read", {{"path", "delete.md"}}).value("ok").toBool());
+        QVERIFY(store.dispatch("read", {{"path", "draft.md"}}).value("ok").toBool());
+        QVERIFY(store.dispatch("read", {{"path", "stale.md"}}).value("ok").toBool());
+        QCOMPARE(store.dispatch("recovery", {}).value("drafts"), drafts);
+        const auto before = store.dispatch("createFolder", {{"path", "KeepUndo"}}).value("undoState");
+        const auto failed = store.dispatch("batch", {{"action", "purgeNotes"}, {"items", QVariantList{items[1]}}});
+        QCOMPARE(failed.value("succeeded").toInt(), 0);
+        QCOMPARE(failed.value("undoState"), before);
+    }
+    void managedDirectFolderDeletionIsPermanentAndScoped() {
+        QTemporaryDir d;
+        const QString folder = QString::fromUtf8("运动🏀%_");
+        const auto child = folder + "/Child/note.md";
+        const auto sibling = folder + "Other/keep.md";
+        const auto old = folder + "/old.md";
+        {
+            ManagedStore store(d.path());
+            for (const auto &path : {child, sibling, old})
+                QVERIFY(store.dispatch("create", {{"path", path}, {"text", "# Original\n"}}).value("ok").toBool());
+            auto note = store.dispatch("read", {{"path", child}});
+            QVERIFY(store.dispatch("save", {{"path", child}, {"baseHash", note.value("baseHash")}, {"text", "# Changed\n"}}).value("ok").toBool());
+            QVERIFY(store.dispatch("history", {{"path", child}}).value("versions").toList().size() > 1);
+            note = store.dispatch("read", {{"path", old}});
+            QVERIFY(store.dispatch("trash", {{"path", old}, {"baseHash", note.value("baseHash")}}).value("ok").toBool());
+            const auto trash = store.dispatch("recovery", {}).value("trashItems");
+            QVERIFY(store.dispatch("createFolder", {{"path", "UndoProbe"}}).value("ok").toBool());
+            QVERIFY(store.dispatch("undo", {}).value("ok").toBool());
+            const auto result = store.dispatch("purgeFolder", {{"path", folder}});
+            QVERIFY(result.value("ok").toBool());
+            QVERIFY(!result.value("undoState").toMap().value("canUndo").toBool());
+            QVERIFY(!result.value("undoState").toMap().value("canRedo").toBool());
+            QCOMPARE(store.dispatch("recovery", {}).value("trashItems"), trash);
+            QVERIFY(!store.dispatch("read", {{"path", child}}).value("ok").toBool());
+            QVERIFY(store.dispatch("read", {{"path", sibling}}).value("ok").toBool());
+            for (const auto &v : store.dispatch("list", {}).value("folders").toList())
+                QVERIFY(v.toString() != folder && !v.toString().startsWith(folder + '/'));
+            QVERIFY(!store.dispatch("undo", {}).value("ok").toBool());
+            QVERIFY(!store.dispatch("redo", {}).value("ok").toBool());
+        }
+        ManagedStore reopened(d.path());
+        QVERIFY(!reopened.dispatch("read", {{"path", child}}).value("ok").toBool());
+        QVERIFY(reopened.dispatch("read", {{"path", sibling}}).value("ok").toBool());
+        sqlite3 *db = nullptr;
+        QCOMPARE(sqlite3_open_v2(QFile::encodeName(d.path() + "/notes.sqlite3").constData(), &db, SQLITE_OPEN_READONLY, nullptr), SQLITE_OK);
+        sqlite3_stmt *statement = nullptr;
+        QCOMPARE(sqlite3_prepare_v2(db, "SELECT count(*) FROM versions WHERE note_id NOT IN (SELECT id FROM notes)", -1, &statement, nullptr), SQLITE_OK);
+        QCOMPARE(sqlite3_step(statement), SQLITE_ROW);
+        QCOMPARE(sqlite3_column_int(statement, 0), 0);
+        sqlite3_finalize(statement); sqlite3_close(db);
+    }
+    void managedDirectFolderDeletionProtectsRecoveryDrafts() {
+        QTemporaryDir d;
+        ManagedStore store(d.path());
+        QVERIFY(store.dispatch("create", {{"path", "Parent/Child/note.md"}, {"text", "# Keep\n"}}).value("ok").toBool());
+        QVERIFY(store.dispatch("checkpoint", {{"path", "Parent/Child/note.md"}, {"text", "Unsaved recovery"}, {"baseHash", "old"}}).value("ok").toBool());
+        const auto folders = store.dispatch("list", {}).value("folders");
+        const auto recovery = store.dispatch("recovery", {}).value("drafts");
+        QCOMPARE(store.dispatch("purgeFolder", {{"path", "Parent"}}).value("error").toString(), QString("pendingDrafts"));
+        QCOMPARE(store.dispatch("purgeFolder", {{"path", ""}}).value("error").toString(), QString("invalidName"));
+        QCOMPARE(store.dispatch("purgeFolder", {{"path", "Missing"}}).value("error").toString(), QString("notFound"));
+        QCOMPARE(store.dispatch("list", {}).value("folders"), folders);
+        QCOMPARE(store.dispatch("recovery", {}).value("drafts"), recovery);
+        QVERIFY(store.dispatch("read", {{"path", "Parent/Child/note.md"}}).value("ok").toBool());
+        QVERIFY(store.dispatch("discardDraft", {{"path", "Parent/Child/note.md"}}).value("ok").toBool());
+        QVERIFY(store.dispatch("purgeFolder", {{"path", "Parent"}}).value("ok").toBool());
+    }
+    void managedFolderOrderPersistsAndReplays() {
+        QTemporaryDir d;
+        const QStringList names{"C", "B", "A"};
+        auto order = [&names](ManagedStore &store) {
+            QStringList result;
+            for (const auto &v : store.dispatch("list", {}).value("folders").toList())
+                if (names.contains(v.toString())) result.append(v.toString());
+            return result;
+        };
+        {
+            ManagedStore store(d.path());
+            for (const auto &name : names) QVERIFY(store.dispatch("createFolder", {{"path", name}}).value("ok").toBool());
+            QCOMPARE(order(store), names);
+            QVERIFY(store.dispatch("moveFolder", {{"path", "A"}, {"folder", ""}, {"sibling", "C"}, {"after", false}}).value("ok").toBool());
+            QCOMPARE(order(store), (QStringList{"A", "C", "B"}));
+            QVERIFY(store.dispatch("undo", {}).value("ok").toBool());
+            QCOMPARE(order(store), names);
+            QVERIFY(store.dispatch("redo", {}).value("ok").toBool());
+            QCOMPARE(order(store), (QStringList{"A", "C", "B"}));
+        }
+        ManagedStore reopened(d.path());
+        QCOMPARE(order(reopened), (QStringList{"A", "C", "B"}));
+        QVERIFY(reopened.dispatch("moveFolder", {{"path", "A"}, {"folder", ""}, {"sibling", "B"}, {"after", true}}).value("ok").toBool());
+        QCOMPARE(order(reopened), (QStringList{"C", "B", "A"}));
+    }
+    void managedFolderMoveKeepsContentsAndRejectsInvalidDrops() {
+        QTemporaryDir d;
+        ManagedStore store(d.path());
+        for (const QString &name : {QString("Work/A"), QString("Work/B"), QString("Source/X/Child")})
+            QVERIFY(store.dispatch("createFolder", {{"path", name}}).value("ok").toBool());
+        const auto created = store.dispatch("create", {{"path", "Source/X/Child/note.md"}, {"text", "# Keep me\n"}});
+        QVERIFY(created.value("ok").toBool());
+        QVERIFY(store.dispatch("editFolder", {{"path", "Source/X"}, {"target", "Source/X"}, {"icon", "shopping"}}).value("ok").toBool());
+        const auto before = store.dispatch("list", {}).value("folders");
+        QVERIFY(store.dispatch("moveFolder", {{"path", "Source/X"}, {"folder", "Work"}, {"sibling", "Work/B"}}).value("ok").toBool());
+        const auto listing = store.dispatch("list", {});
+        QStringList work;
+        for (const auto &v : listing.value("folders").toList())
+            if (v.toString().startsWith("Work/") && v.toString().count('/') == 1) work.append(v.toString());
+        QCOMPARE(work, (QStringList{"Work/A", "Work/X", "Work/B"}));
+        QCOMPARE(listing.value("folderIcons").toMap().value("Work/X").toString(), QString("shopping"));
+        QCOMPARE(store.dispatch("read", {{"path", "Work/X/Child/note.md"}}).value("id"), created.value("id"));
+        QVERIFY(store.dispatch("undo", {}).value("ok").toBool());
+        QCOMPARE(store.dispatch("list", {}).value("folders"), before);
+        QCOMPARE(store.dispatch("read", {{"path", "Source/X/Child/note.md"}}).value("id"), created.value("id"));
+        QVERIFY(store.dispatch("redo", {}).value("ok").toBool());
+        QVERIFY(store.dispatch("undo", {}).value("ok").toBool());
+        QVERIFY(store.dispatch("createFolder", {{"path", "Work/X"}}).value("ok").toBool());
+        const auto unchanged = store.dispatch("list", {}).value("folders");
+        QCOMPARE(store.dispatch("moveFolder", {{"path", "Source/X"}, {"folder", "Work"}}).value("error").toString(), QString("alreadyExists"));
+        QCOMPARE(store.dispatch("moveFolder", {{"path", "Source"}, {"folder", "Source/X/Child"}}).value("error").toString(), QString("invalidParent"));
+        QCOMPARE(store.dispatch("moveFolder", {{"path", "Source/X"}, {"folder", ""}, {"sibling", "Work/A"}}).value("error").toString(), QString("missingFolder"));
+        QCOMPARE(store.dispatch("list", {}).value("folders"), unchanged);
+        QCOMPARE(store.dispatch("read", {{"path", "Source/X/Child/note.md"}}).value("id"), created.value("id"));
+    }
+    void managedLegacyFoldersGainOrderWithoutLosingIcons() {
+        QTemporaryDir d;
+        sqlite3 *raw = nullptr;
+        QCOMPARE(sqlite3_open(QFile::encodeName(d.filePath("notes.sqlite3")).constData(), &raw), SQLITE_OK);
+        const int result = sqlite3_exec(raw, "CREATE TABLE folders(id TEXT PRIMARY KEY,path TEXT NOT NULL UNIQUE,deleted TEXT NOT NULL DEFAULT '',trash_token TEXT NOT NULL DEFAULT '',icon TEXT NOT NULL DEFAULT 'folder');"
+            "INSERT INTO folders(id,path,icon) VALUES('z-id','Z','heart'),('a-id','A','home');", nullptr, nullptr, nullptr);
+        sqlite3_close(raw);
+        QCOMPARE(result, SQLITE_OK);
+        ManagedStore store(d.path());
+        const auto listing = store.dispatch("list", {});
+        QVERIFY(listing.value("ok").toBool());
+        const auto folders = listing.value("folders").toList();
+        QVERIFY(folders.indexOf(QString("A")) < folders.indexOf(QString("Z")));
+        QCOMPARE(listing.value("folderIcons").toMap().value("Z").toString(), QString("heart"));
+        QVERIFY(store.dispatch("moveFolder", {{"path", "Z"}, {"folder", ""}, {"sibling", "A"}}).value("ok").toBool());
+        const auto reordered = store.dispatch("list", {}).value("folders").toList();
+        QVERIFY(reordered.indexOf(QString("Z")) < reordered.indexOf(QString("A")));
+    }
     void missingWikiCreationIsScopedAndNeverOverwrites() {
         QTemporaryDir d;QVERIFY(QDir(d.path()).mkdir("folder"));QVERIFY(write(d.filePath("folder/a.md"),"# Source\n"));
         NotesRepository r;call(r,"selectLibrary",{{"path",d.path()}});

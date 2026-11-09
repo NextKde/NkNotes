@@ -23,7 +23,7 @@ Item {
     readonly property var progress: controller.operationProgress
     readonly property string phaseName: ({scanning: "正在查找笔记…", reviewing: "正在读取导入内容…", preparing: "正在检查笔记…", importing: "正在导入…", finished: "正在整理导入结果…"})[progress.phase] || "正在处理…"
     signal browseRequested()
-    function openImportMenu(anchor) { menu.anchorItem = anchor; menu.openAtAnchor() }
+    function openImportMenu(anchor) { menu.openFromButton(anchor) }
     function showImportHistory() { controller.inspectImports(); history.open() }
     function createBackup() { backupPicker.selectedFile = String(backupPicker.currentFolder) + "/" + encodeURIComponent("笔记备份-" + Qt.formatDateTime(new Date(), "yyyyMMdd-HHmmss") + ".nkbackup"); backupPicker.open() }
     function restoreBackup() { restorePicker.open() }
@@ -138,7 +138,7 @@ Item {
             Label { Layout.fillWidth: true; wrapMode: Text.Wrap; visible: (root.controller.backupResult.cacheFailures || 0) > 0; text: "部分附件缓存未能刷新。附件原件仍在备份和数据库中，请检查磁盘空间后重新打开应用。"; color: AppTheme.mutedText }
         }
     }
-    LiquidPopover {
+    NotesPopover {
         id: menu; sourceItem: root.sceneItem
         LiquidPopoverItem { text: "导入笔记…"; enabled: !root.controller.busy; onTriggered: root.importFiles() }
         LiquidPopoverItem { text: "从文件夹收集…"; enabled: !root.controller.busy; onTriggered: root.importFolder() }
@@ -167,7 +167,7 @@ Item {
                     appearanceMode: AppTheme.appearanceMode;
                     Layout.fillWidth: true; materialForm: true
                     readonly property var locations: [""].concat(Array.from(root.controller.folders))
-                    model: locations.map(p => p ? p.split("/").join(" › ") : "随手记")
+                    model: locations.map(p => p ? p.split("/").join(" › ") : "未分类")
                     currentIndex: Math.max(0, locations.indexOf(root.destination))
                     enabled: !root.controller.busy; Accessible.name: "导入目标文件夹"
                     onActivated: function(index) { root.destination = locations[index]; root.controller.previewImport(root.sources, root.destination, root.preserveStructure) }

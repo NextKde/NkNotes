@@ -41,13 +41,12 @@ Item {
         } else if (modifiers & (Qt.ControlModifier | Qt.MetaModifier)) toggle(item)
         else activate(item)
     }
-    function openMenu(anchor, item) {
+    function openMenu(anchor, item, position) {
         if (item && selected.indexOf(key(item)) < 0) clearSelection()
         targets = item ? (selected.indexOf(key(item)) >= 0 ? chosen.slice() : [item]) : chosen.length ? chosen.slice() : currentEntry ? [currentEntry] : []
-        menu.preferredSide = item ? "right" : "bottom"
-        menu.anchorAlignment = "end"
-        menu.anchorItem = anchor
-        menu.openAtAnchor()
+        menu.rowMenu = !!item
+        if (item) menu.openAtPoint(anchor, position)
+        else menu.openFromButton(anchor)
     }
     property string library: controller.library
     onLibraryChanged: { clearSelection(); currentKey = "" }
@@ -115,7 +114,7 @@ Item {
                 anchors.fill: parent; acceptedButtons: Qt.LeftButton | Qt.RightButton
                 onClicked: function(mouse) {
                     row.forceActiveFocus(Qt.MouseFocusReason)
-                    if (mouse.button === Qt.RightButton) root.openMenu(row, row.modelData)
+                    if (mouse.button === Qt.RightButton) root.openMenu(row, row.modelData, mapToItem(row, mouse.x, mouse.y))
                     else root.click(row.modelData, row.index, mouse.modifiers)
                 }
             }
@@ -145,7 +144,7 @@ Item {
         ColumnLayout {
             anchors.centerIn: parent; width: Math.min(440, parent.width - 52); spacing: 16
             Label { Layout.fillWidth: true; text: root.currentEntry ? (root.currentEntry.title || root.currentEntry.source.split("/").pop().replace(/\.md$/i, "")) : "最近删除"; textFormat: Text.PlainText; wrapMode: Text.Wrap; font.pixelSize: 24; font.weight: Font.DemiBold; color: AppTheme.text }
-            Label { Layout.fillWidth: true; text: root.currentEntry ? (root.currentEntry.kind === "folder" ? "文件夹" : (root.currentEntry.source.includes("/") ? root.currentEntry.source.slice(0, root.currentEntry.source.lastIndexOf("/")).split("/").join(" › ") : "随手记")) + "\n删除于 " + Qt.formatDateTime(new Date(root.currentEntry.deletedUtc), "yyyy/M/d HH:mm") + (root.currentEntry.purging ? "\n删除待完成" : "") : "选择一个项目以恢复或永久删除。"; textFormat: Text.PlainText; wrapMode: Text.Wrap; color: AppTheme.mutedText }
+            Label { Layout.fillWidth: true; text: root.currentEntry ? (root.currentEntry.kind === "folder" ? "文件夹" : (root.currentEntry.source.includes("/") ? root.currentEntry.source.slice(0, root.currentEntry.source.lastIndexOf("/")).split("/").join(" › ") : "未分类")) + "\n删除于 " + Qt.formatDateTime(new Date(root.currentEntry.deletedUtc), "yyyy/M/d HH:mm") + (root.currentEntry.purging ? "\n删除待完成" : "") : "选择一个项目以恢复或永久删除。"; textFormat: Text.PlainText; wrapMode: Text.Wrap; color: AppTheme.mutedText }
             Flow {
                 Layout.fillWidth: true; spacing: 8; visible: !!root.currentEntry
                 LiquidActionButton { text: "恢复"; materialForm: true; enabled: !!root.currentEntry && !root.currentEntry.purging && !root.controller.busy; onClicked: root.controller.recycle("restore", [root.currentEntry]) }
@@ -154,24 +153,61 @@ Item {
             }
         }
     }
-    LiquidPopover {
-        id: menu; sourceItem: root.sceneItem; arrowEnabled: false
-        closePolicy: Popup.CloseOnEscape | Popup.CloseOnReleaseOutside
+    NotesPopover {
+        id: menu; sourceItem: root.sceneItem
+        property bool rowMenu: false
         LiquidPopoverItem { text: root.selectionMode ? "取消所有选择" : "选择当前项目"; enabled: root.selectionMode || !!root.targets.length; onTriggered: { if (root.selectionMode) root.clearSelection(); else root.selected = root.targets.map(i => root.key(i)) } }
-        LiquidPopoverItem { visible: menu.preferredSide !== "right"; height: visible ? implicitHeight : 0; text: "全选当前结果"; enabled: !!root.items.length; onTriggered: root.selectAll() }
+        LiquidPopoverItem { visible: !menu.rowMenu; height: visible ? implicitHeight : 0; text: "全选当前结果"; enabled: !!root.items.length; onTriggered: root.selectAll() }
         LiquidPopoverItem { text: "恢复所选"; enabled: !!root.targets.length && !root.targets.some(i => i.purging) && !root.controller.busy; onTriggered: root.controller.recycle("restore", root.targets) }
         LiquidPopoverItem { text: "恢复副本"; enabled: root.targets.length === 1 && root.targets[0].kind === "note" && !root.targets[0].purging && !root.controller.busy; onTriggered: root.controller.restore(root.targets[0].token, "还原-" + Date.now() + ".md") }
         LiquidPopoverItem { text: "永久删除所选…"; enabled: !!root.targets.length && !root.controller.busy; onTriggered: root.confirm(root.targets) }
-        LiquidPopoverItem { visible: menu.preferredSide !== "right"; height: visible ? implicitHeight : 0; text: "清空最近删除…"; enabled: !!root.items.length && !root.controller.busy; onTriggered: root.confirm(root.items) }
+        LiquidPopoverItem { visible: !menu.rowMenu; height: visible ? implicitHeight : 0; text: "清空最近删除…"; enabled: !!root.items.length && !root.controller.busy; onTriggered: root.confirm(root.items) }
     }
     LiquidDialog {
-        acceptText: "永久删除"; rejectText: "取消"; closeText: "关闭"
         id: purgeDialog; title: "永久删除 " + root.reviewed.length + " 项？"; sourceItem: root.sceneItem
-        parent: Overlay.overlay; anchors.centerIn: parent; width: Math.min(520, parent.width - 40); height: Math.min(380, parent.height - 40)
-        standardButtons: Dialog.Ok | Dialog.Cancel
+        parent: Overlay.overlay; anchors.centerIn: parent; width: Math.min(420, parent.width - 40)
+        padding: 16; topPadding: 4; bottomPadding: 4; spacing: 0
+        standardButtons: Dialog.NoButton
+        onOpened: cancelPurge.forceActiveFocus()
+        header: Label {
+            text: purgeDialog.title
+            leftPadding: 16; rightPadding: 16; topPadding: 16; bottomPadding: 12
+            color: AppTheme.text; font.pixelSize: 17; font.weight: Font.DemiBold
+            elide: Text.ElideRight
+        }
         contentItem: ColumnLayout {
-            Label { Layout.fillWidth: true; text: "这些笔记和文件夹将无法从最近删除恢复。文件夹内的全部内容也会删除。"; wrapMode: Text.Wrap; color: AppTheme.text }
-            ScrollView { Layout.fillWidth: true; Layout.fillHeight: true; KosTextArea { readOnly: true; text: root.reviewed.map(i => i.title || i.source.split("/").pop().replace(/\.md$/i, "")).join("\n"); wrapMode: Text.Wrap; color: AppTheme.text; background: null } }
+            spacing: 10
+            Label { Layout.fillWidth: true; text: "这些笔记和文件夹将无法从最近删除恢复。文件夹内的全部内容也会删除。"; wrapMode: Text.Wrap; color: AppTheme.text; font.pixelSize: 13 }
+            ScrollView {
+                id: purgeNamesScroll
+                Layout.fillWidth: true; Layout.preferredHeight: Math.min(140, purgeNames.implicitHeight)
+                Layout.minimumHeight: 0
+                contentWidth: availableWidth; clip: true
+                ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                Label {
+                    id: purgeNames
+                    width: purgeNamesScroll.availableWidth
+                    text: root.reviewed.map(i => i.title || i.source.split("/").pop().replace(/\.md$/i, "")).join("\n")
+                    textFormat: Text.PlainText; wrapMode: Text.Wrap
+                    color: AppTheme.text; font.pixelSize: 13
+                }
+            }
+        }
+        footer: Item {
+            implicitHeight: 62
+            RowLayout {
+                anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
+                anchors.leftMargin: 16; anchors.rightMargin: 16; anchors.bottomMargin: 16; spacing: 8
+                Item { Layout.fillWidth: true }
+                LiquidDialogButton { id: cancelPurge; text: "取消"; onClicked: purgeDialog.close() }
+                LiquidDialogButton {
+                    text: "永久删除"; destructive: true
+                    enabled: root.reviewed.length > 0 && !root.controller.busy
+                    surfaceColor: enabled ? AppTheme.destructive : AppTheme.controlBackground
+                    textColor: enabled ? "white" : AppTheme.disabledText
+                    onClicked: purgeDialog.accept()
+                }
+            }
         }
         onAccepted: root.controller.recycle("purge", root.reviewed)
     }

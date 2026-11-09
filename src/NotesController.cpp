@@ -87,10 +87,10 @@ void NotesController::selectLibrary(const QUrl &url) {
     // A directory picker imports a copy; it never replaces the managed space.
     previewImport({url});
 }
-void NotesController::load(const QString &path, int match) {
+void NotesController::load(const QString &path, int match, bool preserveCategory) {
     // A link or history navigation may leave the current category. Keep the
     // destination visible instead of showing an unselected note outside the list.
-    if (!path.startsWith("external:") && !std::any_of(m_notes.cbegin(),m_notes.cend(),[&](const QVariant &v){ return v.toMap().value("path").toString()==path; }) && (m_filter!="all" || !m_query.isEmpty())) {
+    if (!preserveCategory && !path.startsWith("external:") && !std::any_of(m_notes.cbegin(),m_notes.cend(),[&](const QVariant &v){ return v.toMap().value("path").toString()==path; }) && (m_filter!="all" || !m_query.isEmpty())) {
         m_filter="all";m_query.clear();++m_searchSerial;refresh();
     }
     m_knowledge.clear();m_version.clear();m_versions.clear();
@@ -107,7 +107,7 @@ void NotesController::createNote() {
     drain([this] {
         const QString folder = m_filter.startsWith("folder:") ? m_filter.mid(7) + '/' : QString();
         m_query.clear();
-        if(m_filter != "all" && m_filter != "inbox" && !m_filter.startsWith("folder:"))m_filter="inbox";
+        if (!m_filter.startsWith("folder:")) m_filter = "all";
         ++m_searchSerial;
         const QString path = folder + "笔记-" + QUuid::createUuid().toString(QUuid::WithoutBraces).left(8) + ".md";
         m_loading = true; send("create", {{"path", path}, {"text", "# 未命名笔记\n\n"}});
@@ -224,7 +224,13 @@ void NotesController::applyListing(const QVariantMap &r) {
         m_duplicateIds.clear();
         for (const auto &v : r.value("duplicateIds").toList()) m_duplicateIds.append(v.toMap().value("id").toString());
     }
-    if (r.contains("folders") && m_folders != r.value("folders").toList()) { m_folders = r.value("folders").toList(); emit foldersChanged(); }
+    if (r.contains("folders")) {
+        const auto folders = r.value("folders").toList();
+        const auto icons = r.value("folderIcons").toMap();
+        if (m_folders != folders || m_folderIcons != icons) {
+            m_folders = folders; m_folderIcons = icons; emit foldersChanged();
+        }
+    }
     if (r.contains("notes") && m_notes != r.value("notes").toList()) {
         m_notes = r.value("notes").toList();
         m_noteModel.replace(m_notes);
@@ -296,12 +302,20 @@ void NotesController::receive(quint64 id, const QString &op, const QVariantMap &
     if (documentOp && !p.args.value("recoveryCopy").toBool() && p.epoch != m_epoch) return;
     if(r.contains("undoState"))m_undoState=r.value("undoState").toMap();
     if(r.value("historyRecorded").toBool() || op=="undo" || op=="redo")m_organizationHistory=true;
-    if(op=="undo" || op=="redo")m_organizing=false;
+    if(op=="undo" || op=="redo" || op=="editFolder" || op=="moveFolder" || op=="purgeFolder")m_organizing=false;
     if (op == "save") m_saving = 0;
     if (op == "createWiki" || op == "tagBatch" || op == "fromTemplate" || op == "dailyNote" || op == "setProperty" || op == "historyVersion" || op == "trashBatch" || op == "batch" || op == "rename" || op == "renameFolder" || op == "removeFolder" || op == "trashFolder" || op == "restoreFolder" || op == "importPreview" || op == "importNotes" || op == "exportNotes" || op == "renameNote" || op == "backup" || op == "restoreBackup") m_organizing = false;
     if(op == "importPreview" || op == "importNotes")m_operationProgress.clear();
     if ((documentOp && !p.args.value("recoveryCopy").toBool()) || op == "selectLibrary") m_loading = false;
     if (!r.value("ok").toBool()) {
+        if (op == "trashFolder" || op == "purgeFolder") {
+            m_status = organizerError(r.value("error").toString());
+            emit changed(); emit folderDeleted(false, m_status); return;
+        }
+        if (op == "editFolder") {
+            m_status = r.value("error") == "alreadyExists" ? QStringLiteral("目标已有同名文件夹（可能在最近删除中），请修改名称或父级文件夹。") : organizerError(r.value("error").toString());
+            emit changed(); emit folderEdited(false, m_status); return;
+        }
         if(op=="undo" || op=="redo") { m_status="无法"+QString(op=="undo"?"撤销":"重做")+"：相关内容已变化，当前笔记仍保留";emit changed();return; }
         if (op == "batch" || op == "trashBatch" || op == "tagBatch") {
             QVariantList failed;
@@ -309,7 +323,7 @@ void NotesController::receive(quint64 id, const QString &op, const QVariantMap &
             acceptBatch({{"action", p.args.value("action")}, {"results", failed}, {"succeeded", 0}, {"failed", failed.size()}}); return;
         }
         if (op == "read") m_historyTarget = -1;
-        if (op == "renameFolder" || op == "removeFolder") { if (r.value("error") == "pendingRelocation") m_readOnly = true; m_status = organizerError(r.value("error").toString()); emit changed(); return; }
+        if (op == "renameFolder" || op == "removeFolder" || op == "moveFolder") { if (r.value("error") == "pendingRelocation") m_readOnly = true; m_status = organizerError(r.value("error").toString()); emit changed(); return; }
         if (op == "importAttachment") emit attachmentReady(p.args.value("request").toString(), p.args.value("webEpoch").toInt(), r);
         if(QStringList{"backup","restoreBackup","importPreview","importNotes","exportNotes"}.contains(op)) {
             const auto previousError=m_error;report(r);QString message=m_error.section("。",0,0);m_error=previousError;
@@ -360,7 +374,7 @@ void NotesController::receive(quint64 id, const QString &op, const QVariantMap &
             m_query.clear();m_filter="all";++m_searchSerial;m_importPlan.clear();m_importReport.clear();
             m_knowledge.clear();m_versions.clear();m_version.clear();m_templates.clear();m_missingLink.clear();
             m_applying=true;m_session->loadPrototype({});m_applying=false;
-            m_status="备份已恢复";refresh();inspectImports();send("recovery",{{"includeCommitText",false}});
+            m_status=r.value("initializationNotice").toString();if(m_status.isEmpty())m_status="备份已恢复";refresh();inspectImports();send("recovery",{{"includeCommitText",false}});
         }else m_status="完整备份已保存";
         emit changed();emit backupFinished();return;
     }
@@ -380,25 +394,49 @@ void NotesController::receive(quint64 id, const QString &op, const QVariantMap &
     if(op=="setProperty"||op=="renameNote"){load(m_path);refresh();return;}
     if(op=="smartSave"||op=="smartDelete"){m_smartFolders=r.value("smartFolders").toMap();emit changed();return;}
     if(op=="reindex"){applyListing(r);refresh();inspectKnowledge();m_status="索引已重建";emit changed();return;}
-    if (op == "trashFolder" || op == "restoreFolder") {
-        if (op == "trashFolder" && m_path.startsWith(p.args.value("path").toString() + '/')) {
+    if (op == "trashFolder" || op == "purgeFolder" || op == "restoreFolder") {
+        if (op == "purgeFolder") {
+            const auto prefix = p.args.value("path").toString() + '/';
+            for (int i = m_history.size() - 1; i >= 0; --i) {
+                if (!m_history[i].startsWith(prefix)) continue;
+                m_history.removeAt(i);
+                if (i <= m_historyIndex) --m_historyIndex;
+            }
+            m_historyTarget = -1;
+        }
+        if (op != "restoreFolder" && m_path.startsWith(p.args.value("path").toString() + '/')) {
             ++m_epoch; m_path.clear(); m_selectedId.clear(); m_base.clear(); m_revision=m_savedRevision=0;
             m_applying=true;m_session->loadPrototype({});m_applying=false;m_readOnly=false;m_conflict=false;
+            m_knowledge.clear(); m_versions.clear(); m_version.clear(); m_missingLink.clear();
+            setPreference("lastNote", QVariantMap{});
         }
-        m_filter="all";++m_searchSerial;refresh();inspectRecovery();m_status="文件夹整理完成";emit changed();return;
+        m_filter="all";++m_searchSerial;refresh();inspectRecovery();
+        m_status = op == "purgeFolder" ? "文件夹已直接删除" : "文件夹整理完成";
+        emit changed();
+        if (op != "restoreFolder") emit folderDeleted(true, {});
+        return;
     }
     if (op == "recoverMove") { m_error.clear(); m_status = "移动操作已回退"; refresh(); inspectRecovery(); if (!m_path.isEmpty()) load(m_path); emit changed(); return; }
     if (op == "batch" || op == "trashBatch" || op == "tagBatch") { acceptBatch(r); return; }
-    if (op == "renameFolder" || op == "removeFolder") {
-        if (m_filter == "folder:" + p.args.value("path").toString()) m_filter = op == "removeFolder" ? "all" : "folder:" + r.value("newPath").toString();
-        ++m_searchSerial; m_status = op == "removeFolder" ? "空文件夹已删除" : "文件夹已重命名";
-        if (op == "renameFolder") {
-            const QString old = p.args.value("path").toString(), next = r.value("newPath").toString();
-            relocateHistory(old, next);
-            if (m_path.startsWith(old + '/')) load(next + m_path.mid(old.size()));
-            else if (!m_path.isEmpty()) load(m_path);
+    if (op == "renameFolder" || op == "removeFolder" || op == "editFolder" || op == "moveFolder") {
+        const QString old = p.args.value("path").toString(), next = r.value("newPath").toString();
+        if (m_filter.startsWith("folder:")) {
+            const auto current = m_filter.mid(7);
+            if (current == old || current.startsWith(old + '/'))
+                m_filter = op == "removeFolder" ? "all" : "folder:" + next + current.mid(old.size());
         }
-        refresh(); emit changed(); return;
+        ++m_searchSerial; m_status = op == "removeFolder" ? "空文件夹已删除" : op == "editFolder" ? "文件夹已更新"
+            : op == "moveFolder" ? (old == next ? "文件夹顺序已更新" : "文件夹已移动") : "文件夹已重命名";
+        if (op != "removeFolder" && old != next) {
+            relocateHistory(old, next);
+            // The pending listing still contains old paths. Keep the updated
+            // folder scope while reloading its moved document.
+            if (m_path.startsWith(old + '/')) load(next + m_path.mid(old.size()), -1, true);
+            else if (!m_path.isEmpty()) load(m_path, -1, true);
+        }
+        refresh(); emit changed();
+        if (op == "editFolder") emit folderEdited(true, {});
+        return;
     }
     if (op == "importAttachment") {
         emit attachmentReady(p.args.value("request").toString(), p.args.value("webEpoch").toInt(), r);
@@ -420,7 +458,9 @@ void NotesController::receive(quint64 id, const QString &op, const QVariantMap &
         ++m_epoch; m_path.clear(); m_selectedId.clear(); m_base.clear(); m_revision = m_savedRevision = 0;
         m_error.clear(); m_conflict = false; m_query.clear(); m_filter = "all";
         m_applying = true; m_session->loadPrototype({}); m_applying = false;
-        applyListing(r); m_status = "请选择笔记"; setPreference("lastLibrary", m_library);
+        applyListing(r); m_status = r.value("initializationNotice").toString();
+        if (m_status.isEmpty()) m_status = "请选择笔记";
+        setPreference("lastLibrary", m_library);
         // Startup needs draft locks and recovery metadata, not every retained
         // version's full body. Opening recovery explicitly loads those previews.
         send("recovery", {{"includeCommitText", false}}); refresh();

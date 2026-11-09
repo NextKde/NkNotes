@@ -18,7 +18,7 @@ Item {
     property var selectedLink: ({})
     function location(path) {
         const parts = String(path || "").split("/"); parts.pop()
-        return parts.length ? parts.join(" › ") : "随手记"
+        return parts.length ? parts.join(" › ") : "未分类"
     }
     function readableTarget(value) { try { return decodeURIComponent(String(value || "")) } catch (error) { return String(value || "") } }
     function cleanSnippet(text) { return String(text || "").replace(/\[([^\]]+)\]\([^)]*\)/g, "$1").replace(/(^|\s)#{1,6}\s+/g, "$1").slice(0,100) }

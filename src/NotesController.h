@@ -44,6 +44,7 @@ class NotesController final : public QObject {
     Q_PROPERTY(QVariantList notes MEMBER m_notes NOTIFY notesChanged)
     Q_PROPERTY(QAbstractItemModel *noteModel READ noteModel CONSTANT)
     Q_PROPERTY(QVariantList folders MEMBER m_folders NOTIFY foldersChanged)
+    Q_PROPERTY(QVariantMap folderIcons MEMBER m_folderIcons NOTIFY foldersChanged)
     Q_PROPERTY(QVariantMap recovery MEMBER m_recovery NOTIFY changed)
     Q_PROPERTY(QString highlightQuery MEMBER m_highlightQuery NOTIFY changed)
     Q_PROPERTY(QString query READ query WRITE setQuery NOTIFY changed)
@@ -66,6 +67,8 @@ public:
     void setSortAscending(bool);
     Q_INVOKABLE void organize(const QString &action, const QStringList &paths, const QString &folder = {});
     Q_INVOKABLE void manageFolder(const QString &operation, const QString &path, const QString &target = {});
+    Q_INVOKABLE void editFolder(const QString &path, const QString &target, const QString &icon);
+    Q_INVOKABLE void moveFolder(const QString &path, const QString &parent, const QString &sibling, bool after);
     void setQuery(const QString &);
     void setFilter(const QString &);
     Q_INVOKABLE void selectCategory(const QString &filter, const QString &query = {});
@@ -183,6 +186,8 @@ signals:
     void notesChanged();
     void foldersChanged();
     void folderCreated(const QString &path);
+    void folderEdited(bool success, const QString &message);
+    void folderDeleted(bool success, const QString &message);
     void batchFinished();
     void documentAnchorRequested(const QString &heading);
     void documentLoaded(int cursor, double scroll, int matchLength);
@@ -206,7 +211,7 @@ private:
     quint64 send(const QString &, QVariantMap = {});
     void drain(std::function<void()>);
     void advance();
-    void load(const QString &, int match = -1);
+    void load(const QString &, int match = -1, bool preserveCategory = false);
     void applyListing(const QVariantMap &);
     void report(const QVariantMap &);
     QString positionKey() const;
@@ -228,6 +233,7 @@ private:
     QString m_library, m_path, m_selectedId, m_base, m_status = QStringLiteral("正在打开我的笔记…"), m_error, m_query, m_filter = "all";
     QStringList m_duplicateIds;
     QVariantList m_notes, m_folders;
+    QVariantMap m_folderIcons;
     QVariantMap m_recovery, m_batchReport;
     QVariantMap m_attachments;
     std::function<void()> m_afterSave;

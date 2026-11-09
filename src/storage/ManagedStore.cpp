@@ -20,6 +20,7 @@
 #include <QTemporaryDir>
 #include <QElapsedTimer>
 #include <QThread>
+#include <QSet>
 
 namespace {
 struct StoreError { QString code, detail; };
@@ -59,6 +60,17 @@ struct ManagedStore::Impl {
     struct Change { QString table, id; QVariantMap before, after; };
     struct Command { QString label; QList<Change> changes; QString primaryId; };
     QList<Command> undoStack, redoStack;
+    QString initializationNotice;
+    void initializeFolderMetadata() {
+        QSet<QString> columns;
+        for (const auto &v : query("PRAGMA table_info(folders)"))
+            columns.insert(v.toMap().value("name").toString());
+        // Additive metadata: old libraries and backups retain their folder IDs.
+        if (!columns.contains("icon")) query("ALTER TABLE folders ADD COLUMN icon TEXT NOT NULL DEFAULT 'folder'");
+        // Equal initial ranks retain the old alphabetical order until rearranged.
+        if (!columns.contains("sort_order")) query("ALTER TABLE folders ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0");
+    }
+    void initializeFolders();
     void initializeUndo();
     void beginCapture();
     Command finishCapture(const QString &label);
@@ -117,11 +129,11 @@ struct ManagedStore::Impl {
     void folder(const QString &path) {
         require(validPath(path, true), "invalidName", path); if (path.isEmpty()) return;
         require(one("SELECT id FROM folders WHERE path=? AND deleted<>''", {path}).isEmpty(), "alreadyExists", path);
-        QString current; for (const auto &part : path.split('/')) { current += (current.isEmpty() ? "" : "/") + part; require(one("SELECT id FROM folders WHERE path=? AND deleted<>''",{current}).isEmpty(),"alreadyExists",current); query("INSERT OR IGNORE INTO folders(id,path,deleted,trash_token) VALUES(?,?,'','')", {uid(),current}); }
+        QString current; for (const auto &part : path.split('/')) { current += (current.isEmpty() ? "" : "/") + part; require(one("SELECT id FROM folders WHERE path=? AND deleted<>''",{current}).isEmpty(),"alreadyExists",current); query("INSERT OR IGNORE INTO folders(id,path,deleted,trash_token,sort_order) VALUES(?,?,'','',(SELECT COALESCE(MAX(sort_order),-1)+1 FROM folders))", {uid(),current}); }
     }
-    QString available(QString path) {
+    QString available(QString path, const QSet<QString> &reserved = {}) {
         require(validPath(path), "invalidName", path); const auto base = path;
-        for (int count = 2; !one("SELECT id FROM notes WHERE path=?", {path}).isEmpty(); ++count) path = base.left(base.size() - 3) + " " + QString::number(count) + ".md";
+        for (int count = 2; reserved.contains(path) || !one("SELECT id FROM notes WHERE path=?", {path}).isEmpty(); ++count) path = base.left(base.size() - 3) + " " + QString::number(count) + ".md";
         return path;
     }
     void version(const QVariantMap &n) {
@@ -145,8 +157,11 @@ struct ManagedStore::Impl {
         const auto keys = index.documents.keys(); for (const auto &path : keys) if (!present.contains(path)) index.remove(path);
     }
     QVariantMap listing(const QVariantMap &a = {}) {
-        refreshIndex(); QVariantList all, matches, folders;
-        for (const auto &v : query("SELECT path FROM folders WHERE deleted='' ORDER BY path")) folders.append(v.toMap()["path"]);
+        refreshIndex(); QVariantList all, matches, folders; QVariantMap folderIcons;
+        for (const auto &v : query("SELECT path,icon FROM folders WHERE deleted='' ORDER BY sort_order,path")) {
+            const auto folder = v.toMap(); folders.append(folder["path"]);
+            folderIcons.insert(folder["path"].toString(), folder["icon"]);
+        }
         QString queryText=a.value("query").toString().trimmed(); const auto filter=a.value("filter").toString();
         QStringList tags; QVariantMap props; QString scope; bool favorite = false;
         static const QRegularExpression terms(R"rx((?:^|\s)(tag|folder|is|prop):("(?:[^"\\]|\\.)*"|'[^']*'|[^\s]+))rx");
@@ -180,7 +195,20 @@ struct ManagedStore::Impl {
         }
         const auto sort=a.value("sort","modified").toString();const bool ascending=a.value("ascending").toBool();
         std::stable_sort(matches.begin(),matches.end(),[&](const QVariant &l,const QVariant &r){auto x=l.toMap(),y=r.toMap();if(x["pinned"].toBool()!=y["pinned"].toBool())return x["pinned"].toBool();const auto field=sort=="title"?"title":sort=="created"?"createdUtc":"displayModifiedUtc";int c=QString::localeAwareCompare(x[field].toString(),y[field].toString());return c==0?x["id"].toString()<y["id"].toString():ascending?c<0:c>0;});
-        return {{"ok",true},{"notes",matches},{"allNotes",all},{"folders",folders},{"smartFolders",settings("smart")},{"duplicateIds",QVariantList()},{"unwatchedPaths",QStringList()},{"indexDocuments",index.documents.size()},{"indexUpdates",index.updates}};
+        return {{"ok",true},{"notes",matches},{"allNotes",all},{"folders",folders},{"folderIcons",folderIcons},{"smartFolders",settings("smart")},{"initializationNotice",initializationNotice},{"duplicateIds",QVariantList()},{"unwatchedPaths",QStringList()},{"indexDocuments",index.documents.size()},{"indexUpdates",index.updates}};
+    }
+    void rewriteRelocatedLinks(const QHash<QString,QString> &moved) {
+        // Preserve path-based Markdown links while identities remain unchanged.
+        refreshIndex();
+        for(const auto &v:query("SELECT * FROM notes")) {
+            auto n=v.toMap(); const auto old=n["path"].toString(),next=moved.value(old,old);QString text=n["text"].toString();
+            const bool rewritable=LinkPaths::rewrite(text,[&](const QString &target,bool wiki){if(wiki){auto paths=index.resolve(old,target,true);if(paths.size()!=1)return target;const auto destination=moved.value(paths[0],paths[0]);if(next==old&&destination==paths[0])return target;return relativeManagedPath(next,destination);}
+                const auto resolved=LinkPaths::resolve(old,target);if(resolved.isEmpty())return target;
+                const auto destination=moved.value(resolved,resolved);if(next==old&&destination==resolved)return target;
+                QUrl url(target);const auto fragment=url.fragment(QUrl::FullyEncoded),queryString=url.query(QUrl::FullyEncoded);QString result=relativeManagedPath(next,destination);result=QString::fromUtf8(QUrl::toPercentEncoding(result,"/"));if(!queryString.isEmpty())result+='?'+queryString;if(!fragment.isEmpty())result+='#'+fragment;return result;});
+            require(rewritable,"unsupportedLinks",old);
+            if(text!=n["text"].toString())updateText(n,text);
+        }
     }
     void relocate(const QString &oldPath,const QString &newPath,bool tree) {
         require(validPath(newPath),"invalidName");
@@ -188,20 +216,12 @@ struct ManagedStore::Impl {
         QHash<QString,QString> moved;
         for(const auto &v:query("SELECT path FROM notes")){auto p=v.toMap()["path"].toString();if(p==oldPath||(tree&&p.startsWith(oldPath+'/')))moved.insert(p,newPath+p.mid(oldPath.size()));}
         for(auto it=moved.begin();it!=moved.end();++it)require(one("SELECT id FROM notes WHERE path=?",{it.value()}).isEmpty(),"alreadyExists",it.value());
-        // Preserve path-based Markdown links while identities remain unchanged.
-        refreshIndex();
-        for(const auto &v:query("SELECT * FROM notes")) {
-            auto n=v.toMap(); const auto old=n["path"].toString(),next=moved.value(old,old);QString text=n["text"].toString();
-            const bool rewritable=LinkPaths::rewrite(text,[&](const QString &target,bool wiki){if(wiki){auto paths=index.resolve(old,target,true);if(paths.size()!=1||!moved.contains(paths[0]))return target;auto result=relativeManagedPath(next,moved.value(paths[0]));return result;}
-                const auto resolved=LinkPaths::resolve(old,target);if(resolved.isEmpty())return target;
-                const auto destination=moved.value(resolved,resolved);if(next==old&&destination==resolved)return target;
-                QUrl url(target);const auto fragment=url.fragment(QUrl::FullyEncoded),queryString=url.query(QUrl::FullyEncoded);QString result=relativeManagedPath(next,destination);result=QString::fromUtf8(QUrl::toPercentEncoding(result,"/"));if(!queryString.isEmpty())result+='?'+queryString;if(!fragment.isEmpty())result+='#'+fragment;return result;});
-            require(rewritable,"unsupportedLinks",old);
-            if(text!=n["text"].toString())updateText(n,text);
-        }
+        rewriteRelocatedLinks(moved);
         if(tree){
             require(one("SELECT id FROM folders WHERE path=?",{newPath}).isEmpty(),"alreadyExists",newPath);folder(parentFolder(newPath));
             const auto rows=query("SELECT id,path FROM folders");for(const auto &v:rows){auto n=v.toMap();auto p=n["path"].toString();if(p==oldPath||p.startsWith(oldPath+'/'))query("UPDATE folders SET path=? WHERE id=?",{newPath+p.mid(oldPath.size()),n["id"]});}
+            if (parentFolder(oldPath) != parentFolder(newPath))
+                query("UPDATE folders SET sort_order=(SELECT COALESCE(MAX(sort_order),-1)+1 FROM folders) WHERE path=?", {newPath});
         }else folder(parentFolder(newPath));
         for(auto it=moved.begin();it!=moved.end();++it){query("UPDATE drafts SET path=? WHERE path=?",{it.value(),it.key()});query("UPDATE notes SET path=? WHERE path=?",{it.value(),it.key()});}
     }
@@ -245,15 +265,72 @@ ManagedStore::ManagedStore(const QString &directory) : d(std::make_unique<Impl>(
     d->query("PRAGMA journal_mode=WAL");d->query("PRAGMA synchronous=FULL");d->query("PRAGMA foreign_keys=ON");
     require(d->one("PRAGMA user_version").value("user_version").toInt()<=1,"databaseVersion","This database was created by a newer version.");
     d->query("CREATE TABLE IF NOT EXISTS notes(id TEXT PRIMARY KEY,path TEXT NOT NULL UNIQUE,text TEXT NOT NULL,hash TEXT NOT NULL,created TEXT NOT NULL,modified TEXT NOT NULL,pinned INTEGER NOT NULL DEFAULT 0,favorite INTEGER NOT NULL DEFAULT 0,deleted TEXT NOT NULL DEFAULT '',trash_token TEXT NOT NULL DEFAULT '',source TEXT NOT NULL DEFAULT '',source_hash TEXT NOT NULL DEFAULT '',import_batch TEXT NOT NULL DEFAULT '')");
-    d->query("CREATE TABLE IF NOT EXISTS folders(id TEXT PRIMARY KEY,path TEXT NOT NULL UNIQUE,deleted TEXT NOT NULL DEFAULT '',trash_token TEXT NOT NULL DEFAULT '')");
+    d->query("CREATE TABLE IF NOT EXISTS folders(id TEXT PRIMARY KEY,path TEXT NOT NULL UNIQUE,deleted TEXT NOT NULL DEFAULT '',trash_token TEXT NOT NULL DEFAULT '',icon TEXT NOT NULL DEFAULT 'folder')");
+    d->initializeFolderMetadata();
     d->query("CREATE TABLE IF NOT EXISTS drafts(path TEXT PRIMARY KEY,text TEXT NOT NULL,base_hash TEXT NOT NULL,time TEXT NOT NULL)");
     d->query("CREATE TABLE IF NOT EXISTS versions(note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,hash TEXT NOT NULL,text TEXT NOT NULL,time TEXT NOT NULL,PRIMARY KEY(note_id,hash))");
     d->query("CREATE TABLE IF NOT EXISTS assets(path TEXT PRIMARY KEY,data BLOB NOT NULL,name TEXT NOT NULL,deleted TEXT NOT NULL DEFAULT '')");
     d->query("CREATE TABLE IF NOT EXISTS imports(id TEXT PRIMARY KEY,name TEXT NOT NULL,time TEXT NOT NULL,report BLOB NOT NULL)");
     d->query("CREATE TABLE IF NOT EXISTS settings(kind TEXT NOT NULL,name TEXT NOT NULL,value BLOB NOT NULL,PRIMARY KEY(kind,name))");
     d->query("CREATE INDEX IF NOT EXISTS notes_source ON notes(source,source_hash)");d->query("CREATE INDEX IF NOT EXISTS notes_state ON notes(deleted,modified)");d->query("PRAGMA user_version=1");
+    d->initializeFolders();
     d->initializeUndo();
     for(const auto &v:d->query("SELECT path FROM assets WHERE deleted=''")){const auto path=v.toMap()["path"].toString();if(!QFileInfo::exists(d->root+'/'+path))writeBytes(d->root+'/'+path,d->one("SELECT data FROM assets WHERE path=?",{path})["data"].toByteArray());}
+}
+void ManagedStore::Impl::initializeFolders() {
+    const auto initialized = settings("initialization");
+    if (initialized.value("defaultFolderCreated").toBool() && initialized.value("quickNotesFolderCreated").toBool()) return;
+    query("BEGIN IMMEDIATE");
+    try {
+        // These are ordinary folders after seeding. Never recreate them after
+        // a rename, move, trash, or permanent deletion.
+        if (!initialized.value("defaultFolderCreated").toBool()) {
+            query("INSERT OR IGNORE INTO folders(id,path,deleted,trash_token) VALUES(?,?,'','')", {uid(),QStringLiteral("默认文件夹")});
+            setSetting("initialization", "defaultFolderCreated", true);
+        }
+        if (!initialized.value("quickNotesFolderCreated").toBool()) {
+            const QString quickFolder = QStringLiteral("随手记");
+            query("INSERT OR IGNORE INTO folders(id,path,deleted,trash_token) VALUES(?,?,'','')", {uid(),quickFolder});
+            query("SAVEPOINT migrate_inbox");
+            try {
+                const auto roots = query("SELECT path FROM notes WHERE deleted='' AND instr(path,'/')=0 ORDER BY path");
+                require(!one("SELECT id FROM folders WHERE path=? AND deleted=''", {quickFolder}).isEmpty(), "missingFolder");
+                // Recovery text and its baseline must stay together. Leave all
+                // root notes untouched if recovering drafts must happen first.
+                require(roots.isEmpty() || one("SELECT path FROM drafts LIMIT 1").isEmpty(), "pendingDrafts");
+                QHash<QString,QString> moved;
+                QSet<QString> reserved;
+                for (const auto &v : roots) {
+                    const auto old = v.toMap()["path"].toString();
+                    const auto next = available(quickFolder + '/' + old, reserved);
+                    moved.insert(old, next); reserved.insert(next);
+                }
+                if (!moved.isEmpty()) rewriteRelocatedLinks(moved);
+                for (auto it = moved.cbegin(); it != moved.cend(); ++it)
+                    query("UPDATE notes SET path=? WHERE path=?", {it.value(),it.key()});
+                const auto smartFolders = settings("smart");
+                for (auto it = smartFolders.cbegin(); it != smartFolders.cend(); ++it) {
+                    auto view = it.value().toMap();
+                    if (view.value("filter") != "inbox") continue;
+                    view.insert("filter", "folder:" + quickFolder);
+                    setSetting("smart", it.key(), view);
+                }
+            } catch (const StoreError &error) {
+                query("ROLLBACK TO migrate_inbox");
+                if (error.code != "pendingDrafts" && error.code != "unsupportedLinks" && error.code != "missingFolder") throw;
+                const auto reason = error.code == "pendingDrafts" ? QStringLiteral("有待恢复的草稿")
+                    : error.code == "unsupportedLinks" ? QStringLiteral("包含无法自动调整的链接")
+                    : QStringLiteral("同名文件夹位于最近删除中");
+                initializationNotice = QStringLiteral("原有未分类笔记因%1而保留原位，可在“全部笔记”中查看和整理。").arg(reason);
+            }
+            query("RELEASE migrate_inbox");
+            setSetting("initialization", "quickNotesFolderCreated", true);
+        }
+        query("COMMIT");
+    } catch (...) {
+        sqlite3_exec(db, "ROLLBACK", nullptr, nullptr, nullptr);
+        throw;
+    }
 }
 void ManagedStore::Impl::initializeUndo() {
     query("CREATE TEMP TABLE capture_keys(table_name TEXT,id TEXT,PRIMARY KEY(table_name,id))");
@@ -289,6 +366,9 @@ ManagedStore::Impl::Command ManagedStore::Impl::finishCapture(const QString &lab
     return command;
 }
 QString ManagedStore::Impl::commandLabel(const QString &op, const QVariantMap &a) const {
+    if (op == "editFolder") return QStringLiteral("编辑文件夹");
+    if (op == "moveFolder") return parentFolder(a.value("path").toString()) == a.value("folder").toString()
+        ? QStringLiteral("调整文件夹顺序") : QStringLiteral("移动文件夹");
     if (op=="batch" || op=="tagBatch") {
         const QHash<QString,QString> labels{{"move","移动笔记"},{"trash","删除笔记"},{"duplicate","创建副本"},{"pin","置顶"},{"unpin","取消置顶"},{"favorite","收藏"},{"unfavorite","取消收藏"}};
         return op=="tagBatch" ? "修改标签" : labels.value(a.value("action").toString());
@@ -381,7 +461,8 @@ QVariantMap ManagedStore::dispatch(const QString &op,const QVariantMap &a, std::
             while(d->undoStack.size()>50 || (d->undoStack.size()>1 && retainedBytes()>64*1024*1024))d->undoStack.removeFirst();
             result.insert("historyRecorded",true);
         } else if(op=="clearRedo") d->redoStack.clear();
-        else if(op=="importNotes" || op=="restoreBackup" || (op=="trashBatch"&&a.value("action")=="purge")) {d->undoStack.clear();d->redoStack.clear();}
+        else if(op=="importNotes" || op=="restoreBackup" || op=="purgeFolder" || (op=="trashBatch"&&a.value("action")=="purge")
+                || (op=="batch" && a.value("action")=="purgeNotes" && result.value("succeeded").toInt()>0)) {d->undoStack.clear();d->redoStack.clear();}
         result.insert("undoState",d->historyState());return result;
     }catch(const StoreError &e){if(outer)sqlite3_exec(d->db,"ROLLBACK",nullptr,nullptr,nullptr);d->index=Knowledge::Index();return {{"ok",false},{"error",e.code},{"detail",e.detail}};}
 }
@@ -420,11 +501,70 @@ QVariantMap ManagedStore::Impl::run(const QString &op,const QVariantMap &a) {
     if(op=="discardDraft"){query("DELETE FROM drafts WHERE path=?",{path});return ok();}
     if(op=="createFolder") {require(validPath(path),"invalidName");require(one("SELECT id FROM folders WHERE path=?",{path}).isEmpty(),"alreadyExists");folder(path);return ok();}
     if(op=="renameFolder") {require(!one("SELECT id FROM folders WHERE path=? AND deleted=''",{path}).isEmpty(),"notFound");auto target=a.value("target").toString();relocate(path,target,true);return {{"ok",true},{"newPath",target}};}
+    if (op == "moveFolder") {
+        const auto current = one("SELECT id FROM folders WHERE path=? AND deleted=''", {path});
+        require(!current.isEmpty(), "notFound");
+        const auto parent = a.value("folder").toString(), sibling = a.value("sibling").toString();
+        require(validPath(parent, true), "invalidName");
+        require(parent != path && !parent.startsWith(path + '/'), "invalidParent");
+        require(parent.isEmpty() || !one("SELECT id FROM folders WHERE path=? AND deleted=''", {parent}).isEmpty(), "missingFolder");
+        const auto anchor = sibling.isEmpty() ? QVariantMap() : one("SELECT id FROM folders WHERE path=? AND deleted=''", {sibling});
+        require(sibling.isEmpty() || (!anchor.isEmpty() && sibling != path && parentFolder(sibling) == parent), "missingFolder");
+        const auto target = (parent.isEmpty() ? QString() : parent + '/') + path.section('/', -1);
+        if (target != path) {
+            require(one("SELECT path FROM drafts LIMIT 1").isEmpty(), "pendingDrafts");
+            relocate(path, target, true);
+        }
+        // Persist sibling order by folder identity, within the same undoable move.
+        QStringList siblings;
+        for (const auto &v : query("SELECT id,path FROM folders WHERE deleted='' ORDER BY sort_order,path")) {
+            const auto row = v.toMap();
+            if (row["id"] != current["id"] && parentFolder(row["path"].toString()) == parent)
+                siblings.append(row["id"].toString());
+        }
+        const int at = sibling.isEmpty() ? siblings.size() : siblings.indexOf(anchor["id"].toString()) + (a.value("after").toBool() ? 1 : 0);
+        siblings.insert(at, current["id"].toString());
+        for (int i = 0; i < siblings.size(); ++i)
+            query("UPDATE folders SET sort_order=? WHERE id=? AND sort_order<>?", {i, siblings[i], i});
+        return {{"ok",true},{"newPath",target}};
+    }
+    if (op == "editFolder") {
+        const auto current = one("SELECT id FROM folders WHERE path=? AND deleted=''", {path});
+        require(!current.isEmpty(), "notFound");
+        const auto target = a.value("target").toString(), icon = a.value("icon").toString();
+        require(validPath(target), "invalidName");
+        require(QStringList{"folder", "editRounded", "album", "home", "flag", "heart", "calendar", "music", "grid", "sparkle", "artist", "reminder",
+            "archive", "envelope", "wallpaper", "keyboard", "settings", "queueList", "radio", "theme", "sliders", "circle", "waves", "info",
+            "work", "study", "sport", "running", "cycling", "swimming", "fitness", "basketball", "football", "badminton", "tennis",
+            "shopping", "travel", "food", "coffee", "health", "finance", "gift", "pets", "garden", "car", "code", "camera", "ideas"}.contains(icon), "invalidIcon");
+        const auto parent = parentFolder(target);
+        require(parent != path && !parent.startsWith(path + '/'), "invalidParent");
+        require(parent.isEmpty() || !one("SELECT id FROM folders WHERE path=? AND deleted=''", {parent}).isEmpty(), "missingFolder");
+        if (target != path) {
+            require(one("SELECT path FROM drafts LIMIT 1").isEmpty(), "pendingDrafts");
+            relocate(path, target, true);
+        }
+        query("UPDATE folders SET icon=? WHERE id=?", {icon,current["id"]});
+        return {{"ok",true},{"newPath",target}};
+    }
     if(op=="removeFolder") {
         require(one("SELECT id FROM notes WHERE path LIKE ? ESCAPE '\\'",{QString(path).replace('\\',"\\\\").replace('%',"\\%").replace('_',"\\_")+"/%"}).isEmpty(),"folderNotEmpty");
         for(const auto &v:query("SELECT path FROM folders"))require(!v.toMap()["path"].toString().startsWith(path+'/'),"folderNotEmpty");query("DELETE FROM folders WHERE path=?",{path});return ok();
     }
     if(op=="rename") {note(path);auto target=a.value("target").toString();relocate(path,target,false);return {{"ok",true},{"newPath",target},{"listing",listing()}};}
+    if (op == "purgeFolder") {
+        require(validPath(path), "invalidName");
+        require(!one("SELECT id FROM folders WHERE path=? AND deleted=''", {path}).isEmpty(), "notFound");
+        const auto prefix = path + '/';
+        // Do not discard unresolved recovery text, or touch previously trashed
+        // entries. instr keeps subtree matching literal and case-sensitive.
+        require(one("SELECT path FROM drafts WHERE instr(path,?)=1 LIMIT 1", {prefix}).isEmpty(), "pendingDrafts");
+        query("DELETE FROM notes WHERE deleted='' AND instr(path,?)=1", {prefix});
+        // Note versions cascade with their note; shared assets keep their
+        // existing reference-aware cleanup lifecycle.
+        query("DELETE FROM folders WHERE deleted='' AND (path=? OR instr(path,?)=1)", {path, prefix});
+        return ok();
+    }
     if(op=="trash"||op=="trashFolder") {
         const auto token=uid(),time=utc();if(op=="trash") {const auto n=note(path);require(a.value("baseHash").toString()==n["hash"].toString(),"conflict");query("UPDATE notes SET deleted=?,trash_token=? WHERE id=?",{time,token,n["id"]});query("DELETE FROM drafts WHERE path=?",{path});}
         else {require(!one("SELECT id FROM folders WHERE path=? AND deleted=''",{path}).isEmpty(),"notFound");for(const auto &v:query("SELECT path FROM folders WHERE deleted=''")){auto p=v.toMap()["path"].toString();if(p==path||p.startsWith(path+'/'))query("UPDATE folders SET deleted=?,trash_token=? WHERE path=?",{time,token,p});}for(const auto &v:query("SELECT path FROM notes WHERE deleted=''")){auto p=v.toMap()["path"].toString();if(p.startsWith(path+'/')){query("UPDATE notes SET deleted=?,trash_token=? WHERE path=?",{time,token,p});query("DELETE FROM drafts WHERE path=?",{p});}}}
@@ -460,13 +600,17 @@ QVariantMap ManagedStore::Impl::run(const QString &op,const QVariantMap &a) {
     if(op=="pin"||op=="favorite") {auto n=note(path);query(op=="pin"?"UPDATE notes SET pinned=? WHERE id=?":"UPDATE notes SET favorite=? WHERE id=?",{a.value(op=="pin"?"pinned":"favorite").toBool(),n["id"]});return ok();}
     if(op=="batch"||op=="tagBatch") {
         const auto action=a.value("action").toString();const auto items=a.value("items").toList();require(!items.isEmpty()&&items.size()<=200,"invalidBatch");
-        require(op=="tagBatch"||QStringList{"pin","unpin","favorite","unfavorite","trash","move","duplicate"}.contains(action),"invalidBatch");
+        require(op=="tagBatch"||QStringList{"pin","unpin","favorite","unfavorite","trash","purgeNotes","move","duplicate"}.contains(action),"invalidBatch");
         QVariantList results;int succeeded=0;QSet<QString> seen;QHash<QString,QString> baselines;
         for(const auto &v:items){const auto p=v.toMap().value("path").toString();baselines.insert(p,one("SELECT hash FROM notes WHERE path=? AND deleted=''",{p}).value("hash").toString());}
         for(const auto &v:items){auto item=v.toMap();auto p=item.value("path").toString();query("SAVEPOINT item");try {
             require(!seen.contains(p),"duplicateRequest");seen.insert(p);auto n=note(p);require(!baselines.value(p).isEmpty()&&item.value("baseHash").toString()==baselines.value(p),"conflict");QVariantMap result=ok();
             if(op=="tagBatch") {auto tags=Knowledge::properties(n["text"].toString()).value("tags").toStringList();for(const auto &v:a.value("tags").toStringList()){if(action=="remove"||action=="rename")tags.removeAll(v);else if(!tags.contains(v))tags.append(v);}if(action=="rename")tags.append(a.value("replacement").toString());tags.removeDuplicates();updateText(n,Knowledge::update(n["text"].toString(),"tags",tags));}
             else if(action=="trash")run("trash",{{"path",p},{"baseHash",n["hash"]}});
+            else if(action=="purgeNotes") {
+                require(one("SELECT path FROM drafts WHERE path=?", {p}).isEmpty(), "pendingDrafts");
+                query("DELETE FROM notes WHERE id=?", {n["id"]});
+            }
             else if(action=="duplicate"){auto copy=insert(parentFolder(p)+(parentFolder(p).isEmpty()?"":"/")+QFileInfo(p).completeBaseName()+" 副本.md",Knowledge::update(n["text"].toString(),"title",MarkdownFile::title(n["text"].toString(),QFileInfo(p).completeBaseName())+" 副本"));result.insert("newPath",copy["path"]);}
             else if(action=="move"){const auto dest=a.value("folder").toString();require(dest.isEmpty()||!one("SELECT id FROM folders WHERE path=? AND deleted=''",{dest}).isEmpty(),"missingFolder");const auto next=(dest.isEmpty()?QString():dest+'/')+QFileInfo(p).fileName();if(next!=p)relocate(p,next,false);result.insert("newPath",next);}
             else run(action=="pin"||action=="unpin"?"pin":"favorite",{{"path",p},{"pinned",action=="pin"},{"favorite",action=="favorite"}});
@@ -734,7 +878,7 @@ QVariantMap ManagedStore::Impl::restoreBackup(const QVariantMap &a) {
     QTemporaryDir temporary; require(temporary.isValid(), "writeFailed");
     const auto snapshot = temporary.filePath("restore.sqlite3");
     streamCopy(source,snapshot);
-    auto incoming = openDatabase(snapshot, SQLITE_OPEN_READONLY);
+    auto incoming = openDatabase(snapshot, SQLITE_OPEN_READWRITE);
     // Validate a private copy, including every schema column used by this app.
     Impl inspection; inspection.db = incoming.release();
     try {
@@ -755,12 +899,16 @@ QVariantMap ManagedStore::Impl::restoreBackup(const QVariantMap &a) {
         require(validPath(path)&&path.startsWith("assets/")&&!QFileInfo(root+'/'+path).isSymLink(),"invalidBackup");
     }
     } catch (const StoreError &) { throw StoreError{"invalidBackup", "备份内容或结构无法读取"}; }
+    // Upgrade the private snapshot before replacing the active library.
+    inspection.initializeFolderMetadata();
+    inspection.initializeFolders();
     // Keep an independent, user-accessible rollback copy before replacing anything.
     const auto safetyFolder=QDir::cleanPath(QDir(root).absoluteFilePath("../Backups"));
     require(QDir().mkpath(safetyFolder),"writeFailed");
     const auto safety=QDir(safetyFolder).filePath("恢复前-"+QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss")+'-'+uid().left(6)+".nkbackup");
     backup({{"destination",QUrl::fromLocalFile(safety).toString()}});
     copyDatabase(db,inspection.db);
+    initializationNotice = inspection.initializationNotice;
     index=Knowledge::Index();external.clear();
     int cacheFailures=0;
     // Cache refresh failures do not undo or misreport a committed database restore.
@@ -769,5 +917,5 @@ QVariantMap ManagedStore::Impl::restoreBackup(const QVariantMap &a) {
         try { writeBytes(root+'/'+asset["path"].toString(),asset["data"].toByteArray()); }
         catch(const StoreError &) { ++cacheFailures; }
     }
-    return {{"ok",true},{"safetyCopy",safety},{"cacheFailures",cacheFailures}};
+    return {{"ok",true},{"safetyCopy",safety},{"cacheFailures",cacheFailures},{"initializationNotice",initializationNotice}};
 }

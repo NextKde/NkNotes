@@ -19,7 +19,7 @@ target_link_libraries(nextnotes-storage PUBLIC Qt6::Core SQLite::SQLite3)
 qt_add_executable(nextnotes src/main.cpp src/EditorSession.cpp src/EditorSessionWeb.cpp src/EditorSession.h src/NotesController.cpp src/NotesLibrary.cpp src/EditorExport.cpp src/PdfExport.cpp src/NotesOrganizer.cpp src/NotesKnowledge.cpp src/NotesController.h)
 target_sources(nextnotes PRIVATE src/EditorRenderLifecycle.cpp src/EditorRenderLifecycle.h)
 qt_add_qml_module(nextnotes URI NextNotes VERSION 1.0 RESOURCE_PREFIX /qt/qml
-    QML_FILES qml/NotesSettings.qml qml/LibraryActions.qml qml/NotesWindowControls.qml qml/KnowledgePanel.qml qml/RecycleBin.qml qml/Main.qml qml/NotesOrganizer.qml qml/SourceEditor.qml qml/EditorTools.qml qml/CommandRegistry.qml qml/NotesTokens.qml qml/NoteReadingView.qml)
+    QML_FILES qml/FolderIcons.js qml/PopupPlacement.js qml/NotesPopover.qml qml/NotesContentPopover.qml qml/NotesSettings.qml qml/LibraryActions.qml qml/NotesWindowControls.qml qml/KnowledgePanel.qml qml/RecycleBin.qml qml/Main.qml qml/NotesOrganizer.qml qml/SourceEditor.qml qml/EditorTools.qml qml/CommandRegistry.qml qml/NotesTokens.qml qml/NoteReadingView.qml)
 qt_add_resources(nextnotes window-controls PREFIX /nextnotes/platform BASE qml FILES qml/NativeWindowControls.qml)
 file(GLOB_RECURSE EDITOR_ASSETS CONFIGURE_DEPENDS web/editor/dist/* web/editor/vendor/*)
 qt_add_resources(nextnotes editor-assets PREFIX /editor BASE web/editor FILES web/editor/index.html web/editor/editor.css ${EDITOR_ASSETS})
@@ -30,7 +30,8 @@ if(NEXTNOTES_BUILD_TESTS)
     enable_testing()
     qt_add_executable(notes-chrome-test tests/chrome/main.cpp)
     qt_add_qml_module(notes-chrome-test URI NextNotes.ChromeTests VERSION 1.0 RESOURCE_PREFIX /qt/qml
-        QML_FILES qml/NotesWindowControls.qml qml/NotesOrganizer.qml)
+        QML_FILES qml/NotesWindowControls.qml qml/NotesOrganizer.qml qml/FolderIcons.js qml/NotesTokens.qml
+            qml/NotesPopover.qml qml/NotesContentPopover.qml qml/PopupPlacement.js)
     qt_add_resources(notes-chrome-test test-window-controls PREFIX /nextnotes/platform BASE qml FILES qml/NativeWindowControls.qml)
     target_compile_definitions(notes-chrome-test PRIVATE QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/chrome")
     target_link_libraries(notes-chrome-test PRIVATE Kos::Ui Kos::UiPlugin Qt6::QuickTest Qt6::QuickControls2)

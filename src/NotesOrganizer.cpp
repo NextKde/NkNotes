@@ -29,6 +29,9 @@ QString NotesController::organizerError(const QString &code) const {
         {"purgeIncomplete", "删除未完成，记录保留；请刷新后重试永久删除"},
         {"relativeLinks", "包含链接引用，暂不能安全跨文件夹移动；原文件保留"},
         {"folderNotEmpty", "此操作仅适用于空文件夹，请先移动其中内容"},
+        {"invalidName", "文件夹名称无效，请检查名称"}, {"invalidIcon", "请选择一个可用的图标"},
+        {"invalidParent", "不能把文件夹放到自身或其子文件夹中"},
+        {"missingFolder", "父级文件夹已不存在，请重新选择"}, {"notFound", "文件夹已不存在，请刷新后重试"},
         {"invalidBatch", "请选择 1 至 200 篇笔记及有效操作"}, {"notListed", "笔记不在当前结果中，请刷新后重选"},
         {"duplicateRequest", "重复选择了同一文件"}, {"unsupportedFormat", "文件格式无法安全生成副本"},
         {"metadataWriteFailed", "元数据写入失败，请检查笔记库权限和空间"}, {"writeFailed", "写入失败，原文件保留"},
@@ -55,10 +58,24 @@ void NotesController::organize(const QString &action, const QStringList &paths, 
     });
 }
 void NotesController::manageFolder(const QString &operation, const QString &path, const QString &target) {
-    if (busy() || !QStringList{"renameFolder", "removeFolder", "trashFolder"}.contains(operation)) return;
+    if (busy() || !QStringList{"renameFolder", "removeFolder", "trashFolder", "purgeFolder"}.contains(operation)) return;
     drain([this, operation, path, target] {
         m_organizing = true; m_status = "正在整理文件夹…";
         send(operation, {{"path", path}, {"target", target}}); emit changed();
+    });
+}
+void NotesController::editFolder(const QString &path, const QString &target, const QString &icon) {
+    if (busy()) return;
+    drain([this, path, target, icon] {
+        m_organizing = true; m_status = "正在保存文件夹…";
+        send("editFolder", {{"path", path}, {"target", target}, {"icon", icon}}); emit changed();
+    });
+}
+void NotesController::moveFolder(const QString &path, const QString &parent, const QString &sibling, bool after) {
+    if (busy()) return;
+    drain([this, path, parent, sibling, after] {
+        m_organizing = true; m_status = "正在整理文件夹…";
+        send("moveFolder", {{"path", path}, {"folder", parent}, {"sibling", sibling}, {"after", after}}); emit changed();
     });
 }
 void NotesController::acceptBatch(QVariantMap report) {
@@ -75,11 +92,22 @@ void NotesController::acceptBatch(QVariantMap report) {
             if (result.value("path").toString() == m_path) moved = result.value("newPath").toString();
         }
         else if (result.value("path").toString() == m_path) {
-            if (report.value("action") == "trash") {
+            if (report.value("action") == "trash" || report.value("action") == "purgeNotes") {
                 ++m_epoch; m_path.clear(); m_selectedId.clear(); m_base.clear(); m_revision = m_savedRevision = 0;
                 m_applying = true; m_session->loadPrototype({}); m_applying = false;
                 m_readOnly = false; m_conflict = false;
+                m_knowledge.clear(); m_versions.clear(); m_version.clear(); m_missingLink.clear();
+                setPreference("lastNote", QVariantMap{});
             } else if (report.value("action") == "move" && result.value("newPath").toString() != m_path) moved = result.value("newPath").toString();
+        }
+        if (result.value("ok").toBool() && report.value("action") == "purgeNotes") {
+            const auto deletedPath = result.value("path").toString();
+            for (int i = m_history.size() - 1; i >= 0; --i) {
+                if (m_history[i] != deletedPath) continue;
+                m_history.removeAt(i);
+                if (i <= m_historyIndex) --m_historyIndex;
+            }
+            m_historyTarget = -1;
         }
         results.append(result);
     }

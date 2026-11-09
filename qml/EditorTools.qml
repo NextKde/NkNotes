@@ -21,31 +21,32 @@ Item {
     property real dragY: 0
     function closeSlash() { slashMenu.close() }
     function post(name, args) { source.action(name, args || {}) }
-    function toggleOutline(anchor) {
+    function toggleOutline(anchor, originMenu) {
         if (width > 600) { outlineVisible = !outlineVisible; controller.setPreference("editorOutline", outlineVisible) }
-        else { outlinePanel.anchorItem = anchor; outlinePanel.open() }
+        else if (originMenu) outlinePanel.openFromMenu(originMenu)
+        else outlinePanel.openFromButton(anchor)
     }
-    function showShortcuts(anchor) { helpPanel.anchorItem = anchor; helpPanel.open() }
-    function openMenu(anchor) { toolsMenu.anchorItem = anchor; toolsMenu.openAtAnchor() }
+    function showShortcuts(anchor) { helpPanel.openFromButton(anchor) }
+    function openMenu(anchor) { toolsMenu.openFromButton(anchor) }
     function openContext(x, y, suggestions) {
-        caretAnchor.x = Math.max(0, Math.min(width - 30, x)); caretAnchor.y = Math.max(0, Math.min(height - 24, y))
-        block = state.block || {}; spellSuggestions = suggestions || []; blockMenu.anchorItem = caretAnchor; blockMenu.openAtAnchor()
+        block = state.block || {}; spellSuggestions = suggestions || []
+        blockMenu.openAtPoint(root, Qt.point(x, y))
     }
-    function openMath() {
+    function openMath(originMenu) {
         const value = state.math || {}; mathPanel.targetPos = value.pos === undefined ? -1 : value.pos
         formula.text = value.source || ""; mathMode.currentIndex = value.display ? 1 : 0
-        mathPanel.anchorItem = handle.visible ? handle : caretAnchor; mathPanel.open(); formula.forceActiveFocus()
+        if (originMenu) mathPanel.openFromMenu(originMenu); else mathPanel.openFromButton(handle.visible ? handle : caretAnchor)
     }
-    function openCode() {
+    function openCode(originMenu) {
         const value = state.code || {}; codePanel.targetPos = value.pos === undefined ? (state.block ? state.block.pos : 0) : value.pos
         const index = language.model.indexOf(value.language || "plain"); language.currentIndex = index < 0 ? 0 : index
-        codePanel.anchorItem = handle.visible ? handle : caretAnchor; codePanel.open()
+        if (originMenu) codePanel.openFromMenu(originMenu); else codePanel.openFromButton(handle.visible ? handle : caretAnchor)
     }
-    function openImage() {
+    function openImage(originMenu) {
         const value = state.image; if (!value) { source.notify("先点击正文中的图片，再调整图片属性"); return }
         imagePanel.targetPos = value.pos; imagePanel.imageSource = value.src; imageAlt.text = value.alt || ""
         imageSize.value = ((controller.imageWidths()[value.src] || 640) - 64) / 1536
-        imagePanel.anchorItem = handle.visible ? handle : caretAnchor; imagePanel.open()
+        if (originMenu) imagePanel.openFromMenu(originMenu); else imagePanel.openFromButton(handle.visible ? handle : caretAnchor)
     }
     function uiChanged() {
         if (state.epoch !== undefined && documentEpoch !== state.epoch) {
@@ -57,7 +58,7 @@ Item {
         if (slash && slash.items.length && editable) {
             caretAnchor.x = Math.max(0, Math.min(width - outlineWidth - 30, slash.x)); caretAnchor.y = Math.max(0, Math.min(height - 22, slash.y))
             slashMenu.currentIndex = slash.index
-            if (!slashMenu.visible) slashMenu.openAtAnchor()
+            if (!slashMenu.visible) slashMenu.openForCaret(caretAnchor)
         } else if (slashMenu.visible) slashMenu.close()
     }
     onStateChanged: uiChanged()
@@ -69,7 +70,7 @@ Item {
         implicitWidth: 26; implicitHeight: 26; iconOnly: true; iconName: "more"; iconSize: 16
         materialForm: true
         Accessible.name: "块操作，可拖动块，或使用 Alt+Shift+方向键移动"
-        onClicked: { root.block = root.state.block; blockMenu.anchorItem = handle; blockMenu.openAtAnchor() }
+        onClicked: { root.block = root.state.block; root.spellSuggestions = []; blockMenu.openFromButton(handle) }
         MouseArea {
             anchors.fill: parent
             property real startY: 0
@@ -88,7 +89,7 @@ Item {
             onReleased: function(mouse) {
                 if (root.dragging) root.post("moveBlock", {pos: startPos, y: root.dragY})
                 else if (mouse.modifiers & Qt.ShiftModifier) root.post("selectBlock", {pos: startPos, extend: true})
-                else { root.block = root.state.block; blockMenu.anchorItem = handle; blockMenu.openAtAnchor() }
+                else { root.block = root.state.block; root.spellSuggestions = []; blockMenu.openFromButton(handle) }
                 root.dragging = false
             }
             onCanceled: root.dragging = false
@@ -131,12 +132,12 @@ Item {
         Rectangle { width: 1; height: parent.height; color: AppTheme.border }
         Loader { anchors.fill: parent; anchors.margins: 10; sourceComponent: outlineView }
     }
-    LiquidContentPopover {
-        id: outlinePanel; sourceItem: root.sceneItem; width: 250; height: Math.min(430, root.height - 20); preferredSide: "bottom"
+    NotesContentPopover {
+        id: outlinePanel; sourceItem: root.sceneItem; preferredWidth: 250; height: Math.min(430, root.height - 20)
         contentItem: Loader { sourceComponent: outlineView }
     }
-    LiquidPopover {
-        id: slashMenu; height: Math.min(implicitHeight, Math.max(100, root.height - 16)); sourceItem: root.sceneItem; anchorItem: caretAnchor; focus: false
+    NotesPopover {
+        id: slashMenu; sourceItem: root.sceneItem; anchorItem: caretAnchor; focus: false
         onClosed: root.post("dismissSlash")
         Instantiator {
             model: root.state.slash ? root.state.slash.items : []
@@ -150,8 +151,8 @@ Item {
             onObjectRemoved: function(index, object) { slashMenu.removeItem(object) }
         }
     }
-    LiquidPopover {
-        id: blockMenu; height: Math.min(implicitHeight, Math.max(100, root.height - 16)); sourceItem: root.sceneItem
+    NotesPopover {
+        id: blockMenu; sourceItem: root.sceneItem
         onClosed: Qt.callLater(function() { if (!root.popupActive) root.source.editor.forceActiveFocus() })
         LiquidPopoverItem { text: "选择块"; enabled: root.editable; onTriggered: root.post("selectBlock", {pos: root.block.pos}) }
         LiquidPopoverItem { text: "复制块"; enabled: root.editable; onTriggered: root.post("copyBlock", {pos: root.block.pos, selection: true}) }
@@ -163,9 +164,9 @@ Item {
         LiquidPopoverItem { text: "转换为二级标题"; enabled: root.editable; onTriggered: root.post("blockType", {pos: root.block.pos, command: "heading2"}) }
         LiquidPopoverItem { text: "折叠 / 展开标题"; enabled: root.block.type === "heading"; onTriggered: root.post("toggleFold", {pos: root.block.pos}) }
         LiquidPopoverItem { text: "删除块"; enabled: root.editable; onTriggered: root.post("deleteBlock", {pos: root.block.pos, selection: true}) }
-        LiquidPopoverItem { text: "代码语言与复制…"; visible: !!root.state.code; onTriggered: root.openCode() }
-        LiquidPopoverItem { text: "编辑数学公式…"; visible: !!root.state.math; enabled: root.editable; onTriggered: root.openMath() }
-        LiquidPopoverItem { text: "图片属性…"; visible: !!root.state.image; onTriggered: root.openImage() }
+        LiquidPopoverItem { text: "代码语言与复制…"; visible: !!root.state.code; onTriggered: root.openCode(blockMenu) }
+        LiquidPopoverItem { text: "编辑数学公式…"; visible: !!root.state.math; enabled: root.editable; onTriggered: root.openMath(blockMenu) }
+        LiquidPopoverItem { text: "图片属性…"; visible: !!root.state.image; onTriggered: root.openImage(blockMenu) }
         Instantiator {
             model: root.spellSuggestions.slice(0, 5)
             delegate: LiquidPopoverItem { required property string modelData; text: "更正为：" + modelData; onTriggered: root.source.correctSpelling(modelData) }
@@ -173,19 +174,20 @@ Item {
             onObjectRemoved: function(index, object) { blockMenu.removeItem(object) }
         }
     }
-    LiquidPopover {
-        id: toolsMenu; height: Math.min(implicitHeight, Math.max(100, root.height - 16)); sourceItem: root.sceneItem
-        LiquidPopoverItem { text: "大纲 / 折叠"; onTriggered: root.toggleOutline(toolsMenu.anchorItem) }
+    NotesPopover {
+        id: toolsMenu; sourceItem: root.sceneItem
+        LiquidPopoverItem { text: "大纲 / 折叠"; onTriggered: root.toggleOutline(null, toolsMenu) }
         LiquidPopoverItem { text: "插入自动目录"; enabled: root.editable; onTriggered: root.post("insertToc") }
         LiquidPopoverItem { text: "插入图片或附件…"; enabled: root.editable && !root.controller.externalDocument; onTriggered: root.post("chooseAttachment") }
-        LiquidPopoverItem { text: "图片属性…"; enabled: !!root.state.image; onTriggered: root.openImage() }
-        LiquidPopoverItem { text: "附件管理…"; enabled: !root.controller.externalDocument; onTriggered: { root.controller.inspectAttachments(); attachmentsPanel.anchorItem = toolsMenu.anchorItem; attachmentsPanel.open() } }
-        LiquidPopoverItem { text: "数学公式…"; enabled: root.editable; onTriggered: root.openMath() }
+        LiquidPopoverItem { text: "图片属性…"; enabled: !!root.state.image; onTriggered: root.openImage(toolsMenu) }
+        LiquidPopoverItem { text: "附件管理…"; enabled: !root.controller.externalDocument; onTriggered: { root.controller.inspectAttachments(); attachmentsPanel.openFromMenu(toolsMenu) } }
+        LiquidPopoverItem { text: "数学公式…"; enabled: root.editable; onTriggered: root.openMath(toolsMenu) }
         LiquidPopoverItem { text: "插入脚注"; enabled: root.editable; onTriggered: root.post("footnote") }
-        LiquidPopoverItem { text: "代码语言与复制…"; enabled: !!root.state.code; onTriggered: root.openCode() }
+        LiquidPopoverItem { text: "代码语言与复制…"; enabled: !!root.state.code; onTriggered: root.openCode(toolsMenu) }
     }
-    LiquidContentPopover {
-        id: mathPanel; sourceItem: root.sceneItem; preferredSide: "bottom"; width: 370
+    NotesContentPopover {
+        id: mathPanel; sourceItem: root.sceneItem; preferredWidth: 370
+        onOpened: formula.forceActiveFocus()
         property int targetPos: -1
         function submit() { if (!formula.inputMethodComposing && formula.text.trim()) { root.post("setMath", {pos: targetPos, source: formula.text, display: mathMode.currentIndex === 1}); close(); source.editor.forceActiveFocus() } }
         contentItem: ColumnLayout {
@@ -196,8 +198,8 @@ Item {
             LiquidActionButton { text: "应用公式"; materialForm: true; enabled: root.editable && !!formula.text.trim() && !formula.inputMethodComposing; onClicked: mathPanel.submit() }
         }
     }
-    LiquidContentPopover {
-        id: codePanel; sourceItem: root.sceneItem; preferredSide: "bottom"; width: 300
+    NotesContentPopover {
+        id: codePanel; sourceItem: root.sceneItem; preferredWidth: 300
         property int targetPos: 0
         contentItem: ColumnLayout {
             Label { text: "代码块"; font.bold: true; color: AppTheme.text }
@@ -207,8 +209,8 @@ Item {
             Label { Layout.fillWidth: true; text: "选择 mermaid 显示图表预览；源码仍可直接编辑。"; wrapMode: Text.WordWrap; font.pixelSize: 11; color: AppTheme.mutedText }
         }
     }
-    LiquidContentPopover {
-        id: imagePanel; sourceItem: root.sceneItem; preferredSide: "bottom"; width: 340
+    NotesContentPopover {
+        id: imagePanel; sourceItem: root.sceneItem; preferredWidth: 340
         property int targetPos: 0
         property string imageSource: ""
         contentItem: ColumnLayout {
@@ -228,8 +230,8 @@ Item {
             }
         }
     }
-    LiquidContentPopover {
-        id: attachmentsPanel; sourceItem: root.sceneItem; preferredSide: "bottom"; width: 440
+    NotesContentPopover {
+        id: attachmentsPanel; sourceItem: root.sceneItem; preferredWidth: 440
         contentItem: ColumnLayout {
             Label { text: "附件管理"; font.bold: true; color: AppTheme.text }
             LiquidSelect {
@@ -253,8 +255,8 @@ Item {
             Label { Layout.fillWidth: true; text: "只回收未被笔记引用的附件，可在附件回收区恢复。"; wrapMode: Text.WordWrap; color: AppTheme.mutedText; font.pixelSize: 11 }
         }
     }
-    LiquidContentPopover {
-        id: helpPanel; sourceItem: root.sceneItem; preferredSide: "bottom"; width: 370
+    NotesContentPopover {
+        id: helpPanel; sourceItem: root.sceneItem; preferredWidth: 370
         contentItem: ColumnLayout {
             Label { text: "正文快捷键"; font.bold: true; color: AppTheme.text }
             Repeater {
