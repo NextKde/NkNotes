@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """Disposable CI VM only: exercise the installed app without personal data."""
-import os
 from pathlib import Path
 import sqlite3
 import subprocess
@@ -69,7 +68,9 @@ def launch(label, create=False):
 launch("first-offline-launch", create=True)
 count = note_count()
 bundle = next(Path("dist").glob("org.nextks.notes-*.flatpak"))
-subprocess.run(["flatpak", "install", "--user", "--noninteractive", "--assumeyes", "--reinstall", "--no-deps", str(bundle)], check=True)
+subprocess.run(["flatpak", "uninstall", "--user", "--noninteractive", "--assumeyes", app], check=True)
+assert database() and note_count() == count
+subprocess.run(["flatpak", "install", "--user", "--noninteractive", "--assumeyes", "--no-deps", str(bundle)], check=True)
 launch("reinstall-offline-launch")
 assert note_count() == count
 subprocess.run(["flatpak", "uninstall", "--user", "--noninteractive", "--assumeyes", app], check=True)

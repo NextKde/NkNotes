@@ -163,7 +163,8 @@ Item {
     }
     LiquidDialog {
         id: purgeDialog; title: "永久删除 " + root.reviewed.length + " 项？"; sourceItem: root.sceneItem
-        parent: Overlay.overlay; anchors.centerIn: parent; width: Math.min(420, parent.width - 40)
+        parent: Overlay.overlay; anchors.centerIn: parent
+        implicitWidth: 420; width: Math.min(implicitWidth, parent.width - 40)
         padding: 16; topPadding: 4; bottomPadding: 4; spacing: 0
         standardButtons: Dialog.NoButton
         onOpened: cancelPurge.forceActiveFocus()

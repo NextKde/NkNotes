@@ -34,6 +34,8 @@ jobs:
           for name, ref in (('Platform', 'org.kde.Platform/x86_64/6.11'), ('Sdk', 'org.kde.Sdk/x86_64/6.11'), ('WebEngine', 'io.qt.qtwebengine.BaseApp/x86_64/6.11')):
               environment[name] = {'ref': ref, 'commit': subprocess.check_output(['flatpak', 'info', '--user', '--show-commit', ref], text=True).strip()}
           Path('tmp/evidence/environment.json').write_text(json.dumps(environment, indent=2) + '\n')
+          base = Path(subprocess.check_output(['flatpak', 'info', '--user', '--show-location', 'io.qt.qtwebengine.BaseApp//6.11'], text=True).strip())
+          Path('tmp/evidence/webengine-base-manifest.json').write_bytes((base / 'files/manifest.json').read_bytes())
           PY
       - name: Build application and corresponding sources
         run: |
@@ -93,5 +95,7 @@ jobs:
         if: failure()
         with:
           name: nextnotes-flatpak-failure-evidence
-          path: tmp/evidence/
+          path: |
+            tmp/evidence/
+            dist/
           retention-days: 7
