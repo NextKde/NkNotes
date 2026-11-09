@@ -50,13 +50,23 @@ def launch(label, create=False):
             if create:
                 before = note_count()
                 subprocess.run(["xdotool", "windowfocus", "--sync", window_id], check=True)
-                subprocess.run(["xdotool", "key", "--clearmodifiers", "ctrl+n"], check=True)
-                wait_for(lambda: note_count() > before, "create and persist a note")
+                # A visible window is not yet ready for commands: on restart
+                # the controller restores the previous document asynchronously.
+                # Retry only while no note has been committed, with time for
+                # each command to complete before sending another one.
+                def create_note():
+                    if note_count() > before:
+                        return True
+                    subprocess.run(["xdotool", "key", "--clearmodifiers", "ctrl+n"], check=True)
+                    time.sleep(2)
+                    return note_count() > before
+                wait_for(create_note, "create and persist a note")
             time.sleep(8)
             if process.poll() is not None:
                 raise RuntimeError("Application exited during offline launch")
-            subprocess.run(["import", "-window", "root", str(evidence / f"{label}.png")], check=True)
         finally:
+            # Keep the actual failure screen as well as successful launches.
+            subprocess.run(["import", "-window", "root", str(evidence / f"{label}.png")], check=False)
             subprocess.run(["flatpak", "kill", app], check=False)
             process.wait(timeout=15)
     text = (evidence / f"{label}.log").read_text()
