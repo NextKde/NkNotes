@@ -1,0 +1,94 @@
+name: Build Flatpak
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - name: Provision isolated SDK and runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder ostree python3-gi gir1.2-flatpak-1.0 xvfb xdotool dbus-x11 imagemagick
+          flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user --noninteractive --assumeyes flathub org.kde.Sdk//6.11 org.kde.Platform//6.11
+      - name: Pin source and record environment
+        run: |
+          mkdir -p tmp/evidence dist
+          python3 - <<'PY'
+          import json, os, subprocess
+          from pathlib import Path
+          manifest = json.loads(Path('packaging/flatpak/org.nextks.notes.json').read_text())
+          manifest['modules'][-1]['sources'] = [{'type': 'git', 'url': 'https://github.com/NextKde/NkNotes.git', 'commit': os.environ['GITHUB_SHA']}]
+          Path('tmp/org.nextks.notes.json').write_text(json.dumps(manifest, indent=2) + '\n')
+          environment = {'revision': os.environ['GITHUB_SHA']}
+          for name in ('Platform', 'Sdk'):
+              ref = f'org.kde.{name}/x86_64/6.11'
+              environment[name] = {'ref': ref, 'commit': subprocess.check_output(['flatpak', 'info', '--user', '--show-commit', ref], text=True).strip()}
+          Path('tmp/evidence/environment.json').write_text(json.dumps(environment, indent=2) + '\n')
+          PY
+      - name: Build application and corresponding sources
+        run: |
+          flatpak-builder --user --arch=x86_64 --default-branch=stable --disable-rofiles-fuse \
+            --disable-tests --keep-build-dirs --bundle-sources --state-dir="$PWD/tmp/state" --repo="$PWD/tmp/repo" \
+            tmp/build tmp/org.nextks.notes.json 2>&1 | tee tmp/evidence/build.log
+      - name: Run targeted regressions inside SDK
+        run: |
+          repository_test=$(find "$PWD/tmp/state/build" -type f -name notes-repository-test -print -quit)
+          controller_test=$(find "$PWD/tmp/state/build" -type f -name notes-controller-test -print -quit)
+          test -n "$repository_test" && test -n "$controller_test"
+          flatpak-builder --user --run tmp/build tmp/org.nextks.notes.json "$repository_test" \
+            managedFolderSummariesTrackNotesAndPreserveCreation managedLegacyFoldersGainOrderWithoutLosingIcons \
+            managedFolderMoveKeepsContentsAndRejectsInvalidDrops managedFolderOrderPersistsAndReplays \
+            managedDirectNoteDeletionIsPermanentAndScoped managedDirectNoteDeletionPreservesFailedItems \
+            managedDirectFolderDeletionIsPermanentAndScoped managedDirectFolderDeletionProtectsRecoveryDrafts \
+            2>&1 | tee tmp/evidence/repository-tests.log
+          flatpak-builder --user --run tmp/build tmp/org.nextks.notes.json env QT_QPA_PLATFORM=offscreen "$controller_test" \
+            directNoteDeletionSavesBeforeRemovingCurrentDocument failedDirectNoteDeletionKeepsCurrentDocument \
+            directFolderDeletionDrainsAndClearsTheOpenDocument failedDirectFolderDeletionKeepsTheOpenDocument \
+            2>&1 | tee tmp/evidence/controller-tests.log
+      - name: Export bundle and exact release plan
+        run: |
+          /usr/bin/python3 packaging/flatpak/export-release.py --repo tmp/repo --output dist --revision "$GITHUB_SHA"
+          cp tmp/org.nextks.notes.json dist/org.nextks.notes.build-manifest.json
+          cp tmp/evidence/environment.json dist/org.nextks.notes.build-info.json
+          ostree --repo=tmp/repo ls -R app/org.nextks.notes/x86_64/stable > tmp/evidence/runtime-files.txt
+          if grep -E '/files/lib/.*libQt6' tmp/evidence/runtime-files.txt; then
+            echo 'Unexpected private Qt runtime in application bundle' >&2
+            exit 1
+          fi
+          python3 - <<'PY'
+          import json, subprocess
+          from pathlib import Path
+          environment = json.loads(Path('tmp/evidence/environment.json').read_text())
+          for name in ('Platform', 'Sdk'):
+              entry = environment[name]
+              assert subprocess.check_output(['flatpak', 'info', '--user', '--show-commit', entry['ref']], text=True).strip() == entry['commit']
+          PY
+      - name: Install and exercise offline in disposable profile
+        run: |
+          flatpak install --user --noninteractive --assumeyes --no-deps dist/org.nextks.notes-*.flatpak
+          xvfb-run -a -s '-screen 0 1360x900x24' dbus-run-session -- /usr/bin/python3 packaging/flatpak/smoke.py
+      - name: Retain evidence and checksums
+        run: |
+          tar -C tmp -czf dist/org.nextks.notes.validation.tar.gz evidence
+          cd dist
+          sha256sum * > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: nextnotes-flatpak-x86_64
+          path: dist/
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: nextnotes-flatpak-failure-evidence
+          path: tmp/evidence/
+          retention-days: 7

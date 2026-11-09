@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>org.nextks.notes</id>
+  <name>NextNotes</name>
+  <name xml:lang="zh_CN">笔记</name>
+  <name xml:lang="pt_BR">Notas</name>
+  <summary>Write and organize Markdown notes</summary>
+  <summary xml:lang="zh_CN">编写和整理 Markdown 笔记</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-only</project_license>
+  <developer id="org.nextkde"><name>NextKde Contributors</name></developer>
+  <description>
+    <p>Write Markdown with a visual editor or source view. Organize notes in folders, search your library, and recover recently deleted items.</p>
+    <p>Your notes are stored locally. Import and export files through the desktop file chooser.</p>
+  </description>
+  <launchable type="desktop-id">org.nextks.notes.desktop</launchable>
+  <provides><binary>nextnotes</binary></provides>
+  <categories><category>Office</category><category>TextEditor</category></categories>
+  <url type="homepage">https://github.com/NextKde/NkNotes</url>
+  <url type="bugtracker">https://github.com/NextKde/NkNotes/issues</url>
+  <content_rating type="oars-1.1"/>
+  <releases><release version="@PROJECT_VERSION@" date="@NEXTNOTES_RELEASE_DATE@"/></releases>
+</component>

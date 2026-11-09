@@ -1,0 +1,26 @@
+{
+  "app-id": "org.nextks.notes",
+  "runtime": "org.kde.Platform",
+  "runtime-version": "6.11",
+  "sdk": "org.kde.Sdk",
+  "command": "nextnotes",
+  "separate-locales": false,
+  "finish-args": [
+    "--share=ipc",
+    "--socket=wayland",
+    "--socket=fallback-x11",
+    "--device=dri",
+    "--env=QT_QPA_PLATFORMTHEME=xdgdesktopportal"
+  ],
+  "modules": [
+    {
+      "name": "nextnotes",
+      "buildsystem": "cmake-ninja",
+      "config-opts": [
+        "-DCMAKE_BUILD_TYPE=Release",
+        "-DNEXTNOTES_BUILD_TESTS=ON"
+      ],
+      "sources": [{"type": "dir", "path": "../..", "skip": [".git", "build", "output", "tmp", ".flatpak-builder", ".agents", ".codex", ".aws"]}]
+    }
+  ]
+}

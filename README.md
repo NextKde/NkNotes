@@ -58,7 +58,7 @@ npm run build
 
 ## 依赖
 
-Qt 6.8+（Core、Gui、Qml、Quick、QuickControls2、QuickDialogs2、Svg、WebEngineQuick、WebChannel），运行时 Qt Quick Effects、Qt5Compat.GraphicalEffects 与 SVG 图像支持。Kos.Ui 子模块固定为 `608847c9231121b888f11c4e5f84850ac95deda4`，保留上游 GPL-3.0 LICENSE 与 NOTICE.md。应用正式许可与发布身份尚待确定，不作为当前可分发版本。
+Qt 6.8+（Core、Gui、Qml、Quick、QuickControls2、QuickDialogs2、Svg、WebEngineQuick、WebChannel），运行时 Qt Quick Effects、Qt5Compat.GraphicalEffects 与 SVG 图像支持。Kos.Ui 子模块固定为 `608847c9231121b888f11c4e5f84850ac95deda4`，保留上游 GPL-3.0 LICENSE 与 NOTICE.md。应用采用 GPL-3.0-only；第三方组件保留其各自许可证。Flatpak 发布身份为 `org.nextks.notes`，复用 `org.kde.Platform//6.11`。构建及发布流程见 [Flatpak 打包说明](packaging/flatpak/README.md)。
 
 ## 仅在指定虚拟机或托管 CI 构建
 

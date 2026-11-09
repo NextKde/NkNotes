@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=NextNotes
+Name[zh_CN]=笔记
+Name[pt_BR]=Notas
+Comment=Write and organize Markdown notes
+Comment[zh_CN]=编写和整理 Markdown 笔记
+Exec=nextnotes %f
+Icon=org.nextks.notes
+Terminal=false
+Categories=Office;TextEditor;
+MimeType=text/markdown;text/x-markdown;
+StartupNotify=true

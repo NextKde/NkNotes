@@ -67,6 +67,7 @@ int main(int argc, char **argv) {
     qmlRegisterType<EditorRenderLifecycle>("NextNotes.Editor", 1, 0, "EditorRenderLifecycle");
     app.setOrganizationName("NextKde");
     app.setApplicationName("NextNotes");
+    app.setDesktopFileName("org.nextks.notes");
     if (qEnvironmentVariableIsEmpty("QTWEBENGINE_DICTIONARIES_PATH")) {
         const QString folder = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation) + "/dictionaries-v1";
         QFile dictionary(":/editor/vendor/dictionaries/en-US.bdic");
