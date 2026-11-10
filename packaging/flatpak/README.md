@@ -39,3 +39,14 @@ have actually been signed by that key.
 Runtime dependencies are resolved by the catalog client's approved Flathub
 source. The app does not configure runtime remotes or ship a private Qt runtime.
 The full source export and third-party notices accompany the binary release.
+
+## Cooperative KWin controls
+
+The bundle includes `Kos.SurfaceShape` from NextKde/NextKde commit
+`d7b34a8e8b37a9fb7605333f10d02f7b16e70743`, built against the shared
+KDE 6.11 SDK. Its license is installed under `/app/share/licenses/kos-surface-shape`.
+`QML_IMPORT_PATH` exposes the module inside the sandbox. Window control slots
+reserve actual button geometry; client controls disappear only after KWin
+acknowledges takeover. Desktops without this protocol retain working controls.
+Release acceptance must exercise the actual bundle under a cooperating Wayland
+compositor; an X11 smoke test alone does not establish decoration ownership.
