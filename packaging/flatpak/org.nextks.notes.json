@@ -11,9 +11,31 @@
     "--socket=fallback-x11",
     "--device=dri",
     "--env=QT_QPA_PLATFORMTHEME=xdgdesktopportal",
-    "--env=QTWEBENGINEPROCESS_PATH=/app/bin/QtWebEngineProcess"
+    "--env=QTWEBENGINEPROCESS_PATH=/app/bin/QtWebEngineProcess",
+    "--env=QML_IMPORT_PATH=/app/lib/qt6/qml:/app/lib/qml"
   ],
   "modules": [
+    {
+      "name": "kos-surface-shape",
+      "buildsystem": "cmake-ninja",
+      "builddir": true,
+      "subdir": "shell/native/surface-shape",
+      "config-opts": [
+        "-DCMAKE_BUILD_TYPE=Release",
+        "-DCMAKE_INSTALL_LIBDIR=lib"
+      ],
+      "post-install": [
+        "install -Dm644 /run/build/kos-surface-shape/LICENSE /app/share/licenses/kos-surface-shape/LICENSE"
+      ],
+      "sources": [
+        {
+          "type": "git",
+          "url": "https://github.com/NextKde/NextKde.git",
+          "commit": "d7b34a8e8b37a9fb7605333f10d02f7b16e70743",
+          "disable-submodules": true
+        }
+      ]
+    },
     {
       "name": "nextnotes",
       "buildsystem": "cmake-ninja",
