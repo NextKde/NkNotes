@@ -21,5 +21,6 @@ QtObject {
     readonly property int bodySize: 16
     readonly property int readingWidth: 1200
     readonly property int inset: 26
+    readonly property int editorInset: 48
     readonly property int documentTitleSize: 24
 }

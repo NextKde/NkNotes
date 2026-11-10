@@ -39,6 +39,25 @@ class NotesControllerTest : public QObject {
         int count(const QString &op) { int n = 0; for (const auto &r : requests) if (r[1] == op) ++n; return n; }
     };
 private slots:
+    void newNoteStartsWithAnIndependentNameAndEmptyBody() {
+        Fixture f;
+        f.controller.createNote();
+        const auto request = f.take("create");
+        QVERIFY(!request.isEmpty());
+        QCOMPARE(request[2].toMap().value("text").toString(), QString("---\ntitle: 未命名笔记\n---\n\n"));
+    }
+    void changingNoteNameWaitsForTheBodyToSave() {
+        Fixture f;
+        f.type("正文修改");
+        f.controller.renameNote("独立名称");
+        QCOMPARE(f.count("renameNote"), 0);
+        f.answer("save", {{"baseHash", "saved-body"}});
+        const auto request = f.take("renameNote");
+        QVERIFY(!request.isEmpty());
+        QCOMPARE(request[2].toMap().value("baseHash").toString(), QString("saved-body"));
+        QCOMPARE(request[2].toMap().value("title").toString(), QString("独立名称"));
+        QCOMPARE(f.document.toPlainText(), QString("原文正文修改"));
+    }
     void directNoteDeletionSavesBeforeRemovingCurrentDocument() {
         Fixture f;
         f.type(" changed");

@@ -36,6 +36,63 @@ class NotesRepositoryTest : public QObject {
         return {{"ok", false}, {"error", "missingRequest"}};
     }
 private slots:
+    void managedNoteNameIsIndependentOfBodyHeadings() {
+        QTemporaryDir directory;
+        const QString body = "\n# 正文章节\n\n正文内容\n\n## 子章节\n";
+        const QString source = "---\ntitle: 旧名称\ncustom: 保留\n---\n" + body;
+        QString noteId;
+        {
+            ManagedStore store(directory.path());
+            const auto created = store.dispatch("create", {{"path", "note.md"}, {"text", source}});
+            QVERIFY(created.value("ok").toBool());
+            noteId = created.value("id").toString();
+            QVERIFY(store.dispatch("create", {{"path", "link.md"}, {"text", "[[旧名称]]\n"}}).value("ok").toBool());
+            const auto renamed = store.dispatch("renameNote", {{"path", "note.md"}, {"baseHash", created.value("baseHash")}, {"title", "新名称 / #1"}});
+            QVERIFY(renamed.value("ok").toBool());
+            const auto document = store.dispatch("read", {{"path", "note.md"}});
+            const auto text = document.value("text").toString();
+            QCOMPARE(document.value("id").toString(), noteId);
+            QCOMPARE(MarkdownFile::field(text, "title"), QString("新名称 / #1"));
+            QCOMPARE(MarkdownFile::field(text, "custom"), QString("保留"));
+            QVERIFY(text.endsWith(body));
+            QVERIFY(!text.contains("# 新名称"));
+            QVERIFY(store.dispatch("read", {{"path", "link.md"}}).value("text").toString().contains("note.md"));
+            const auto stale = store.dispatch("renameNote", {{"path", "note.md"}, {"baseHash", created.value("baseHash")}, {"title", "过期修改"}});
+            QCOMPARE(stale.value("error").toString(), QString("conflict"));
+            QVERIFY(store.dispatch("undo", {}).value("ok").toBool());
+            QCOMPARE(store.dispatch("read", {{"path", "note.md"}}).value("text").toString(), source);
+            QCOMPARE(store.dispatch("read", {{"path", "link.md"}}).value("text").toString(), QString("[[旧名称]]\n"));
+            QVERIFY(store.dispatch("redo", {}).value("ok").toBool());
+        }
+        ManagedStore reopened(directory.path());
+        const auto document = reopened.dispatch("read", {{"path", "note.md"}});
+        QCOMPARE(document.value("id").toString(), noteId);
+        QCOMPARE(MarkdownFile::title(document.value("text").toString(), "fallback"), QString("新名称 / #1"));
+        QVERIFY(document.value("text").toString().endsWith(body));
+    }
+    void managedFolderCreationKeepsChosenIconAcrossUndoAndReopen() {
+        QTemporaryDir directory;
+        {
+            ManagedStore store(directory.path());
+            QVERIFY(store.dispatch("createFolder", {{"path", "Projects"}}).value("ok").toBool());
+            QCOMPARE(store.dispatch("list", {}).value("folderIcons").toMap().value("Projects").toString(), QString("folder"));
+            QVERIFY(store.dispatch("createFolder", {{"path", "Projects/Training"}, {"icon", "cycling"}}).value("ok").toBool());
+            QCOMPARE(store.dispatch("list", {}).value("folderIcons").toMap().value("Projects/Training").toString(), QString("cycling"));
+            QVERIFY(store.dispatch("undo", {}).value("ok").toBool());
+            QVERIFY(!store.dispatch("list", {}).value("folderIcons").toMap().contains("Projects/Training"));
+            QVERIFY(store.dispatch("redo", {}).value("ok").toBool());
+            QCOMPARE(store.dispatch("list", {}).value("folderIcons").toMap().value("Projects/Training").toString(), QString("cycling"));
+            const auto invalid = store.dispatch("createFolder", {{"path", "Rejected/Child"}, {"icon", "unknown-icon"}});
+            QVERIFY(!invalid.value("ok").toBool());
+            QCOMPARE(invalid.value("error").toString(), QString("invalidIcon"));
+            QVERIFY(!store.dispatch("list", {}).value("folderIcons").toMap().contains("Rejected"));
+            const auto duplicate = store.dispatch("createFolder", {{"path", "Projects/Training"}, {"icon", "home"}});
+            QVERIFY(!duplicate.value("ok").toBool());
+            QCOMPARE(store.dispatch("list", {}).value("folderIcons").toMap().value("Projects/Training").toString(), QString("cycling"));
+        }
+        ManagedStore reopened(directory.path());
+        QCOMPARE(reopened.dispatch("list", {}).value("folderIcons").toMap().value("Projects/Training").toString(), QString("cycling"));
+    }
     void managedSandboxLockCrashHelper() {
 #ifdef Q_OS_LINUX
         const auto path = qEnvironmentVariable("NKNOTES_LOCK_TEST_DIR");
