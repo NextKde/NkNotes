@@ -1,7 +1,23 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
-  <rect x="12" y="8" width="104" height="112" rx="24" fill="#ffb921"/>
-  <path d="M12 38V32A24 24 0 0 1 36 8H92A24 24 0 0 1 116 32V38Z" fill="#ffd76c"/>
-  <g fill="none" stroke="#493713" stroke-width="7" stroke-linecap="round">
-    <path d="M37 57H91M37 77H91M37 97H72"/>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="paper" x1="0" y1="10" x2="0" y2="114" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#f4f3ee"/>
+    </linearGradient>
+    <linearGradient id="cover" x1="0" y1="10" x2="0" y2="45" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffe477"/>
+      <stop offset="1" stop-color="#f8c638"/>
+    </linearGradient>
+    <path id="tile" d="M42 10H86C107 10 116 19 116 40V84C116 105 107 114 86 114H42C21 114 12 105 12 84V40C12 19 21 10 42 10Z"/>
+  </defs>
+  <use xlink:href="#tile" transform="translate(0 4)" fill="#30280d" opacity=".06"/>
+  <use xlink:href="#tile" transform="translate(0 2)" fill="#30280d" opacity=".07"/>
+  <use xlink:href="#tile" fill="url(#paper)"/>
+  <g>
+    <path d="M42 10H86C107 10 116 19 116 40V45H12V40C12 19 21 10 42 10Z" fill="url(#cover)"/>
+    <path d="M12 45H116" stroke="#bc9227" stroke-opacity=".22"/>
+    <path d="M28 16C34 13 39 12 46 12H84C92 12 98 14 103 17" fill="none" stroke="#ffffff" stroke-opacity=".45"/>
   </g>
+  <path d="M30 63H98M30 80H98M30 97H77" fill="none" stroke="#d4d2c9" stroke-width="1.5" stroke-linecap="round"/>
+  <use xlink:href="#tile" fill="none" stroke="#8d7b4e" stroke-opacity=".14" stroke-width=".75"/>
 </svg>
