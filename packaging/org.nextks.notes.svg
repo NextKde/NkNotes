@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="128" height="128" viewBox="0 0 128 128">
   <defs>
     <linearGradient id="paper" x1="0" y1="10" x2="0" y2="114" gradientUnits="userSpaceOnUse">
       <stop stop-color="#ffffff"/>
@@ -9,16 +9,15 @@
       <stop offset="1" stop-color="#f8c638"/>
     </linearGradient>
     <path id="tile" d="M42 10H86C107 10 116 19 116 40V84C116 105 107 114 86 114H42C21 114 12 105 12 84V40C12 19 21 10 42 10Z"/>
-    <clipPath id="edge"><use href="#tile"/></clipPath>
   </defs>
-  <use href="#tile" transform="translate(0 4)" fill="#30280d" opacity=".06"/>
-  <use href="#tile" transform="translate(0 2)" fill="#30280d" opacity=".07"/>
-  <use href="#tile" fill="url(#paper)"/>
-  <g clip-path="url(#edge)">
-    <path d="M12 10H116V45H12Z" fill="url(#cover)"/>
+  <use xlink:href="#tile" transform="translate(0 4)" fill="#30280d" opacity=".06"/>
+  <use xlink:href="#tile" transform="translate(0 2)" fill="#30280d" opacity=".07"/>
+  <use xlink:href="#tile" fill="url(#paper)"/>
+  <g>
+    <path d="M42 10H86C107 10 116 19 116 40V45H12V40C12 19 21 10 42 10Z" fill="url(#cover)"/>
     <path d="M12 45H116" stroke="#bc9227" stroke-opacity=".22"/>
-    <path d="M20 12H108" stroke="#ffffff" stroke-opacity=".45"/>
+    <path d="M28 16C34 13 39 12 46 12H84C92 12 98 14 103 17" fill="none" stroke="#ffffff" stroke-opacity=".45"/>
   </g>
   <path d="M30 63H98M30 80H98M30 97H77" fill="none" stroke="#d4d2c9" stroke-width="1.5" stroke-linecap="round"/>
-  <use href="#tile" fill="none" stroke="#8d7b4e" stroke-opacity=".14" stroke-width=".75"/>
+  <use xlink:href="#tile" fill="none" stroke="#8d7b4e" stroke-opacity=".14" stroke-width=".75"/>
 </svg>

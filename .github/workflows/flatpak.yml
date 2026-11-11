@@ -1,6 +1,8 @@
 name: Build Flatpak
 on:
   workflow_dispatch:
+  pull_request:
+    branches: [main]
 defaults:
   run:
     shell: bash
@@ -13,6 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           persist-credentials: false
       - name: Provision isolated SDK and runtime
@@ -28,9 +31,9 @@ jobs:
           import json, os, subprocess
           from pathlib import Path
           manifest = json.loads(Path('packaging/flatpak/org.nextks.notes.json').read_text())
-          manifest['modules'][-1]['sources'] = [{'type': 'git', 'url': 'https://github.com/NextKde/NkNotes.git', 'commit': os.environ['GITHUB_SHA']}]
+          manifest['modules'][-1]['sources'] = [{'type': 'git', 'url': 'https://github.com/NextKde/NkNotes.git', 'commit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()}]
           Path('tmp/org.nextks.notes.json').write_text(json.dumps(manifest, indent=2) + '\n')
-          environment = {'revision': os.environ['GITHUB_SHA']}
+          environment = {'revision': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()}
           for name, ref in (('Platform', 'org.kde.Platform/x86_64/6.11'), ('Sdk', 'org.kde.Sdk/x86_64/6.11'), ('WebEngine', 'io.qt.qtwebengine.BaseApp/x86_64/6.11')):
               environment[name] = {'ref': ref, 'commit': subprocess.check_output(['flatpak', 'info', '--user', '--show-commit', ref], text=True).strip()}
           Path('tmp/evidence/environment.json').write_text(json.dumps(environment, indent=2) + '\n')
@@ -61,10 +64,12 @@ jobs:
             2>&1 | tee tmp/evidence/controller-tests.log
       - name: Export bundle and exact release plan
         run: |
-          /usr/bin/python3 packaging/flatpak/export-release.py --repo tmp/repo --output dist --revision "$GITHUB_SHA"
+          /usr/bin/python3 packaging/flatpak/export-release.py --repo tmp/repo --output dist --revision "$(git rev-parse HEAD)"
           cp tmp/org.nextks.notes.json dist/org.nextks.notes.build-manifest.json
           cp tmp/evidence/environment.json dist/org.nextks.notes.build-info.json
           ostree --repo=tmp/repo ls -R app/org.nextks.notes/x86_64/stable > tmp/evidence/runtime-files.txt
+          grep -Fq '/files/lib/qt6/qml/Kos/SurfaceShape/qmldir' tmp/evidence/runtime-files.txt
+          grep -Fq '/files/lib/qt6/qml/Kos/SurfaceShape/libkos_surface_shape.so' tmp/evidence/runtime-files.txt
           if grep -E '/files/lib/.*libQt6(Core|Gui|Qml|Quick|Network|Widgets|DBus)\.so' tmp/evidence/runtime-files.txt; then
             echo 'Unexpected private Qt runtime in application bundle' >&2
             exit 1
