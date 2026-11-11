@@ -1,0 +1,28 @@
+DOWN 0 0
+DOWN 1 0
+DOWN 2 0
+DOWN 3 0
+DOWN 4 0
+DOWN 5 0
+DOWN 6 0
+DOWN 7 0
+DOWN 8 0
+DOWN 9 0
+DOWN 10 0
+DOWN 11 0
+DOWN 12 0
+DOWN 13 0
+DOWN 14 0
+SLASH {"epoch":2,"outline":[],"stats":{"characters":1,"words":0,"approximate":false,"minutes":1,"selected":0},"block":{"x":48,"pos":0,"end":3,"type":"paragraph","title":"/","y":18,"height":26.390625,"canMoveUp":false,"canMoveDown":false,"canConvert":true},"blockHandleVisible":true,"slash":{"query":"","items":[{"command":"paragraph","label":"正文"},{"command":"heading1","label":"标题 1"},{"command":"heading2","label":"标题 2"},{"command":"heading3","label":"标题 3"},{"command":"bullet","label":"项目列表"},{"command":"ordered","label":"编号列表"},{"command":"task","label":"任务清单"},{"command":"quote","label":"引用"},{"command":"codeblock","label":"代码块"},{"command":"mermaid","label":"Mermaid 图表"},{"command":"table","label":"表格"},{"command":"rule","label":"分隔线"},{"command":"math","label":"数学公式"},{"command":"footnote","label":"脚注"},{"command":"attachment","label":"图片或附件"},{"command":"toc","label":"插入目录"}],"index":0,"from":1,"to":2,"x":54.28125,"y":43},"search":{"total":0,"current":0},"pending":0,"canPasteBlock":false,"dropTarget":null,"context":null,"tableWidths":[]}
+AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+0 !== 15
+
+    at file:///home/amao/nknotes-review-agent-20261111/native-slash.mjs:34:59 {
+  generatedMessage: true,
+  code: 'ERR_ASSERTION',
+  actual: 0,
+  expected: 15,
+  operator: 'strictEqual',
+  diff: 'simple'
+}

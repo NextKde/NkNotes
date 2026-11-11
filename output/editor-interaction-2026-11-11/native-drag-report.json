@@ -1,0 +1,30 @@
+{
+  "results": [
+    {
+      "name": "native drag and repeated drag retain moved block handle",
+      "passed": true
+    },
+    {
+      "name": "Escape and release outside editor cancel native drag",
+      "passed": false,
+      "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n+ actual - expected\n\n+ '第一段\\n\\n第四段\\n\\n第二段\\n\\n第三段\\n'\n- '第一段\\n\\n第二段\\n\\n第三段\\n\\n第四段\\n'\n           ^\n\n    at file:///home/amao/nknotes-review-agent-20261111/NativeEditorInteractionRegression.mjs:38:207\n    at async test (file:///home/amao/nknotes-review-agent-20261111/NativeEditorInteractionRegression.mjs:28:34)\n    at async file:///home/amao/nknotes-review-agent-20261111/NativeEditorInteractionRegression.mjs:37:1"
+    },
+    {
+      "name": "first-block menu disables move-up and empty clipboard paste",
+      "passed": false,
+      "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\ntrue !== false\n\n    at file:///home/amao/nknotes-review-agent-20261111/NativeEditorInteractionRegression.mjs:42:134\n    at async test (file:///home/amao/nknotes-review-agent-20261111/NativeEditorInteractionRegression.mjs:28:34)\n    at async file:///home/amao/nknotes-review-agent-20261111/NativeEditorInteractionRegression.mjs:41:1"
+    },
+    {
+      "name": "edge scroll samples",
+      "passed": true,
+      "s0": 32,
+      "s1": 304,
+      "s2": 512,
+      "stop": 1168
+    },
+    {
+      "name": "stationary pointer at edge keeps scrolling and Escape stops it",
+      "passed": true
+    }
+  ]
+}

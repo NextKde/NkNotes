@@ -1,0 +1,10 @@
+{
+  "results": [
+    {
+      "name": "copy and reopen paste availability",
+      "passed": true,
+      "afterCopy": false,
+      "afterReopen": true
+    }
+  ]
+}

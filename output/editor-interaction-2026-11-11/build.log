@@ -1,0 +1,293 @@
+[0/2] Re-checking globbed directories...
+[1/293] Copying kos_icons qml resources into build dir
+[2/293] Copying kos_icons qml sources into build dir
+[3/293] Automatic MOC and UIC for target kos_icons_plugin_init
+[4/293] Building CXX object kos-ui/kos-icons/CMakeFiles/kos_icons_resources_2.dir/.qt/rcc/qrc_kos_icons_raw_qml_0_init.cpp.o
+[5/293] Building CXX object kos-ui/kos-icons/CMakeFiles/kos_icons_resources_1.dir/.qt/rcc/qrc_qmake_Kos_Icons_init.cpp.o
+[6/293] Running AUTOMOC file extraction for target kos_icons_plugin_init
+[7/293] Populating .qmlls.ini file at /home/amao/nknotes-review-agent-20261111/build/.qt/.qmlls.build.ini
+[8/293] Copying kos_ui qml resources into build dir
+[9/293] Copying kos_ui qml sources into build dir
+[10/293] Building CXX object kos-ui/kos-icons/CMakeFiles/kos_icons_resources_3.dir/.qt/rcc/qrc_kos_icons_raw_res_0_init.cpp.o
+[11/293] Running moc --collect-json for target kos_icons_plugin_init
+[12/293] Building CXX object kos-ui/kos-icons/CMakeFiles/kos_icons_plugin_init.dir/kos_icons_plugin_init_autogen/mocs_compilation.cpp.o
+[13/293] Automatic MOC and UIC for target kos_icons
+[14/293] Running AUTOMOC file extraction for target kos_icons
+[15/293] Automatic MOC and UIC for target kos_ui_plugin_init
+[16/293] Running moc --collect-json for target kos_icons
+[17/293] Running rcc for resource qmake_Kos_Icons
+[18/293] Generating .rcc/qmlcache/kos_icons_qmlcache_loader.cpp
+[19/293] Running rcc for resource kos_icons_raw_qml_0
+[20/293] Automatic QML type registration for target kos_icons
+[21/293] Generating .rcc/qmlcache/kos_icons_BatteryIcon_qml.cpp, .rcc/qmlcache/kos_icons_BatteryIcon_qml.cpp.aotstats
+[22/293] Running rcc for resource kos_icons_raw_res_0
+[23/293] Generating .rcc/qmlcache/kos_icons_SignalIcon_qml.cpp, .rcc/qmlcache/kos_icons_SignalIcon_qml.cpp.aotstats
+[24/293] Generating .rcc/qmlcache/kos_icons_VolumeIcon_qml.cpp, .rcc/qmlcache/kos_icons_VolumeIcon_qml.cpp.aotstats
+[25/293] Generating .rcc/qmlcache/kos_icons_Icon_qml.cpp, .rcc/qmlcache/kos_icons_Icon_qml.cpp.aotstats
+[26/293] Generating .rcc/qmlcache/kos_icons_IconRegistry_qml.cpp, .rcc/qmlcache/kos_icons_IconRegistry_qml.cpp.aotstats
+[27/293] Generating .rcc/qmlcache/kos_icons_IconMap_js.cpp
+[28/293] Building CXX object kos-ui/kos-icons/CMakeFiles/kos_icons.dir/kos_icons_autogen/mocs_compilation.cpp.o
+[29/293] Building CXX object kos-ui/CMakeFiles/kos_ui_resources_1.dir/.qt/rcc/qrc_qmake_Kos_Ui_init.cpp.o
+[30/293] Building CXX object kos-ui/kos-icons/CMakeFiles/kos_icons.dir/.qt/rcc/qrc_qmake_Kos_Icons.cpp.o
+[31/293] Automatic MOC and UIC for target nextnotes-storage
+[32/293] Building CXX object kos-ui/kos-icons/CMakeFiles/kos_icons_plugin_init.dir/kos_icons_plugin_init.cpp.o
+[33/293] Building CXX object kos-ui/kos-icons/CMakeFiles/kos_icons.dir/kos_icons_qmltyperegistrations.cpp.o
+[34/293] Building CXX object kos-ui/kos-icons/CMakeFiles/kos_icons.dir/.rcc/qmlcache/kos_icons_qmlcache_loader.cpp.o
+[35/293] Building CXX object kos-ui/kos-icons/CMakeFiles/kos_icons.dir/.rcc/qmlcache/kos_icons_BatteryIcon_qml.cpp.o
+[36/293] Building CXX object kos-ui/kos-icons/CMakeFiles/kos_icons.dir/.rcc/qmlcache/kos_icons_VolumeIcon_qml.cpp.o
+[37/293] Building CXX object kos-ui/kos-icons/CMakeFiles/kos_icons.dir/.rcc/qmlcache/kos_icons_SignalIcon_qml.cpp.o
+[38/293] Building CXX object kos-ui/kos-icons/CMakeFiles/kos_icons.dir/.qt/rcc/qrc_kos_icons_raw_qml_0.cpp.o
+[39/293] Building CXX object kos-ui/kos-icons/CMakeFiles/kos_icons.dir/.qt/rcc/qrc_kos_icons_raw_res_0.cpp.o
+[40/293] Running AUTOMOC file extraction for target nextnotes-storage
+[41/293] Running moc --collect-json for target nextnotes-storage
+[42/293] Building CXX object kos-ui/kos-icons/CMakeFiles/kos_icons.dir/.rcc/qmlcache/kos_icons_Icon_qml.cpp.o
+[43/293] Building CXX object kos-ui/kos-icons/CMakeFiles/kos_icons.dir/.rcc/qmlcache/kos_icons_IconRegistry_qml.cpp.o
+[44/293] Building CXX object kos-ui/kos-icons/CMakeFiles/kos_icons.dir/.rcc/qmlcache/kos_icons_IconMap_js.cpp.o
+[45/293] Linking CXX static library kos-ui/kos-icons/libkos_icons.a
+[46/293] Automatic MOC and UIC for target kos_icons_plugin
+[47/293] Building CXX object kos-ui/kos-icons/CMakeFiles/kos_icons_plugin.dir/kos_icons_plugin_autogen/mocs_compilation.cpp.o
+[48/293] Building CXX object CMakeFiles/nextnotes-storage.dir/nextnotes-storage_autogen/mocs_compilation.cpp.o
+[49/293] Building CXX object CMakeFiles/nextnotes-storage.dir/src/storage/MarkdownFile.cpp.o
+[50/293] Building CXX object kos-ui/CMakeFiles/kos_ui_resources_2.dir/.qt/rcc/qrc_kos_ui_raw_qml_0_init.cpp.o
+[51/293] Building CXX object kos-ui/CMakeFiles/kos_ui_resources_3.dir/.qt/rcc/qrc_kos_ui_raw_res_0_init.cpp.o
+[52/293] Building CXX object kos-ui/CMakeFiles/kos_ui_resources_4.dir/.qt/rcc/qrc_kos_ui_raw_qml_0_extra_qmldirs_init.cpp.o
+[53/293] Running AUTOMOC file extraction for target kos_ui_plugin_init
+[54/293] Copying nextnotes qml sources into build dir
+[55/293] Copying nextnotes qml resources into build dir
+[56/293] Building CXX object kos-ui/kos-icons/CMakeFiles/kos_icons_plugin.dir/kos_icons_plugin_Kos_IconsPlugin.cpp.o
+[57/293] Linking CXX static library kos-ui/kos-icons/Kos/Icons/libkos_icons_plugin.a
+[58/293] Automatic MOC and UIC for target kos_ui
+[59/293] Running AUTOMOC file extraction for target kos_ui
+[60/293] Running moc --collect-json for target kos_ui
+[61/293] Automatic QML type registration for target kos_ui
+[62/293] Running rcc for resource qmake_Kos_Ui
+[63/293] Generating .rcc/qmlcache/kos_ui_qmlcache_loader.cpp
+[64/293] Generating .rcc/qmlcache/kos_ui_i18n/I18n_qml.cpp, .rcc/qmlcache/kos_ui_i18n/I18n_qml.cpp.aotstats
+[65/293] Generating .rcc/qmlcache/kos_ui_foundation/AppTheme_qml.cpp, .rcc/qmlcache/kos_ui_foundation/AppTheme_qml.cpp.aotstats
+[66/293] Generating .rcc/qmlcache/kos_ui_foundation/KosSidebar_qml.cpp, .rcc/qmlcache/kos_ui_foundation/KosSidebar_qml.cpp.aotstats
+[67/293] Generating .rcc/qmlcache/kos_ui_foundation/KosSidebarToggle_qml.cpp, .rcc/qmlcache/kos_ui_foundation/KosSidebarToggle_qml.cpp.aotstats
+[68/293] Generating .rcc/qmlcache/kos_ui_foundation/KosCheckBox_qml.cpp, .rcc/qmlcache/kos_ui_foundation/KosCheckBox_qml.cpp.aotstats
+[69/293] Generating .rcc/qmlcache/kos_ui_foundation/KosComboBox_qml.cpp, .rcc/qmlcache/kos_ui_foundation/KosComboBox_qml.cpp.aotstats
+[70/293] Generating .rcc/qmlcache/kos_ui_foundation/KosTextArea_qml.cpp, .rcc/qmlcache/kos_ui_foundation/KosTextArea_qml.cpp.aotstats
+[71/293] Generating .rcc/qmlcache/kos_ui_foundation/KosAppWindow_qml.cpp, .rcc/qmlcache/kos_ui_foundation/KosAppWindow_qml.cpp.aotstats
+[72/293] Running qmlimportscanner for nextnotes
+[73/293] Generating .rcc/qmlcache/kos_ui_foundation/KosApplicationWindow_qml.cpp, .rcc/qmlcache/kos_ui_foundation/KosApplicationWindow_qml.cpp.aotstats
+[74/293] Generating .rcc/qmlcache/kos_ui_foundation/KosWindowResizeHandles_qml.cpp, .rcc/qmlcache/kos_ui_foundation/KosWindowResizeHandles_qml.cpp.aotstats
+[75/293] Generating .rcc/qmlcache/kos_ui_foundation/KosWindowControls_qml.cpp, .rcc/qmlcache/kos_ui_foundation/KosWindowControls_qml.cpp.aotstats
+[76/293] Generating .rcc/qmlcache/kos_ui_foundation/KosCard_qml.cpp, .rcc/qmlcache/kos_ui_foundation/KosCard_qml.cpp.aotstats
+[77/293] Generating .rcc/qmlcache/kos_ui_foundation/KosButton_qml.cpp, .rcc/qmlcache/kos_ui_foundation/KosButton_qml.cpp.aotstats
+[78/293] Generating .rcc/qmlcache/kos_ui_foundation/SettingsGroup_qml.cpp, .rcc/qmlcache/kos_ui_foundation/SettingsGroup_qml.cpp.aotstats
+[79/293] Generating .rcc/qmlcache/kos_ui_foundation/SettingsItem_qml.cpp, .rcc/qmlcache/kos_ui_foundation/SettingsItem_qml.cpp.aotstats
+[80/293] Generating .rcc/qmlcache/kos_ui_foundation/SettingsTextField_qml.cpp, .rcc/qmlcache/kos_ui_foundation/SettingsTextField_qml.cpp.aotstats
+[81/293] Generating .rcc/qmlcache/kos_ui_foundation/SettingsTextArea_qml.cpp, .rcc/qmlcache/kos_ui_foundation/SettingsTextArea_qml.cpp.aotstats
+[82/293] Generating .rcc/qmlcache/kos_ui_foundation/SettingsSwitch_qml.cpp, .rcc/qmlcache/kos_ui_foundation/SettingsSwitch_qml.cpp.aotstats
+[83/293] Generating .rcc/qmlcache/kos_ui_foundation/SettingsDateField_qml.cpp, .rcc/qmlcache/kos_ui_foundation/SettingsDateField_qml.cpp.aotstats
+[84/293] Generating .rcc/qmlcache/kos_ui_foundation/SettingsTimeField_qml.cpp, .rcc/qmlcache/kos_ui_foundation/SettingsTimeField_qml.cpp.aotstats
+[85/293] Generating .rcc/qmlcache/kos_ui_foundation/SettingsAppearancePreview_qml.cpp, .rcc/qmlcache/kos_ui_foundation/SettingsAppearancePreview_qml.cpp.aotstats
+[86/293] Generating .rcc/qmlcache/kos_ui_foundation/KosWorkspaceDialog_qml.cpp, .rcc/qmlcache/kos_ui_foundation/KosWorkspaceDialog_qml.cpp.aotstats
+[87/293] Generating .rcc/qmlcache/kos_ui_foundation/KosItemDelegate_qml.cpp, .rcc/qmlcache/kos_ui_foundation/KosItemDelegate_qml.cpp.aotstats
+[88/293] Generating .rcc/qmlcache/kos_ui_foundation/KosDialog_qml.cpp, .rcc/qmlcache/kos_ui_foundation/KosDialog_qml.cpp.aotstats
+[89/293] Generating .rcc/qmlcache/kos_ui_foundation/KosEmptyState_qml.cpp, .rcc/qmlcache/kos_ui_foundation/KosEmptyState_qml.cpp.aotstats
+[90/293] Generating .rcc/qmlcache/kos_ui_foundation/KosNavigationButton_qml.cpp, .rcc/qmlcache/kos_ui_foundation/KosNavigationButton_qml.cpp.aotstats
+[91/293] Generating .rcc/qmlcache/kos_ui_foundation/KosPageMotion_qml.cpp, .rcc/qmlcache/kos_ui_foundation/KosPageMotion_qml.cpp.aotstats
+[92/293] Generating .rcc/qmlcache/kos_ui_foundation/KosPageCache_qml.cpp, .rcc/qmlcache/kos_ui_foundation/KosPageCache_qml.cpp.aotstats
+[93/293] Generating .rcc/qmlcache/kos_ui_foundation/KosRoundButton_qml.cpp, .rcc/qmlcache/kos_ui_foundation/KosRoundButton_qml.cpp.aotstats
+[94/293] Generating .rcc/qmlcache/kos_ui_foundation/KosSlider_qml.cpp, .rcc/qmlcache/kos_ui_foundation/KosSlider_qml.cpp.aotstats
+[95/293] Generating .rcc/qmlcache/kos_ui_foundation/KosSettingsDialog_qml.cpp, .rcc/qmlcache/kos_ui_foundation/KosSettingsDialog_qml.cpp.aotstats
+[96/293] Generating .rcc/qmlcache/kos_ui_foundation/KosSurface_qml.cpp, .rcc/qmlcache/kos_ui_foundation/KosSurface_qml.cpp.aotstats
+[97/293] Generating .rcc/qmlcache/kos_ui_foundation/KosSwitch_qml.cpp, .rcc/qmlcache/kos_ui_foundation/KosSwitch_qml.cpp.aotstats
+[98/293] Generating .rcc/qmlcache/kos_ui_foundation/KosTextField_qml.cpp, .rcc/qmlcache/kos_ui_foundation/KosTextField_qml.cpp.aotstats
+[99/293] Generating .rcc/qmlcache/kos_ui_foundation/KosToolButton_qml.cpp, .rcc/qmlcache/kos_ui_foundation/KosToolButton_qml.cpp.aotstats
+[100/293] Generating .rcc/qmlcache/kos_ui_foundation/KosLyricLine_qml.cpp, .rcc/qmlcache/kos_ui_foundation/KosLyricLine_qml.cpp.aotstats
+[101/293] Generating .rcc/qmlcache/kos_ui_foundation/KosToolTip_qml.cpp, .rcc/qmlcache/kos_ui_foundation/KosToolTip_qml.cpp.aotstats
+[102/293] Generating .rcc/qmlcache/kos_ui_foundation/KosKineticScrollPhysics_mjs.cpp
+[103/293] Generating .rcc/qmlcache/kos_ui_foundation/PageCachePolicy_js.cpp
+[104/293] Generating .rcc/qmlcache/kos_ui_foundation/KosKineticScroll_qml.cpp, .rcc/qmlcache/kos_ui_foundation/KosKineticScroll_qml.cpp.aotstats
+[105/293] Generating .rcc/qmlcache/kos_ui_controls/ControlForm_qml.cpp, .rcc/qmlcache/kos_ui_controls/ControlForm_qml.cpp.aotstats
+[106/293] Generating .rcc/qmlcache/kos_ui_controls/ColorRampSlider_qml.cpp, .rcc/qmlcache/kos_ui_controls/ColorRampSlider_qml.cpp.aotstats
+[107/293] Generating .rcc/qmlcache/kos_ui_controls/VectorIcon_qml.cpp, .rcc/qmlcache/kos_ui_controls/VectorIcon_qml.cpp.aotstats
+[108/293] Generating .rcc/qmlcache/kos_ui_controls/LiquidGlassButton_qml.cpp, .rcc/qmlcache/kos_ui_controls/LiquidGlassButton_qml.cpp.aotstats
+[109/293] Generating .rcc/qmlcache/kos_ui_controls/LiquidStyle_qml.cpp, .rcc/qmlcache/kos_ui_controls/LiquidStyle_qml.cpp.aotstats
+[110/293] Generating .rcc/qmlcache/kos_ui_controls/LiquidBackdrop_qml.cpp, .rcc/qmlcache/kos_ui_controls/LiquidBackdrop_qml.cpp.aotstats
+[111/293] Generating .rcc/qmlcache/kos_ui_controls/LiquidSurface_qml.cpp, .rcc/qmlcache/kos_ui_controls/LiquidSurface_qml.cpp.aotstats
+[112/293] Generating .rcc/qmlcache/kos_ui_controls/LiquidGlassNumber_qml.cpp, .rcc/qmlcache/kos_ui_controls/LiquidGlassNumber_qml.cpp.aotstats
+[113/293] Generating .rcc/qmlcache/kos_ui_controls/LiquidOuterShadow_qml.cpp, .rcc/qmlcache/kos_ui_controls/LiquidOuterShadow_qml.cpp.aotstats
+[114/293] Generating .rcc/qmlcache/kos_ui_controls/LiquidCard_qml.cpp, .rcc/qmlcache/kos_ui_controls/LiquidCard_qml.cpp.aotstats
+[115/293] Generating .rcc/qmlcache/kos_ui_controls/LiquidActionButton_qml.cpp, .rcc/qmlcache/kos_ui_controls/LiquidActionButton_qml.cpp.aotstats
+[116/293] Generating .rcc/qmlcache/kos_ui_controls/LiquidActionButtonGroup_qml.cpp, .rcc/qmlcache/kos_ui_controls/LiquidActionButtonGroup_qml.cpp.aotstats
+[117/293] Generating .rcc/qmlcache/kos_ui_controls/LiquidNavigationButton_qml.cpp, .rcc/qmlcache/kos_ui_controls/LiquidNavigationButton_qml.cpp.aotstats
+[118/293] Generating .rcc/qmlcache/kos_ui_controls/LiquidCheckBox_qml.cpp, .rcc/qmlcache/kos_ui_controls/LiquidCheckBox_qml.cpp.aotstats
+[119/293] Generating .rcc/qmlcache/kos_ui_controls/LiquidContentPopover_qml.cpp, .rcc/qmlcache/kos_ui_controls/LiquidContentPopover_qml.cpp.aotstats
+[120/293] Generating .rcc/qmlcache/kos_ui_controls/LiquidPopover_qml.cpp, .rcc/qmlcache/kos_ui_controls/LiquidPopover_qml.cpp.aotstats
+[121/293] Generating .rcc/qmlcache/kos_ui_controls/LiquidPopoverItem_qml.cpp, .rcc/qmlcache/kos_ui_controls/LiquidPopoverItem_qml.cpp.aotstats
+[122/293] Generating .rcc/qmlcache/kos_ui_controls/LiquidPopoverSurface_qml.cpp, .rcc/qmlcache/kos_ui_controls/LiquidPopoverSurface_qml.cpp.aotstats
+[123/293] Generating .rcc/qmlcache/kos_ui_controls/LiquidFilePicker_qml.cpp, .rcc/qmlcache/kos_ui_controls/LiquidFilePicker_qml.cpp.aotstats
+[124/293] Generating .rcc/qmlcache/kos_ui_controls/LiquidDialog_qml.cpp, .rcc/qmlcache/kos_ui_controls/LiquidDialog_qml.cpp.aotstats
+[125/293] Generating .rcc/qmlcache/kos_ui_controls/LiquidDialogButton_qml.cpp, .rcc/qmlcache/kos_ui_controls/LiquidDialogButton_qml.cpp.aotstats
+[126/293] Generating .rcc/qmlcache/kos_ui_controls/LiquidDialogSurface_qml.cpp, .rcc/qmlcache/kos_ui_controls/LiquidDialogSurface_qml.cpp.aotstats
+[127/293] Generating .rcc/qmlcache/kos_ui_controls/LiquidPanelSurface_qml.cpp, .rcc/qmlcache/kos_ui_controls/LiquidPanelSurface_qml.cpp.aotstats
+[128/293] Generating .rcc/qmlcache/kos_ui_controls/LiquidGlassSwitch_qml.cpp, .rcc/qmlcache/kos_ui_controls/LiquidGlassSwitch_qml.cpp.aotstats
+[129/293] Generating .rcc/qmlcache/kos_ui_controls/LiquidSlider_qml.cpp, .rcc/qmlcache/kos_ui_controls/LiquidSlider_qml.cpp.aotstats
+[130/293] Generating .rcc/qmlcache/kos_ui_controls/LiquidSelect_qml.cpp, .rcc/qmlcache/kos_ui_controls/LiquidSelect_qml.cpp.aotstats
+[131/293] Generating .rcc/qmlcache/kos_ui_controls/LiquidNavBar_qml.cpp, .rcc/qmlcache/kos_ui_controls/LiquidNavBar_qml.cpp.aotstats
+[132/293] Generating .rcc/qmlcache/kos_ui_controls/LiquidTextField_qml.cpp, .rcc/qmlcache/kos_ui_controls/LiquidTextField_qml.cpp.aotstats
+[133/293] Generating .rcc/qmlcache/kos_ui_controls/LiquidSegmentedControl_qml.cpp, .rcc/qmlcache/kos_ui_controls/LiquidSegmentedControl_qml.cpp.aotstats
+[134/293] Generating .rcc/qmlcache/kos_ui_controls/SelectionHighlight_qml.cpp, .rcc/qmlcache/kos_ui_controls/SelectionHighlight_qml.cpp.aotstats
+[135/293] Running rcc for resource kos_ui_raw_res_0
+[136/293] Running rcc for resource kos_ui_raw_qml_0_extra_qmldirs
+[137/293] Running moc --collect-json for target kos_ui_plugin_init
+[138/293] Building CXX object kos-ui/CMakeFiles/kos_ui_plugin_init.dir/kos_ui_plugin_init_autogen/mocs_compilation.cpp.o
+[139/293] Running rcc for resource kos_ui_raw_qml_0
+[140/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/kos_ui_autogen/mocs_compilation.cpp.o
+[141/293] Building CXX object kos-ui/CMakeFiles/kos_ui_plugin_init.dir/kos_ui_plugin_init.cpp.o
+[142/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.qt/rcc/qrc_qmake_Kos_Ui.cpp.o
+[143/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/kos_ui_qmltyperegistrations.cpp.o
+[144/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_i18n/I18n_qml.cpp.o
+[145/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_qmlcache_loader.cpp.o
+[146/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_foundation/KosSidebar_qml.cpp.o
+[147/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_foundation/AppTheme_qml.cpp.o
+[148/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_foundation/KosSidebarToggle_qml.cpp.o
+[149/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_foundation/KosCheckBox_qml.cpp.o
+[150/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_foundation/KosComboBox_qml.cpp.o
+[151/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_foundation/KosTextArea_qml.cpp.o
+[152/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_foundation/KosAppWindow_qml.cpp.o
+[153/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_foundation/KosApplicationWindow_qml.cpp.o
+[154/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_foundation/KosWindowControls_qml.cpp.o
+[155/293] Building CXX object CMakeFiles/nextnotes-storage.dir/src/storage/ManagedStore.cpp.o
+[156/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_foundation/KosWindowResizeHandles_qml.cpp.o
+[157/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_foundation/KosButton_qml.cpp.o
+[158/293] Building CXX object CMakeFiles/nextnotes-storage.dir/src/storage/NotesRepository.cpp.o
+[159/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_foundation/KosCard_qml.cpp.o
+[160/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_foundation/SettingsGroup_qml.cpp.o
+[161/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_foundation/SettingsTextField_qml.cpp.o
+[162/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_foundation/SettingsTextArea_qml.cpp.o
+[163/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_foundation/SettingsItem_qml.cpp.o
+[164/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_foundation/SettingsSwitch_qml.cpp.o
+[165/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_foundation/SettingsDateField_qml.cpp.o
+[166/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_foundation/SettingsTimeField_qml.cpp.o
+[167/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_foundation/KosWorkspaceDialog_qml.cpp.o
+[168/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_foundation/KosItemDelegate_qml.cpp.o
+[169/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_foundation/KosDialog_qml.cpp.o
+[170/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_foundation/SettingsAppearancePreview_qml.cpp.o
+[171/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_foundation/KosEmptyState_qml.cpp.o
+[172/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_foundation/KosNavigationButton_qml.cpp.o
+[173/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_foundation/KosPageCache_qml.cpp.o
+[174/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_foundation/KosPageMotion_qml.cpp.o
+[175/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_foundation/KosRoundButton_qml.cpp.o
+[176/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_foundation/KosSettingsDialog_qml.cpp.o
+[177/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_foundation/KosSlider_qml.cpp.o
+[178/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_foundation/KosSwitch_qml.cpp.o
+[179/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_foundation/KosSurface_qml.cpp.o
+[180/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_foundation/KosTextField_qml.cpp.o
+[181/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_foundation/KosToolButton_qml.cpp.o
+[182/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_foundation/KosLyricLine_qml.cpp.o
+[183/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_foundation/KosToolTip_qml.cpp.o
+[184/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_foundation/KosKineticScrollPhysics_mjs.cpp.o
+[185/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_foundation/KosKineticScroll_qml.cpp.o
+[186/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_foundation/PageCachePolicy_js.cpp.o
+[187/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_controls/ControlForm_qml.cpp.o
+[188/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_controls/VectorIcon_qml.cpp.o
+[189/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_controls/ColorRampSlider_qml.cpp.o
+[190/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_controls/LiquidStyle_qml.cpp.o
+[191/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_controls/LiquidGlassButton_qml.cpp.o
+[192/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_controls/LiquidBackdrop_qml.cpp.o
+[193/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_controls/LiquidOuterShadow_qml.cpp.o
+[194/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_controls/LiquidGlassNumber_qml.cpp.o
+[195/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_controls/LiquidSurface_qml.cpp.o
+[196/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_controls/LiquidCard_qml.cpp.o
+[197/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_controls/LiquidActionButtonGroup_qml.cpp.o
+[198/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_controls/LiquidActionButton_qml.cpp.o
+[199/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_controls/LiquidCheckBox_qml.cpp.o
+[200/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_controls/LiquidNavigationButton_qml.cpp.o
+[201/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_controls/LiquidContentPopover_qml.cpp.o
+[202/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_controls/LiquidPopover_qml.cpp.o
+[203/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_controls/LiquidPopoverItem_qml.cpp.o
+[204/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_controls/LiquidDialog_qml.cpp.o
+[205/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_controls/LiquidFilePicker_qml.cpp.o
+[206/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_controls/LiquidDialogButton_qml.cpp.o
+[207/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_controls/LiquidPopoverSurface_qml.cpp.o
+[208/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_controls/LiquidDialogSurface_qml.cpp.o
+[209/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_controls/LiquidPanelSurface_qml.cpp.o
+[210/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_controls/LiquidGlassSwitch_qml.cpp.o
+[211/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_controls/LiquidSlider_qml.cpp.o
+[212/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_controls/LiquidSelect_qml.cpp.o
+[213/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_controls/LiquidNavBar_qml.cpp.o
+[214/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_controls/LiquidTextField_qml.cpp.o
+[215/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.qt/rcc/qrc_kos_ui_raw_qml_0.cpp.o
+[216/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.qt/rcc/qrc_kos_ui_raw_qml_0_extra_qmldirs.cpp.o
+[217/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.qt/rcc/qrc_kos_ui_raw_res_0.cpp.o
+[218/293] Linking CXX static library libnextnotes-storage.a
+[219/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_controls/SelectionHighlight_qml.cpp.o
+[220/293] Building CXX object kos-ui/CMakeFiles/kos_ui.dir/.rcc/qmlcache/kos_ui_controls/LiquidSegmentedControl_qml.cpp.o
+[221/293] Linking CXX static library kos-ui/libkos_ui.a
+[222/293] Automatic MOC and UIC for target kos_ui_plugin
+[223/293] Building CXX object kos-ui/CMakeFiles/kos_ui_plugin.dir/kos_ui_plugin_autogen/mocs_compilation.cpp.o
+[224/293] Building CXX object kos-ui/CMakeFiles/kos_ui_plugin.dir/kos_ui_plugin_Kos_UiPlugin.cpp.o
+[225/293] Linking CXX static library kos-ui/libkos_ui_plugin.a
+[226/293] Automatic MOC and UIC for target nextnotes
+[227/293] Running AUTOMOC file extraction for target nextnotes
+[228/293] Running rcc for resource qmake_NextNotes
+[229/293] Running rcc for resource nextnotes_raw_qml_0_extra_qmldirs
+[230/293] Generating .rcc/qmlcache/nextnotes_qmlcache_loader.cpp
+[231/293] Running moc --collect-json for target nextnotes
+[232/293] Running rcc for resource window-controls
+[233/293] Running rcc for resource app-icon
+[234/293] Automatic QML type registration for target nextnotes
+[235/293] Running rcc for resource nextnotes_raw_qml_0
+[236/293] Generating .rcc/qmlcache/nextnotes_qml/FolderIcons_js.cpp
+[237/293] Generating .rcc/qmlcache/nextnotes_qml/PopupPlacement_js.cpp
+[238/293] Generating .rcc/qmlcache/nextnotes_qml/NotesSelectionBox_qml.cpp, .rcc/qmlcache/nextnotes_qml/NotesSelectionBox_qml.cpp.aotstats
+[239/293] Generating .rcc/qmlcache/nextnotes_qml/NotesPopover_qml.cpp, .rcc/qmlcache/nextnotes_qml/NotesPopover_qml.cpp.aotstats
+[240/293] Generating .rcc/qmlcache/nextnotes_qml/NotesContentPopover_qml.cpp, .rcc/qmlcache/nextnotes_qml/NotesContentPopover_qml.cpp.aotstats
+[241/293] Generating .rcc/qmlcache/nextnotes_qml/NotesSettings_qml.cpp, .rcc/qmlcache/nextnotes_qml/NotesSettings_qml.cpp.aotstats
+[242/293] Generating .rcc/qmlcache/nextnotes_qml/NotesWindowControls_qml.cpp, .rcc/qmlcache/nextnotes_qml/NotesWindowControls_qml.cpp.aotstats
+[243/293] Generating .rcc/qmlcache/nextnotes_qml/LibraryActions_qml.cpp, .rcc/qmlcache/nextnotes_qml/LibraryActions_qml.cpp.aotstats
+[244/293] Generating .rcc/qmlcache/nextnotes_qml/RecycleBin_qml.cpp, .rcc/qmlcache/nextnotes_qml/RecycleBin_qml.cpp.aotstats
+[245/293] Generating .rcc/qmlcache/nextnotes_qml/KnowledgePanel_qml.cpp, .rcc/qmlcache/nextnotes_qml/KnowledgePanel_qml.cpp.aotstats
+[246/293] Generating .rcc/qmlcache/nextnotes_qml/NoteNameEditor_qml.cpp, .rcc/qmlcache/nextnotes_qml/NoteNameEditor_qml.cpp.aotstats
+[247/293] Generating .rcc/qmlcache/nextnotes_qml/SourceEditor_qml.cpp, .rcc/qmlcache/nextnotes_qml/SourceEditor_qml.cpp.aotstats
+[248/293] Generating .rcc/qmlcache/nextnotes_qml/NotesOrganizer_qml.cpp, .rcc/qmlcache/nextnotes_qml/NotesOrganizer_qml.cpp.aotstats
+[249/293] Generating .rcc/qmlcache/nextnotes_qml/CommandRegistry_qml.cpp, .rcc/qmlcache/nextnotes_qml/CommandRegistry_qml.cpp.aotstats
+[250/293] Generating .rcc/qmlcache/nextnotes_qml/EditorTools_qml.cpp, .rcc/qmlcache/nextnotes_qml/EditorTools_qml.cpp.aotstats
+[251/293] Generating .rcc/qmlcache/nextnotes_qml/NotesTokens_qml.cpp, .rcc/qmlcache/nextnotes_qml/NotesTokens_qml.cpp.aotstats
+[252/293] Generating .rcc/qmlcache/nextnotes_qml/NoteReadingView_qml.cpp, .rcc/qmlcache/nextnotes_qml/NoteReadingView_qml.cpp.aotstats
+[253/293] Generating .rcc/qmlcache/nextnotes_qml/Main_qml.cpp, .rcc/qmlcache/nextnotes_qml/Main_qml.cpp.aotstats
+[254/293] Running rcc for resource editor-assets
+[255/293] Building CXX object CMakeFiles/nextnotes.dir/src/EditorSessionWeb.cpp.o
+[256/293] Building CXX object CMakeFiles/nextnotes.dir/src/EditorSession.cpp.o
+[257/293] Building CXX object CMakeFiles/nextnotes.dir/src/main.cpp.o
+[258/293] Building CXX object CMakeFiles/nextnotes.dir/nextnotes_autogen/mocs_compilation.cpp.o
+[259/293] Building CXX object CMakeFiles/nextnotes.dir/src/EditorExport.cpp.o
+[260/293] Building CXX object CMakeFiles/nextnotes.dir/src/PdfExport.cpp.o
+[261/293] Building CXX object CMakeFiles/nextnotes.dir/src/NotesLibrary.cpp.o
+[262/293] Building CXX object CMakeFiles/nextnotes.dir/src/NotesOrganizer.cpp.o
+[263/293] Building CXX object CMakeFiles/nextnotes.dir/src/NotesKnowledge.cpp.o
+[264/293] Building CXX object CMakeFiles/nextnotes.dir/.qt/rcc/qrc_qmake_NextNotes.cpp.o
+[265/293] Building CXX object CMakeFiles/nextnotes.dir/src/EditorRenderLifecycle.cpp.o
+[266/293] Building CXX object CMakeFiles/nextnotes.dir/nextnotes_qmltyperegistrations.cpp.o
+[267/293] Building CXX object CMakeFiles/nextnotes.dir/src/NotesController.cpp.o
+[268/293] Building CXX object CMakeFiles/nextnotes.dir/.rcc/qmlcache/nextnotes_qml/NotesSelectionBox_qml.cpp.o
+[269/293] Building CXX object CMakeFiles/nextnotes.dir/.rcc/qmlcache/nextnotes_qmlcache_loader.cpp.o
+[270/293] Building CXX object CMakeFiles/nextnotes.dir/.rcc/qmlcache/nextnotes_qml/FolderIcons_js.cpp.o
+[271/293] Building CXX object CMakeFiles/nextnotes.dir/.rcc/qmlcache/nextnotes_qml/PopupPlacement_js.cpp.o
+[272/293] Building CXX object CMakeFiles/nextnotes.dir/.rcc/qmlcache/nextnotes_qml/NotesPopover_qml.cpp.o
+[273/293] Building CXX object CMakeFiles/nextnotes.dir/.rcc/qmlcache/nextnotes_qml/NotesContentPopover_qml.cpp.o
+[274/293] Building CXX object CMakeFiles/nextnotes.dir/.rcc/qmlcache/nextnotes_qml/NotesSettings_qml.cpp.o
+[275/293] Building CXX object CMakeFiles/nextnotes.dir/.rcc/qmlcache/nextnotes_qml/NotesWindowControls_qml.cpp.o
+[276/293] Building CXX object CMakeFiles/nextnotes.dir/.rcc/qmlcache/nextnotes_qml/LibraryActions_qml.cpp.o
+[277/293] Building CXX object CMakeFiles/nextnotes.dir/.rcc/qmlcache/nextnotes_qml/KnowledgePanel_qml.cpp.o
+[278/293] Building CXX object CMakeFiles/nextnotes.dir/.rcc/qmlcache/nextnotes_qml/RecycleBin_qml.cpp.o
+[279/293] Building CXX object CMakeFiles/nextnotes.dir/.rcc/qmlcache/nextnotes_qml/NoteNameEditor_qml.cpp.o
+[280/293] Building CXX object CMakeFiles/nextnotes.dir/.rcc/qmlcache/nextnotes_qml/NotesOrganizer_qml.cpp.o
+[281/293] Building CXX object CMakeFiles/nextnotes.dir/.rcc/qmlcache/nextnotes_qml/EditorTools_qml.cpp.o
+[282/293] Building CXX object CMakeFiles/nextnotes.dir/.rcc/qmlcache/nextnotes_qml/SourceEditor_qml.cpp.o
+[283/293] Building CXX object CMakeFiles/nextnotes.dir/.rcc/qmlcache/nextnotes_qml/CommandRegistry_qml.cpp.o
+[284/293] Building CXX object CMakeFiles/nextnotes.dir/.qt/rcc/qrc_nextnotes_raw_qml_0.cpp.o
+[285/293] Building CXX object CMakeFiles/nextnotes.dir/.qt/rcc/qrc_nextnotes_raw_qml_0_extra_qmldirs.cpp.o
+[286/293] Building CXX object CMakeFiles/nextnotes.dir/.qt/rcc/qrc_window-controls.cpp.o
+[287/293] Building CXX object CMakeFiles/nextnotes.dir/.qt/rcc/qrc_app-icon.cpp.o
+[288/293] Building CXX object CMakeFiles/nextnotes.dir/.rcc/qmlcache/nextnotes_qml/Main_qml.cpp.o
+[289/293] Building CXX object CMakeFiles/nextnotes.dir/.qt/rcc/qrc_editor-assets.cpp.o
+[290/293] Building CXX object CMakeFiles/nextnotes.dir/.rcc/qmlcache/nextnotes_qml/NotesTokens_qml.cpp.o
+[291/293] Building CXX object CMakeFiles/nextnotes.dir/.rcc/qmlcache/nextnotes_qml/NoteReadingView_qml.cpp.o
+[292/293] Linking CXX executable nextnotes

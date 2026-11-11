@@ -1,0 +1,12 @@
+slash_filter_keyboard_conversion_single_undo
+slash_lists_literal_input_and_exit
+task_checkbox_stable_geometry
+block_duplicate_move_multiselect_delete_undo
+outline_folding_readonly_view_live_toc
+literal_case_search_replace_all_preserves_marks_undo
+math_parse_render_edit_undo
+footnote_insert_serialization
+code_highlighting_and_offline_mermaid_export
+Error: Timed out waiting for editor state
+    at until (file:///home/amao/nknotes-review-agent-20261111/AdvancedEditorRegression.safe-cdp.mjs:14:128)
+    at async file:///home/amao/nknotes-review-agent-20261111/AdvancedEditorRegression.safe-cdp.mjs:73:2

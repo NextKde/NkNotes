@@ -1,0 +1,84 @@
+// Manual VM-only integration test. This replaces the active disposable fixture.
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+const endpoint=process.env.NEXTNOTES_CDP_URL||'http://127.0.0.1:9226';
+const fixture=process.env.NEXTNOTES_TEST_FILE;
+assert.ok(fixture,'Provide NEXTNOTES_TEST_FILE for the disposable note open in the VM.');
+const target=(await (await fetch(endpoint+'/json/list')).json()).find(x=>x.url==='qrc:/editor/index.html');
+const ws=new WebSocket(target.webSocketDebuggerUrl);await new Promise((resolve,reject)=>{ws.onopen=resolve;ws.onerror=reject;});
+let sequence=0;const requests=new Map(),results=[];
+ws.onmessage=event=>{const response=JSON.parse(event.data),request=requests.get(response.id);if(request){requests.delete(response.id);response.error?request.reject(response.error):request.resolve(response.result);}};
+const call=(method,params={})=>new Promise((resolve,reject)=>{const id=++sequence;const timer=setTimeout(()=>{requests.delete(id);reject(Error('CDP timeout '+method+' '+JSON.stringify(params)))},8000);requests.set(id,{resolve:value=>{clearTimeout(timer);resolve(value)},reject:error=>{clearTimeout(timer);reject(error)}});ws.send(JSON.stringify({id,method,params}));});
+const run=async expression=>{const response=await call('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});if(response.exceptionDetails)throw Error(JSON.stringify(response.exceptionDetails));return response.result.value;};
+const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+async function until(fn){const deadline=Date.now()+10000;while(Date.now()<deadline){if(await fn())return;await wait(50);}throw Error('Timed out waiting for editor state');}
+const snapshot=()=>run('nextnotes.snapshot()');
+const doc=async()=> (await snapshot()).doc;
+const action=(name,args={})=>run(`nextnotes.tools(${JSON.stringify(name)},${JSON.stringify(args)})`);
+const command=name=>run(`(()=>{nextnotes.command(${JSON.stringify(name)});return true})()`);
+const key=async(key,code,vk,modifiers=0,text)=>{await call('Input.dispatchKeyEvent',{type:'keyDown',key,code,windowsVirtualKeyCode:vk,modifiers,text});await call('Input.dispatchKeyEvent',{type:'keyUp',key,code,windowsVirtualKeyCode:vk,modifiers});await wait(30);};
+const text=value=>call('Input.insertText',{text:value});
+await until(()=>run('!!window.nextnotes'));
+const active=await snapshot();assert.equal(decodeURIComponent(new URL(active.baseUrl).pathname),fixture);assert.ok(fs.readFileSync(fixture,'utf8').startsWith('---\ncustom: untouched\n---\n'));
+async function load(source){await run(`nextnotes.load({epoch:nextnotes.snapshot().epoch,baseUrl:nextnotes.snapshot().baseUrl,source:${JSON.stringify(source)}})`);await until(()=>run('nextnotes.view().editable'));await wait(100);}
+const plain=()=>run(`nextnotes.view().state.doc.textBetween(0,nextnotes.view().state.doc.content.size,${JSON.stringify('\n')})`);
+const position=(type,value)=>run(`(()=>{let result;nextnotes.view().state.doc.descendants((node,pos)=>{if(result===undefined&&node.type.name===${JSON.stringify(type)}&&node.textContent===${JSON.stringify(value)})result=pos;});return result;})()`);
+const ok=name=>{results.push({name,passed:true});console.log(name);};
+try{
+ await load('');await run('nextnotes.view().focus()');await text('/');await text('h2');await wait(120);
+ assert.ok((await run('nextnotes.toolsState().slash.items')).some(x=>x.command==='heading2'));
+ await key('Enter','Enter',13);assert.equal((await doc()).content[0].type,'heading');assert.equal((await doc()).content[0].attrs.level,2);
+ await command('undo');assert.equal(await plain(),'/h2');await command('redo');await text('Slash title');ok('slash_filter_keyboard_conversion_single_undo');
+ for(const kind of ['bullet','ordered','task']){
+  await load('');await run('nextnotes.view().focus()');await text('/');await wait(120);
+  const entries=await run('nextnotes.toolsState().slash.items');
+  await action('slashChoose',{index:entries.findIndex(entry=>entry.command===kind)});await wait(120);
+  assert.equal(await run('document.querySelectorAll("li .editor-empty-line").length'),0,'list items must not advertise slash insertion');
+  await text('/');await wait(120);
+  assert.equal(await run('nextnotes.toolsState().slash'),null,'slash inside '+kind+' is literal text');
+  assert.equal(await run('nextnotes.view().state.selection.$from.parent.textContent'),'/');
+  await key('Backspace','Backspace',8);await key('Enter','Enter',13);await text('/');await wait(120);
+  assert.ok(await run('nextnotes.toolsState().slash'),'slash insertion returns after leaving '+kind);
+ }
+ ok('slash_lists_literal_input_and_exit');
+ await load('- [ ] Task\n');await run('nextnotes.view().focus()');
+ const taskBox=()=>run(`(()=>{const box=getComputedStyle(document.querySelector('li[data-checked]'),'::before');return {width:box.width,height:box.height,left:box.left,top:box.top,border:box.borderWidth};})()`);
+ const uncheckedBox=await taskBox();assert.ok(parseFloat(uncheckedBox.width)>0);
+ await command('check');assert.equal(await run('document.querySelector("li[data-checked]").dataset.checked'),'true');
+ assert.deepEqual(await taskBox(),uncheckedBox,'checking a task must not resize or move its box');
+ await command('check');assert.equal(await run('document.querySelector("li[data-checked]").dataset.checked'),'false');
+ assert.deepEqual(await taskBox(),uncheckedBox);ok('task_checkbox_stable_geometry');
+ await load('A\n\nB\n\nC\n');await action('duplicateBlock',{pos:3});assert.equal(await plain(),'A\nB\nB\nC');await command('undo');assert.equal(await plain(),'A\nB\nC');
+ await action('moveBlock',{pos:3,direction:'up'});assert.equal(await plain(),'B\nA\nC');await command('undo');
+ await action('moveBlock',{pos:3,direction:'down'});assert.equal(await plain(),'A\nC\nB');await command('undo');
+ await action('selectBlock',{pos:0});await action('selectBlock',{pos:6,extend:true});await action('duplicateBlock',{pos:3,selection:true});assert.equal(await plain(),'A\nB\nC\nA\nB\nC');
+ await command('undo');await action('deleteBlock',{pos:3});assert.equal(await plain(),'A\nC');await command('undo');ok('block_duplicate_move_multiselect_delete_undo');
+ await load('# Main\n\nIntro\n\n## One\n\none\n\n## Two\n\ntwo\n');const one=await position('heading','One'),source=(await snapshot()).source;
+ await action('toggleFold',{pos:one});assert.ok(await run(`Array.from(document.querySelectorAll('.folded-content')).some(node=>getComputedStyle(node).display==='none')`));assert.equal((await snapshot()).source,source);
+ await action('jump',{pos:one});assert.equal(await run('document.querySelectorAll(".folded-content").length'),0);
+ await key('End','End',35,2);await key('Enter','Enter',13);await action('insertToc');await wait(100);assert.ok((await snapshot()).source.includes('[toc]'));assert.equal(await run('document.querySelectorAll(".editor-toc a").length'),3);
+ await run(`(()=>{const v=nextnotes.view();v.dispatch(v.state.tr.insertText('Changed ',1));})()`);await wait(100);assert.match(await run('document.querySelector(".editor-toc a").textContent'),/Changed Main/);const tocSource=(await snapshot()).source;await load(tocSource);assert.equal((await doc()).content.filter(n=>n.type==='toc').length,1);await load('\\[toc]\n');assert.equal((await doc()).content[0].type,'paragraph');ok('outline_folding_readonly_view_live_toc');
+ await load('Alpha **alpha** ALPHA\n\nalpha\n');await action('search',{query:'alpha',caseSensitive:false});await wait(100);assert.equal((await run('nextnotes.toolsState().search')).total,4);
+ await action('replaceAll',{replacement:'Beta'});assert.equal(await plain(),'Beta Beta Beta\nBeta');assert.ok(JSON.stringify(await doc()).includes('"strong"'));await command('undo');assert.equal(await plain(),'Alpha alpha ALPHA\nalpha');
+ await action('search',{query:'alpha',caseSensitive:true});await wait(80);assert.equal((await run('nextnotes.toolsState().search')).total,2);await action('findNext');await action('replace',{replacement:'one'});assert.match(await plain(),/one/);
+ await load('a.b a+b [x] İZ\n');await action('search',{query:'a.b'});await wait(80);assert.equal((await run('nextnotes.toolsState().search')).total,1);ok('literal_case_search_replace_all_preserves_marks_undo');
+ await load('$E=mc^2$\n\n$$\n\\frac{a}{b}\n$$\n');assert.equal((await doc()).content[0].content[0].type,'math_inline');assert.equal((await doc()).content[1].type,'math_block');assert.equal(await run('document.querySelectorAll(".katex").length'),2);
+ await action('setMath',{pos:await position('math_block','\\frac{a}{b}'),display:true,source:'\\sum_{i=1}^n i'});assert.match((await snapshot()).source,/\\sum/);await command('undo');assert.match((await snapshot()).source,/\\frac/);ok('math_parse_render_edit_undo');
+ await load('Note\n');await key('End','End',35,2);await action('footnote',{text:'Footnote text'});let content=await doc();assert.ok(JSON.stringify(content).includes('"footnote_reference"'));assert.ok(content.content.some(x=>x.type==='footnote_definition'));assert.match((await snapshot()).source,/Footnote text/);ok('footnote_insert_serialization');
+ await load('```python\ndef hello(name):\n    return "Hello " + name\n```\n\n```mermaid\nflowchart LR\n A[Write] --> B[Save]\n```\n');assert.ok(await run('document.querySelectorAll(".token").length')>0);
+ await until(()=>run('!!document.querySelector(".diagram-preview img")'));assert.ok(await run('document.querySelector(".diagram-preview img").src.startsWith("data:image/svg+xml")'));
+ const exported=await run('nextnotes.exportBody()');assert.ok(exported.includes('data:image/svg+xml'));assert.ok((await run(`new DOMParser().parseFromString(${JSON.stringify(exported)},'text/html').body.textContent`)).includes('def hello'));ok('code_highlighting_and_offline_mermaid_export');
+ await load('Image: ');await key('End','End',35,2);
+ await run(`(async()=>{const canvas=document.createElement('canvas');canvas.width=240;canvas.height=80;const context=canvas.getContext('2d');context.fillStyle='#dfe9f4';context.fillRect(0,0,240,80);context.fillStyle='#234';context.font='22px sans-serif';context.fillText('Attachment',38,48);const blob=await new Promise(resolve=>canvas.toBlob(resolve));const transfer=new DataTransfer();transfer.items.add(new File([blob],'Clipboard.png',{type:'image/png'}));nextnotes.view().dom.dispatchEvent(new ClipboardEvent('paste',{clipboardData:transfer,bubbles:true,cancelable:true}));})()`);
+ await until(()=>run('!!document.querySelector("img[data-original-src]")&&!nextnotes.snapshot().composing'));
+ const image=(await doc()).content[0].content.find(n=>n.type==='image');assert.ok(image.attrs.src.startsWith('assets/'));
+ await until(()=>run('document.querySelector("img[data-original-src]").naturalWidth===240'));
+ await wait(1100);assert.ok(fs.readFileSync(fixture,'utf8').includes(image.attrs.src));ok('clipboard_image_import_file_storage_insert_and_autosave');
+ await load('| A | B |\n| --- | --- |\n| a | b |\n');const original=(await snapshot()).source;
+ await run(`(()=>{const v=nextnotes.view();const cell=v.state.doc.firstChild.firstChild.firstChild;v.dispatch(v.state.tr.setNodeMarkup(2,undefined,{...cell.attrs,colwidth:[200]}));})()`);
+ assert.equal((await snapshot()).source,original);await wait(150);assert.deepEqual((await run('nextnotes.toolsState().tableWidths'))[0][0],[200]);ok('table_column_width_view_only_no_markdown_rewrite');
+ await run('nextnotes.view().state.doc.check();true');
+ await wait(1100);assert.ok(fs.readFileSync(fixture,'utf8').startsWith('---\ncustom: untouched\n---\n'));ok('metadata_and_schema_integrity');
+ if(process.env.NEXTNOTES_TEST_REPORT)fs.writeFileSync(process.env.NEXTNOTES_TEST_REPORT,JSON.stringify({results,snapshot:await snapshot()},null,2));
+}catch(error){console.error(error);if(process.env.NEXTNOTES_TEST_REPORT)fs.writeFileSync(process.env.NEXTNOTES_TEST_REPORT,JSON.stringify({results,error:error.stack,snapshot:await snapshot()},null,2));process.exitCode=1;}
+ws.close();setTimeout(()=>process.exit(process.exitCode||0),200);
