@@ -13,7 +13,13 @@ Item {
     signal exportRequested(var paths, string folder)
     signal smartFolderRequested()
     property var selectedPaths: []
-    readonly property bool selectionMode: selectedPaths.length > 0
+    property var selectedFolderPaths: []
+    property var selectableFolders: []
+    property string selectionKind: ""
+    readonly property bool noteSelectionMode: selectionKind === "notes" || selectedPaths.length > 0
+    readonly property bool folderSelectionMode: selectionKind === "folders"
+    readonly property bool selectionMode: noteSelectionMode || folderSelectionMode
+    onSelectableFoldersChanged: selectedFolderPaths = selectedFolderPaths.filter(path => selectableFolders.includes(path))
     property string dragKind: ""
     property var dragPaths: []
     property string dragFolder: ""
@@ -64,12 +70,30 @@ Item {
     property string folderPath: ""
     property string notice: ""
     readonly property string contextPath: menu.visible && targets.length === 1 ? targets[0] : ""
-    readonly property bool popupActive: menu.visible || tagActions.visible || sortActions.visible || movePanel.visible || deletePanel.visible || resultPanel.visible || folderMenu.visible || createFolderPanel.visible || trashFolderDialog.visible || editFolderDialog.visible || tagsPanel.visible || tagRenamePanel.visible || tagRenameConfirm.visible
+    readonly property bool popupActive: menu.visible || tagActions.visible || sortActions.visible || movePanel.visible || deletePanel.visible || resultPanel.visible || folderMenu.visible || trashFolderDialog.visible || editFolderDialog.visible || tagsPanel.visible || tagRenamePanel.visible || tagRenameConfirm.visible
     readonly property var targetNotes: controller.notes.filter(n => targets.indexOf(n.path) >= 0)
     property string scope: controller.library + "\n" + controller.filter + "\n" + controller.query
     onScopeChanged: clearSelection()
-    function clearSelection() { selectedPaths = []; selectionAnchor = "" }
+    function clearSelection() { selectedPaths = []; selectedFolderPaths = []; selectionAnchor = ""; selectionKind = "" }
+    function beginSelection(kind, initialPaths) {
+        clearSelection()
+        selectionKind = kind
+        if (kind === "notes" && initialPaths) {
+            selectedPaths = initialPaths.slice()
+            selectionAnchor = selectedPaths[0] || ""
+        }
+    }
+    function toggleFolder(path) {
+        if (!folderSelectionMode || !selectableFolders.includes(path)) return
+        let paths = selectedFolderPaths.slice()
+        const at = paths.indexOf(path)
+        if (at >= 0) paths.splice(at, 1)
+        else if (paths.length < 200) paths.push(path)
+        else { notice = "一次最多选择 200 个文件夹"; return }
+        selectedFolderPaths = paths
+    }
     function toggle(path) {
+        if (folderSelectionMode) clearSelection()
         let paths = selectedPaths.slice()
         const at = paths.indexOf(path)
         if (at >= 0) paths.splice(at, 1)
@@ -78,6 +102,7 @@ Item {
         selectedPaths = paths; selectionAnchor = paths.length ? path : ""
     }
     function click(note, index, modifiers) {
+        if (folderSelectionMode) clearSelection()
         if (modifiers & Qt.ShiftModifier) {
             let anchor = controller.notes.findIndex(n => n.path === (selectionAnchor || controller.path))
             if (anchor < 0) anchor = index
@@ -90,11 +115,17 @@ Item {
             return true
         }
         if (modifiers & (Qt.ControlModifier | Qt.MetaModifier)) { toggle(note.path); return true }
+        if (selectionKind === "notes") { toggle(note.path); return true }
         clearSelection()
         selectionAnchor = note.path
         return false
     }
     function selectAll() {
+        if (folderSelectionMode) {
+            if (selectableFolders.length > 200) { notice = "一次最多选择 200 个文件夹"; return }
+            selectedFolderPaths = selectableFolders.slice()
+            return
+        }
         if (controller.notes.length > 200) { notice = "结果超过 200 篇，请先缩小筛选范围"; return }
         selectedPaths = controller.notes.map(n => n.path)
         if (!selectionAnchor && selectedPaths.length) selectionAnchor = selectedPaths[0]
@@ -128,10 +159,18 @@ Item {
         deletePanel.open()
     }
     function newFolder(parentPath, anchor, originMenu) {
-        folderPath = parentPath || ""; createFolderName.text = ""
-        if (originMenu) createFolderPanel.openFromMenu(originMenu); else createFolderPanel.openFromButton(anchor)
+        folderPath = parentPath || ""
+        editFolderDialog.creating = true
+        editFolderDialog.originalPath = ""
+        editFolderName.text = ""
+        editFolderDialog.selectedIcon = "folder"
+        editFolderDialog.selectedParent = folderPath
+        editFolderDialog.errorMessage = ""
+        if (originMenu) originMenu.close()
+        editFolderDialog.open()
     }
     function editFolder() {
+        editFolderDialog.creating = false
         editFolderDialog.originalPath = folderPath
         editFolderName.text = folderPath.split("/").pop()
         editFolderDialog.selectedIcon = controller.folderIcons[folderPath] || "folder"
@@ -154,8 +193,14 @@ Item {
             if (root.selectionAnchor && !visible.has(root.selectionAnchor)) root.selectionAnchor = ""
         }
         function onTagRenameReady() { tagRenamePanel.close(); tagRenameConfirm.open() }
+        function onFolderCreated(path) {
+            if (editFolderDialog.visible && editFolderDialog.creating) editFolderDialog.close()
+        }
+        function onFolderCreationFailed(message) {
+            if (editFolderDialog.visible && editFolderDialog.creating) editFolderDialog.errorMessage = message
+        }
         function onFolderEdited(success, message) {
-            if (!editFolderDialog.visible) return
+            if (!editFolderDialog.visible || editFolderDialog.creating) return
             if (success) editFolderDialog.close()
             else editFolderDialog.errorMessage = message
         }
@@ -187,8 +232,25 @@ Item {
         property bool rowMenu: false
         readonly property bool allPinned: root.targetNotes.length > 0 && root.targetNotes.every(n => n.pinned)
         readonly property bool allFavorite: root.targetNotes.length > 0 && root.targetNotes.every(n => n.favorite)
-        LiquidPopoverItem { text: root.selectionMode ? "取消选择" : "选择笔记"; enabled: root.selectionMode || root.targets.length > 0; onTriggered: { if (root.selectionMode) root.clearSelection(); else { root.selectedPaths = root.targets.slice(); root.selectionAnchor = root.selectedPaths[0] || "" } } }
-        LiquidPopoverItem { visible: !menu.rowMenu; height: visible ? implicitHeight : 0; text: "全选当前结果"; enabled: !!root.controller.notes.length; onTriggered: root.selectAll() }
+        LiquidPopoverItem {
+            objectName: "selectNotesMenuItem"
+            text: root.noteSelectionMode ? "取消选择笔记" : "选择笔记"
+            enabled: !root.controller.busy && (root.noteSelectionMode || root.controller.notes.length > 0)
+            onTriggered: { if (root.noteSelectionMode) root.clearSelection(); else root.beginSelection("notes", menu.rowMenu ? root.targets : []) }
+        }
+        LiquidPopoverItem {
+            objectName: "selectFoldersMenuItem"
+            visible: !menu.rowMenu; height: visible ? implicitHeight : 0
+            text: root.folderSelectionMode ? "取消选择文件夹" : "选择文件夹"
+            enabled: !root.controller.busy && (root.folderSelectionMode || root.selectableFolders.length > 0)
+            onTriggered: { if (root.folderSelectionMode) root.clearSelection(); else root.beginSelection("folders") }
+        }
+        LiquidPopoverItem {
+            visible: !menu.rowMenu; height: visible ? implicitHeight : 0
+            text: root.folderSelectionMode ? "全选子文件夹" : "全选当前结果"
+            enabled: root.folderSelectionMode ? root.selectableFolders.length > 0 : root.controller.notes.length > 0
+            onTriggered: root.selectAll()
+        }
         LiquidPopoverItem { visible: menu.rowMenu; height: visible ? implicitHeight : 0; text: menu.allPinned ? "取消置顶" : "置顶"; enabled: root.targets.length > 0 && !root.controller.busy; onTriggered: root.perform(menu.allPinned ? "unpin" : "pin") }
         LiquidPopoverItem { visible: menu.rowMenu; height: visible ? implicitHeight : 0; text: menu.allFavorite ? "取消收藏" : "收藏"; enabled: root.targets.length > 0 && !root.controller.busy; onTriggered: root.perform(menu.allFavorite ? "unfavorite" : "favorite") }
         LiquidPopoverItem { visible: menu.rowMenu; height: visible ? implicitHeight : 0; text: "标签…"; enabled: root.targets.length > 0 && !root.controller.busy; onTriggered: tagActions.openFromMenu(menu) }
@@ -336,38 +398,10 @@ Item {
         FolderMenuItem { text: "导出其中的笔记…"; enabled: !root.controller.busy; onTriggered: root.exportRequested([], root.folderPath) }
         FolderMenuItem { text: "删除文件夹…"; enabled: !root.controller.busy; onTriggered: trashFolderDialog.open() }
     }
-    NotesContentPopover {
-        id: createFolderPanel; sourceItem: root.sceneItem; preferredWidth: 350
-        onOpened: { createFolderName.forceActiveFocus(); createFolderName.selectAll() }
-        function submit() {
-            if (!validName || createFolderName.inputMethodComposing || root.controller.busy) return
-            root.controller.createFolder(proposedPath)
-            close()
-        }
-        readonly property string enteredName: createFolderName.text.trim()
-        readonly property string proposedPath: (root.folderPath ? root.folderPath + "/" : "") + enteredName
-        readonly property bool nameAlreadyUsed: Array.from(root.controller.folders).includes(proposedPath)
-        readonly property bool validName: !!enteredName && !nameAlreadyUsed && enteredName !== "." && enteredName !== ".." && !/[\\/\u0000]/.test(enteredName) && ![".git", ".nextnotes"].includes(enteredName)
-        contentItem: ColumnLayout {
-            Label { text: root.folderPath ? "新建子文件夹" : "新建文件夹"; font.bold: true; color: AppTheme.text }
-            Label {
-                Layout.fillWidth: true
-                text: "位置：" + (root.folderPath || "我的笔记").split("/").join(" › ")
-                wrapMode: Text.Wrap; color: AppTheme.mutedText; font.pixelSize: 12
-            }
-            LiquidTextField { id: createFolderName; Layout.fillWidth: true; materialForm: true; Accessible.name: "文件夹名称"; onAccepted: createFolderPanel.submit() }
-            Label { visible: createFolderPanel.nameAlreadyUsed; Layout.fillWidth: true; text: "这里已有同名文件夹，请换个名称。"; wrapMode: Text.Wrap; color: AppTheme.mutedText; font.pixelSize: 12 }
-            RowLayout {
-                Layout.alignment: Qt.AlignRight
-                LiquidActionButton { text: "取消"; materialForm: true; onClicked: createFolderPanel.close() }
-                LiquidActionButton { text: "创建"; materialForm: true; enabled: createFolderPanel.validName && !createFolderName.inputMethodComposing && !root.controller.busy; onClicked: createFolderPanel.submit() }
-            }
-        }
-    }
     LiquidDialog {
         id: editFolderDialog
         objectName: "editFolderDialog"
-        title: "编辑文件夹"; sourceItem: root.sceneItem
+        title: creating ? (selectedParent ? "新建子文件夹" : "新建文件夹") : "编辑文件夹"; sourceItem: root.sceneItem
         width: Math.min(340, root.width - 32)
         padding: 16; spacing: 0
         topPadding: 4; bottomPadding: 4
@@ -379,6 +413,7 @@ Item {
         }
         standardButtons: Dialog.NoButton
         closePolicy: root.controller.busy ? Popup.NoAutoClose : Popup.CloseOnEscape
+        property bool creating: false
         property string originalPath: ""
         property string selectedIcon: "folder"
         property string hoveredIconLabel: ""
@@ -388,18 +423,19 @@ Item {
         readonly property color formGroupColor: AppTheme.dark ? "#363638" : "#EDEDEF"
         onSelectedIconChanged: errorMessage = ""
         onSelectedParentChanged: errorMessage = ""
-        readonly property var destinations: [""].concat(Array.from(root.controller.folders)).filter(p => p !== originalPath && !p.startsWith(originalPath + "/"))
+        readonly property var destinations: [""].concat(Array.from(root.controller.folders)).filter(p => creating || (p !== originalPath && !p.startsWith(originalPath + "/")))
         readonly property string enteredName: editFolderName.text.trim()
         readonly property string proposedPath: (selectedParent ? selectedParent + "/" : "") + enteredName
         readonly property bool nameAlreadyUsed: proposedPath !== originalPath && Array.from(root.controller.folders).includes(proposedPath)
         readonly property bool validName: !!enteredName && enteredName !== "." && enteredName !== ".." && !/[\\/\u0000]/.test(enteredName) && ![".git", ".nextnotes"].includes(enteredName)
-        readonly property bool hasChanges: proposedPath !== originalPath || selectedIcon !== (root.controller.folderIcons[originalPath] || "folder")
-        readonly property bool canSave: validName && !nameAlreadyUsed && hasChanges && destinations.includes(selectedParent) && Array.from(root.controller.folders).includes(originalPath) && !editFolderName.inputMethodComposing && !root.controller.busy
+        readonly property bool hasChanges: creating || proposedPath !== originalPath || selectedIcon !== (root.controller.folderIcons[originalPath] || "folder")
+        readonly property bool canSave: validName && !nameAlreadyUsed && hasChanges && destinations.includes(selectedParent) && (creating || Array.from(root.controller.folders).includes(originalPath)) && !editFolderName.inputMethodComposing && !root.controller.busy
         onOpened: { hoveredIconLabel = ""; editFolderName.forceActiveFocus(); editFolderName.selectAll() }
         function submit() {
             if (!canSave) return
             errorMessage = ""
-            root.controller.editFolder(originalPath, proposedPath, selectedIcon)
+            if (creating) root.controller.createFolder(proposedPath, selectedIcon)
+            else root.controller.editFolder(originalPath, proposedPath, selectedIcon)
         }
         contentItem: ColumnLayout {
             spacing: 6
@@ -456,15 +492,8 @@ Item {
                                 }
                                 contentItem: Item {
                                     VectorIcon {
-                                        visible: !FolderIcons.paths[iconChoice.modelData.name]
                                         anchors.centerIn: parent; name: iconChoice.modelData.name; size: 16
                                         color: iconChoice.checked ? "#242424" : AppTheme.text
-                                    }
-                                    Image {
-                                        anchors.centerIn: parent; width: 16; height: 16
-                                        sourceSize: Qt.size(32, 32)
-                                        source: FolderIcons.source(iconChoice.modelData.name, iconChoice.checked ? Qt.rgba(0.141, 0.141, 0.141, 1) : AppTheme.text)
-                                        visible: source.toString().length > 0
                                     }
                                 }
                                 KosToolTip { target: iconChoice; text: iconChoice.modelData.label; backdrop: editFolderDialog.contentBackdrop }
@@ -512,7 +541,7 @@ Item {
                 Item { Layout.fillWidth: true }
                 LiquidDialogButton { text: "取消"; enabled: !root.controller.busy; onClicked: editFolderDialog.close() }
                 LiquidDialogButton {
-                    text: root.controller.busy ? "保存中…" : "保存"
+                    text: editFolderDialog.creating ? (root.controller.busy ? "创建中…" : "创建") : (root.controller.busy ? "保存中…" : "保存")
                     primaryAction: true; enabled: editFolderDialog.canSave
                     surfaceColor: enabled ? tokens.primaryYellow : AppTheme.controlBackground
                     accentColor: tokens.primaryYellow

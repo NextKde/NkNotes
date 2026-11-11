@@ -43,6 +43,12 @@ bool validPath(const QString &path, bool empty = false) {
     for (const auto &part : path.split('/')) if (part.isEmpty() || part == "." || part == ".." || part == ".nextnotes" || part == ".git") return false;
     return true;
 }
+bool validFolderIcon(const QString &icon) {
+    return QStringList{"folder", "editRounded", "album", "home", "flag", "heart", "calendar", "music", "grid", "sparkle", "artist", "reminder",
+            "archive", "envelope", "wallpaper", "keyboard", "settings", "queueList", "radio", "theme", "sliders", "circle", "waves", "info",
+            "work", "study", "sport", "running", "cycling", "swimming", "fitness", "basketball", "football", "badminton", "tennis",
+            "shopping", "travel", "food", "coffee", "health", "finance", "gift", "pets", "garden", "car", "code", "camera", "ideas"}.contains(icon);
+}
 QByteArray bytesAt(const QString &path, qint64 max = 64 * 1024 * 1024) {
     QFile f(path); require(QFileInfo(path).isFile() && QFileInfo(path).size() <= max, "readFailed", path);
     require(f.open(QIODevice::ReadOnly), "readFailed", path); auto bytes = f.read(max + 1); require(f.error() == QFileDevice::NoError && bytes.size() <= max && f.atEnd(), "readFailed", path); return bytes;
@@ -527,7 +533,15 @@ QVariantMap ManagedStore::Impl::run(const QString &op,const QVariantMap &a) {
     }
     if(op=="checkpoint") {query("INSERT INTO drafts(path,text,base_hash,time) VALUES(?,?,?,?) ON CONFLICT(path) DO UPDATE SET text=excluded.text,base_hash=excluded.base_hash,time=excluded.time",{path,a.value("text"),a.value("baseHash"),utc()});return {{"ok",true},{"recoveryDurable",true}};}
     if(op=="discardDraft"){query("DELETE FROM drafts WHERE path=?",{path});return ok();}
-    if(op=="createFolder") {require(validPath(path),"invalidName");require(one("SELECT id FROM folders WHERE path=?",{path}).isEmpty(),"alreadyExists");folder(path);return ok();}
+    if (op == "createFolder") {
+        const auto icon = a.value("icon", QStringLiteral("folder")).toString();
+        require(validPath(path), "invalidName");
+        require(validFolderIcon(icon), "invalidIcon");
+        require(one("SELECT id FROM folders WHERE path=?", {path}).isEmpty(), "alreadyExists");
+        folder(path);
+        query("UPDATE folders SET icon=? WHERE path=?", {icon, path});
+        return ok();
+    }
     if(op=="renameFolder") {require(!one("SELECT id FROM folders WHERE path=? AND deleted=''",{path}).isEmpty(),"notFound");auto target=a.value("target").toString();relocate(path,target,true);return {{"ok",true},{"newPath",target}};}
     if (op == "moveFolder") {
         const auto current = one("SELECT id FROM folders WHERE path=? AND deleted=''", {path});
@@ -561,10 +575,7 @@ QVariantMap ManagedStore::Impl::run(const QString &op,const QVariantMap &a) {
         require(!current.isEmpty(), "notFound");
         const auto target = a.value("target").toString(), icon = a.value("icon").toString();
         require(validPath(target), "invalidName");
-        require(QStringList{"folder", "editRounded", "album", "home", "flag", "heart", "calendar", "music", "grid", "sparkle", "artist", "reminder",
-            "archive", "envelope", "wallpaper", "keyboard", "settings", "queueList", "radio", "theme", "sliders", "circle", "waves", "info",
-            "work", "study", "sport", "running", "cycling", "swimming", "fitness", "basketball", "football", "badminton", "tennis",
-            "shopping", "travel", "food", "coffee", "health", "finance", "gift", "pets", "garden", "car", "code", "camera", "ideas"}.contains(icon), "invalidIcon");
+        require(validFolderIcon(icon), "invalidIcon");
         const auto parent = parentFolder(target);
         require(parent != path && !parent.startsWith(path + '/'), "invalidParent");
         require(parent.isEmpty() || !one("SELECT id FROM folders WHERE path=? AND deleted=''", {parent}).isEmpty(), "missingFolder");
@@ -650,17 +661,7 @@ QVariantMap ManagedStore::Impl::run(const QString &op,const QVariantMap &a) {
         auto n=note(path);require(n["hash"].toString()==a.value("baseHash").toString(),"conflict");const auto title=a.value("title").toString().trimmed();require(!title.isEmpty()&&title.size()<=300&&!title.contains('\n'),"invalidName");
         refreshIndex();
         for(const auto &v:query("SELECT * FROM notes WHERE deleted=''")) {auto linked=v.toMap();const auto source=linked["path"].toString();QString text=linked["text"].toString();LinkPaths::rewrite(text,[&](const QString &target,bool wiki){if(!wiki)return target;const auto choices=index.resolve(source,target,true);if(choices.size()!=1||choices[0]!=path)return target;return relativeManagedPath(source,path);});if(text!=linked["text"].toString())updateText(linked,text);}
-        n=note(path);QString text=n["text"].toString();int start=0;
-        if(text.startsWith("---\n")) {
-            const auto end=QRegularExpression("(?m)^(?:---|\\.\\.\\.)[ \\t]*$").match(text,4);
-            if(end.hasMatch())start=end.capturedEnd();
-        }
-        while(start<text.size() && (text[start]=='\n' || text[start]=='\r'))++start;
-        const auto heading=QRegularExpression(" {0,3}#[ \\t]+[^\n]*").match(text,start);
-        if(heading.hasMatch() && heading.capturedStart()==start) {
-            QString escaped;for(const auto c:title){if(QString("\\`*_{}[]<>~#").contains(c))escaped+='\\';escaped+=c;}
-            text.replace(start,heading.capturedLength(),"# "+escaped);
-        }
+        n=note(path);const QString text=n["text"].toString();
         updateText(n,Knowledge::update(text,"title",title));return ok();
     }
     if(op=="setProperty") {auto n=note(path);require(n["hash"].toString()==a.value("baseHash").toString(),"conflict");const auto key=a.value("key").toString();require(QRegularExpression("^[A-Za-z_][A-Za-z0-9_-]*$").match(key).hasMatch()&&key!="nextnotes_id","invalidProperty");updateText(n,Knowledge::update(n["text"].toString(),key,a.value("value"),a.value("remove").toBool()));return ok();}

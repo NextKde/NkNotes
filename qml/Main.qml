@@ -64,7 +64,7 @@ ApplicationWindow {
     readonly property bool showSidebar: hasLibrary && (width >= 1000 ? sidebarRequested : width >= 800 && compactSidebarRequested)
     readonly property bool showList: hasLibrary && !(width < 1000 && showSidebar) && (width >= 800 || listRequested || (trashView ? !recycleBin.currentEntry : !controller.path))
     readonly property real editorX: (showSidebar ? sidebarWidth : 0) + (showList ? (width < 800 ? width : listWidth) : 0)
-    readonly property bool popupsOpen: (source.popupActive || knowledgePanel.popupActive || smartDialog.visible || missingLinkDialog.visible) || libraryActions.popupActive || organizer.popupActive || recycleBin.popupActive || actionMenu.visible || outputMenu.visible || formatMenu.visible || tableMenu.visible || linkPanel.visible || paragraphSelect.popupOpened || namePanel.visible || recoveryDialog.visible || discardDialog.visible || folderPanel.visible || notesSettings.visible || discardRecoveryDialog.visible
+    readonly property bool popupsOpen: (source.popupActive || knowledgePanel.popupActive || smartDialog.visible || missingLinkDialog.visible) || libraryActions.popupActive || organizer.popupActive || recycleBin.popupActive || actionMenu.visible || outputMenu.visible || formatMenu.visible || tableMenu.visible || linkPanel.visible || paragraphMenu.visible || namePanel.visible || recoveryDialog.visible || discardDialog.visible || folderPanel.visible || notesSettings.visible || discardRecoveryDialog.visible
     onClosing: function(close) {
         if (source.exporting) { close.accepted = false; source.notify("正在导出，请完成后再关闭窗口"); return }
         controller.setPreference("width", width); controller.setPreference("height", height)
@@ -133,7 +133,8 @@ ApplicationWindow {
         function handleKey(event) {
             if (model === controller.noteModel && event.modifiers === Qt.ControlModifier && event.key === Qt.Key_A) { organizer.selectAll(); event.accepted = true; return }
             if (model === controller.noteModel && event.modifiers === Qt.ControlModifier && event.key === Qt.Key_Space && currentIndex >= 0) { organizer.toggle(controller.notes[currentIndex].path); event.accepted = true; return }
-            if (model === controller.noteModel && event.key === Qt.Key_Escape && organizer.selectionMode) { organizer.clearSelection(); event.accepted = true; return }
+            if (keyboardList === childFolderList && event.modifiers === Qt.ControlModifier && event.key === Qt.Key_A) { organizer.beginSelection("folders"); organizer.selectAll(); event.accepted = true; return }
+            if (event.key === Qt.Key_Escape && organizer.selectionMode) { organizer.clearSelection(); event.accepted = true; return }
             if (model === controller.noteModel && currentItem && (event.key === Qt.Key_Menu || (event.key === Qt.Key_F10 && event.modifiers === Qt.ShiftModifier))) {
                 organizer.openMenu(currentItem, controller.notes[currentIndex].path)
                 event.accepted = true; return
@@ -181,7 +182,8 @@ ApplicationWindow {
         signal clickedItem(int button, int modifiers, point position)
         anchors.fill: parent
         acceptedButtons: Qt.LeftButton | Qt.RightButton
-        drag.target: pressedButtons & Qt.LeftButton ? organizePreview : null
+        property bool dragEnabled: true
+        drag.target: dragEnabled && (pressedButtons & Qt.LeftButton) ? organizePreview : null
         drag.axis: Drag.XAndYAxis
         onPressed: function(mouse) {
             didDrag = false
@@ -319,6 +321,9 @@ ApplicationWindow {
     component HeaderAction: ToolbarAction {
         implicitWidth: tokens.headerButtonHeight
         implicitHeight: tokens.headerButtonHeight
+        width: tokens.headerButtonHeight; height: tokens.headerButtonHeight
+        Layout.minimumHeight: tokens.headerButtonHeight
+        Layout.maximumHeight: tokens.headerButtonHeight
         iconSize: tokens.headerIconSize
     }
     component ListNavigationActions: LiquidActionButtonGroup {
@@ -327,8 +332,8 @@ ApplicationWindow {
         materialForm: false; backdrop: readingBackdrop
         icons: root.currentFolder ? ["back", "more"] : ["more"]
         labels: root.currentFolder
-            ? ["返回" + (organizer.parentFolder(root.currentFolder) ? organizer.parentFolder(root.currentFolder).split("/").pop() : "全部笔记"), "笔记列表操作"]
-            : ["笔记列表操作"]
+            ? ["返回" + (organizer.parentFolder(root.currentFolder) ? organizer.parentFolder(root.currentFolder).split("/").pop() : "全部笔记"), "列表操作"]
+            : ["列表操作"]
         enabledActions: root.currentFolder ? [!controller.busy, true] : [true]
         onTriggered: function(index) {
             if (root.currentFolder && index === 0) root.browseParentFolder()
@@ -401,7 +406,7 @@ ApplicationWindow {
             id: entryButton
             width: parent.width - (entryMenu.visible ? 28 : 0)
             iconName: controller.folderIcons[entry.folderPath] || "folder"; text: entry.folderPath.split("/").pop()
-            iconSource: FolderIcons.source(iconName, tokens.primaryYellow)
+
             checked: !root.trashView && (controller.filter === "folder:" + entry.folderPath || (entry.highlightBranch && controller.filter.startsWith("folder:" + entry.folderPath + "/")))
             focusPolicy: Qt.StrongFocus
             activeFocusOnTab: !entry.keyboardView
@@ -488,64 +493,146 @@ ApplicationWindow {
             }
             ListNavigationActions {}
         }
-        RowLayout {
+        Item {
             id: headerActions
             visible: root.hasLibrary
             x: root.editorX < root.width ? Math.max(178, root.editorX + 12) : 178
             anchors.verticalCenter: parent.verticalCenter
-            // Position against the actual declared circle, including its click inset.
             readonly property real controlsLeft: windowControls.x + (windowControls.buttonLayout.length ? windowControls.buttonLayout[0].x : 0)
-            width: Math.max(0, controlsLeft - 10 - x); height: tokens.headerButtonHeight; spacing: 10
-            readonly property bool wideSearch: root.width >= 1320 && width >= 330
+            width: Math.max(0, controlsLeft - 10 - x); height: tokens.headerButtonHeight
+            readonly property bool wideSearch: root.width >= 1320 && width >= noteActions.implicitWidth + editorActions.implicitWidth + tokens.headerButtonHeight + 210
             readonly property bool searchShown: wideSearch || root.searchOpen || controller.query.length > 0
             readonly property bool searching: !wideSearch && searchShown
-            HeaderAction { objectName: "newNoteButton"; visible: !headerActions.searching; iconName: "editRounded"; help: "新建笔记 · Ctrl+N"; enabled: !controller.busy; onClicked: root.newNote() }
-            LiquidActionButtonGroup {
-                id: historyButtons
-                visible: parent.width > 245 && !headerActions.searching
-                buttonSize: tokens.headerButtonHeight; materialForm: false; backdrop: readingBackdrop
-                icons: ["undo", "forward"]; labels: [controller.undoText, controller.redoText]
-                enabledActions: [!root.popupsOpen && controller.canUndo, !root.popupsOpen && controller.canRedo]
-                onTriggered: function(index) { if (index === 0) controller.undo(); else controller.redo() }
+            Row {
+                id: noteActions
+                visible: !headerActions.searching
+                height: parent.height; spacing: 8
+                HeaderAction { objectName: "newNoteButton"; iconName: "editRounded"; help: "新建笔记 · Ctrl+N"; enabled: !controller.busy; onClicked: root.newNote() }
+                HeaderAction { id: moreButton; enabled: !!controller.path; iconName: "more"; help: "更多笔记操作"; onClicked: actionMenu.openFromButton(moreButton) }
             }
-            HeaderAction { id: moreButton; enabled: !!controller.path; visible: !headerActions.searching; iconName: "more"; help: "更多笔记操作"; onClicked: { actionMenu.openFromButton(moreButton) } }
-            Item { visible: !headerActions.searching; Layout.fillWidth: true; Layout.minimumWidth: 0 }
-            HeaderAction { iconName: "settings"; help: "设置 · Ctrl+,"; visible: !headerActions.searching; onClicked: notesSettings.show(0) }
-            Item {
-                visible: headerActions.searchShown
-                Layout.preferredWidth: 160; Layout.fillWidth: headerActions.searching
-                Layout.minimumWidth: 0; Layout.fillHeight: true
-                clip: true
-                LiquidTextField {
-                    id: search
-                    objectName: "searchField"
-                    anchors.fill: parent
-                    materialForm: false; liquidFinish: true; liquidIntensity: "light"; backdrop: readingBackdrop
-                    placeholderText: "搜索笔记"; text: controller.query
-                    leftPadding: 30; rightPadding: headerActions.searching ? 36 : 10
-                    VectorIcon {
-                        x: 8; anchors.verticalCenter: parent.verticalCenter
-                        name: "search"; size: tokens.headerIconSize; color: search.textColor
+            Flickable {
+                id: editorActionsViewport
+                visible: !headerActions.searching
+                readonly property real availableWidth: Math.max(0, globalActions.x - noteActions.width - 24)
+                width: Math.min(editorActions.implicitWidth, availableWidth); height: tokens.headerButtonHeight
+                anchors.verticalCenter: parent.verticalCenter
+                x: Math.max(noteActions.width + 12, Math.min((parent.width - width) / 2, globalActions.x - 12 - width))
+                contentWidth: editorActions.implicitWidth; contentHeight: height
+                flickableDirection: Flickable.HorizontalFlick
+                boundsBehavior: Flickable.StopAtBounds
+                // Keep the shared surface edges intact when no scrolling is needed.
+                clip: contentWidth > width
+                onWidthChanged: contentX = Math.max(0, Math.min(contentX, contentWidth - width))
+                onContentWidthChanged: contentX = Math.max(0, Math.min(contentX, contentWidth - width))
+                ScrollBar.horizontal: ScrollBar { policy: ScrollBar.AsNeeded; height: 3 }
+                WheelHandler {
+                    onWheel: function(event) {
+                        if (editorActionsViewport.contentWidth <= editorActionsViewport.width) return
+                        const delta = event.pixelDelta.x || event.pixelDelta.y || event.angleDelta.x / 2 || event.angleDelta.y / 2
+                        editorActionsViewport.contentX = Math.max(0, Math.min(editorActionsViewport.contentWidth - editorActionsViewport.width, editorActionsViewport.contentX - delta))
+                        event.accepted = true
                     }
-                    onTextEdited: if (!inputMethodComposing) root.updateGlobalQuery(text)
-                    onInputMethodComposingChanged: if (!inputMethodComposing && text !== controller.query) root.updateGlobalQuery(text)
-                    onActiveFocusChanged: if (!activeFocus && !headerActions.wideSearch && text.length === 0 && root.searchOpen) root.closeGlobalSearch()
-                    Keys.onEscapePressed: function(event) { if (!inputMethodComposing) { root.closeGlobalSearch(); event.accepted = true } }
-                    Accessible.name: "搜索所有笔记"
+                }
+                Connections {
+                    target: root
+                    function onActiveFocusItemChanged() {
+                        const item = root.activeFocusItem
+                        if (!item || !editorActionsViewport.visible) return
+                        let ancestor = item
+                        while (ancestor && ancestor !== editorActions) ancestor = ancestor.parent
+                        if (!ancestor) return
+                        const left = item.mapToItem(editorActions, 0, 0).x
+                        const desired = left < editorActionsViewport.contentX ? left
+                            : Math.max(editorActionsViewport.contentX, left + item.width - editorActionsViewport.width)
+                        editorActionsViewport.contentX = Math.max(0, Math.min(editorActionsViewport.contentWidth - editorActionsViewport.width, desired))
+                    }
+                }
+                LiquidActionButtonGroup {
+                    id: editorActions
+                    objectName: "bodyEditingButtonGroup"
+                    height: tokens.headerButtonHeight
+                    anchors.verticalCenter: parent.verticalCenter
+                    clip: false
+                    buttonSize: tokens.headerButtonHeight; materialForm: false; backdrop: readingBackdrop
+                    icons: session.sourceMode ? ["undo", "forward", ""] : ["undo", "forward", "", "", "", "", "reminder", "grid", "more"]
+                    labels: session.sourceMode ? [controller.undoText, controller.redoText, "返回正文"]
+                        : [controller.undoText, controller.redoText, "段落样式", "粗体 · Ctrl+B", "斜体 · Ctrl+I", "删除线 · Ctrl+Shift+X", "列表与插入", "表格与行列操作", "更多编辑工具"]
+                    enabledActions: session.sourceMode
+                        ? [!root.popupsOpen && controller.canUndo, !root.popupsOpen && controller.canRedo, source.visible && !controller.busy && !session.composing]
+                        : [!root.popupsOpen && controller.canUndo, !root.popupsOpen && controller.canRedo, root.canFormat, root.canFormat, root.canFormat, root.canFormat, root.canFormat, root.canFormat, source.visible && !source.exporting]
+                    onTriggered: function(index) {
+                        if (index === 0) controller.undo()
+                        else if (index === 1) controller.redo()
+                        else if (session.sourceMode) session.execute("sourceMode")
+                        else if (index === 2) paragraphMenu.openFromButton(paragraphButton)
+                        else if (index <= 5) root.applyFormat(["bold", "italic", "strike"][index - 3])
+                        else if (index === 6) formatMenu.openFromButton(insertButton)
+                        else if (index === 7) tableMenu.openFromButton(tableButton)
+                        else source.openTools(editorToolsButton)
+                    }
+                    // Text marks fill the cells missing from the shared icon catalogue.
+                    Repeater {
+                        model: session.sourceMode ? ["正文"] : [session.headingLevel ? "H" + session.headingLevel : "正文", "B", "I", "S"]
+                        Text {
+                            required property string modelData
+                            required property int index
+                            x: (index + 2) * editorActions.buttonSize
+                            width: editorActions.buttonSize; height: editorActions.buttonSize
+                            text: modelData; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                            color: editorActions.enabledActions[index + 2] ? AppTheme.text : AppTheme.disabledText
+                            font.pixelSize: index === 0 ? 10 : 14
+                            font.bold: index === 1; font.italic: index === 2; font.strikeout: index === 3
+                            Accessible.ignored: true
+                        }
+                    }
+                    Item { id: paragraphButton; x: 2 * editorActions.buttonSize; width: editorActions.buttonSize; height: width }
+                    Item { id: insertButton; x: 6 * editorActions.buttonSize; width: editorActions.buttonSize; height: width }
+                    Item { id: tableButton; x: 7 * editorActions.buttonSize; width: editorActions.buttonSize; height: width }
+                    Item { id: editorToolsButton; x: 8 * editorActions.buttonSize; width: editorActions.buttonSize; height: width }
+                }
+            }
+            RowLayout {
+                id: globalActions
+                anchors.right: parent.right
+                width: headerActions.searching ? parent.width : implicitWidth
+                height: parent.height; spacing: 10
+                HeaderAction { iconName: "settings"; help: "设置 · Ctrl+,"; visible: !headerActions.searching; onClicked: notesSettings.show(0) }
+                Item {
+                    visible: headerActions.searchShown
+                    Layout.preferredWidth: 160; Layout.fillWidth: headerActions.searching
+                    Layout.minimumWidth: 0; Layout.fillHeight: true
+                    clip: true
+                    LiquidTextField {
+                        id: search
+                        objectName: "searchField"
+                        anchors.fill: parent
+                        materialForm: false; liquidFinish: true; liquidIntensity: "light"; backdrop: readingBackdrop
+                        placeholderText: "搜索笔记"; text: controller.query
+                        leftPadding: 30; rightPadding: headerActions.searching ? 36 : 10
+                        VectorIcon {
+                            x: 8; anchors.verticalCenter: parent.verticalCenter
+                            name: "search"; size: tokens.headerIconSize; color: search.textColor
+                        }
+                        onTextEdited: if (!inputMethodComposing) root.updateGlobalQuery(text)
+                        onInputMethodComposingChanged: if (!inputMethodComposing && text !== controller.query) root.updateGlobalQuery(text)
+                        onActiveFocusChanged: if (!activeFocus && !headerActions.wideSearch && text.length === 0 && root.searchOpen) root.closeGlobalSearch()
+                        Keys.onEscapePressed: function(event) { if (!inputMethodComposing) { root.closeGlobalSearch(); event.accepted = true } }
+                        Accessible.name: "搜索所有笔记"
+                    }
+                    HeaderAction {
+                        anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+                        visible: headerActions.searching
+                        iconName: "plus"; contentItem.rotation: 45; help: "关闭搜索"
+                        enabled: !search.inputMethodComposing
+                        onClicked: root.closeGlobalSearch()
+                    }
                 }
                 HeaderAction {
-                    anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
-                    visible: headerActions.searching
-                    iconName: "plus"; contentItem.rotation: 45; help: "关闭搜索"
-                    enabled: !search.inputMethodComposing
-                    onClicked: root.closeGlobalSearch()
+                    objectName: "searchToggleButton"
+                    visible: !headerActions.searchShown
+                    iconName: "search"; help: "搜索所有笔记"; enabled: !controller.busy
+                    onClicked: root.openGlobalSearch()
                 }
-            }
-            HeaderAction {
-                objectName: "searchToggleButton"
-                visible: !headerActions.searchShown
-                iconName: "search"; help: "搜索所有笔记"; enabled: !controller.busy
-                onClicked: root.openGlobalSearch()
             }
         }
         NotesWindowControls {
@@ -565,11 +652,11 @@ ApplicationWindow {
             id: source
             session: root.session; controller: root.controller
             sceneItem: readingScene
-            allowRestoreFocus: !root.popupsOpen
+            allowRestoreFocus: !root.popupsOpen && !noteNameEditor.editing
             visible: root.hasLibrary && !root.trashView && !!controller.path && root.editorX < root.width
-            x: root.editorX; y: formatBar.y + formatBar.height + 8 + (controller.externalDocument ? 36 : 0) + (findBar.visible ? findBar.implicitHeight + 8 : 0)
+            x: root.editorX; y: 8 + (controller.externalDocument ? 36 : noteNameEditor.height + 8) + (findBar.visible ? findBar.implicitHeight + 8 : 0)
             width: Math.max(0, parent.width - x); height: Math.max(0, parent.height - y - statusArea.height)
-            bodySize: notesSettings.bodySize; readingWidth: tokens.readingWidth; inset: tokens.inset
+            bodySize: notesSettings.bodySize; readingWidth: tokens.readingWidth; inset: tokens.editorInset
         }
 
 
@@ -595,43 +682,6 @@ ApplicationWindow {
         Qt.callLater(deliverFormat)
     }
     Connections { target: session; function onStateChanged() { if (root.pendingFormat) Qt.callLater(root.deliverFormat) } }
-    Row {
-        id: formatBar
-        visible: source.visible
-        x: root.editorX + 16; y: 6; height: 26; spacing: 8
-        LiquidActionButton { visible: session.sourceMode; text: "返回正文"; materialForm: true; implicitHeight: 26; enabled: !controller.busy && !session.composing; onClicked: session.execute("sourceMode") }
-        LiquidSelect {
-            visible: !session.sourceMode
-            id: paragraphSelect
-            implicitHeight: 26; materialForm: false; backdrop: readingBackdrop
-            appearanceMode: AppTheme.appearanceMode
-            model: ["正文", "标题 1", "标题 2", "标题 3", "标题 4", "标题 5", "标题 6"]
-            currentIndex: session.headingLevel
-            enabled: root.canFormat
-            Accessible.name: "段落样式"
-            onActivated: function(index) { root.applyFormat(index === 0 ? "paragraph" : "heading" + index) }
-        }
-        LiquidActionButtonGroup {
-            visible: !session.sourceMode
-            buttonSize: 26; materialForm: false; backdrop: readingBackdrop
-            icons: ["", "", ""]; labels: ["粗体 · Ctrl+B", "斜体 · Ctrl+I", "删除线 · Ctrl+Shift+X"]
-            enabledActions: [root.canFormat, root.canFormat, root.canFormat]
-            onTriggered: function(index) { root.applyFormat(["bold", "italic", "strike"][index]) }
-            // Shared group owns surfaces and interaction; the pinned icon catalogue
-            // has no italic/strike glyphs, so supply typographic marks only.
-            Row {
-                anchors.fill: parent
-                Repeater {
-                    model: ["B", "I", "S"]
-                    Text { required property string modelData; required property int index; width: 26; height: 26; text: modelData; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; color: root.canFormat ? AppTheme.text : AppTheme.disabledText; font.pixelSize: 14; font.bold: index === 0; font.italic: index === 1; font.strikeout: index === 2; Accessible.ignored: true }
-                }
-            }
-        }
-        ToolbarAction { id: insertButton; visible: !session.sourceMode; iconName: "reminder"; help: "列表与插入"; enabled: root.canFormat; onClicked: formatMenu.openFromButton(insertButton) }
-        ToolbarAction { id: tableButton; visible: !session.sourceMode; iconName: "grid"; help: "表格与行列操作"; enabled: root.canFormat; onClicked: tableMenu.openFromButton(tableButton) }
-        ToolbarAction { id: editorToolsButton; visible: !session.sourceMode; iconName: "more"; help: "更多编辑工具"; enabled: !source.exporting; onClicked: source.openTools(editorToolsButton) }
-        Label { visible: root.width - root.editorX > 640; anchors.verticalCenter: parent.verticalCenter; text: session.formatState; font.pixelSize: 10; color: AppTheme.mutedText }
-    }
     LiquidBackdrop { id: readingBackdrop; sourceItem: readingScene; registerAsDefault: false }
     KosEmptyState {
         anchors.centerIn: parent; width: Math.min(420, root.width - 64)
@@ -721,7 +771,7 @@ ApplicationWindow {
                 visible: !!root.currentFolder && (root.childFolders.length > 0 || organizer.dragKind === "folder")
                 Layout.fillWidth: true
                 Layout.preferredHeight: root.childFoldersExpanded
-                    ? Math.min(childFolderHeading.implicitHeight + 6 + childFolderList.contentHeight, Math.max(100, noteColumnLayout.height * 0.35))
+                    ? Math.min(childFolderHeading.implicitHeight + 6 + childFolderList.contentHeight + 8, Math.max(100, noteColumnLayout.height * 0.35))
                     : childFolderHeading.implicitHeight
                 ColumnLayout {
                     anchors.fill: parent; spacing: 6
@@ -730,7 +780,7 @@ ApplicationWindow {
                         Layout.fillWidth: true; spacing: 4
                         Label {
                             Layout.fillWidth: true; leftPadding: 0
-                            text: "子文件夹 · " + root.childFolders.length
+                            text: "子文件夹 · " + root.childFolders.length + (organizer.folderSelectionMode ? " · 已选 " + organizer.selectedFolderPaths.length : "")
                             color: AppTheme.mutedText; font.pixelSize: 11; font.weight: Font.Medium
                             DropArea {
                                 id: collapsedFolderDrop
@@ -756,11 +806,16 @@ ApplicationWindow {
                     Item {
                         visible: root.childFoldersExpanded
                         Layout.fillWidth: true; Layout.fillHeight: true
+                        Rectangle {
+                            anchors.fill: parent; radius: 10
+                            color: AppTheme.dark ? "#303032" : "#f7f7f8"
+                        }
                         KeyboardList {
                             id: childFolderList
                             visible: childFolderSection.visible && root.childFoldersExpanded
                             anchors.fill: parent
-                            clip: true; spacing: 4
+                            anchors.topMargin: 4; anchors.bottomMargin: 4
+                            clip: true; spacing: 0
                             model: root.childFolders
                             Accessible.name: "子文件夹"
                             delegate: ItemDelegate {
@@ -769,32 +824,43 @@ ApplicationWindow {
                                 required property int index
                                 readonly property var details: controller.folderDetails[modelData] || ({})
                                 readonly property string folderIcon: controller.folderIcons[modelData] || "folder"
-                                readonly property string iconUrl: FolderIcons.source(folderIcon, tokens.primaryYellow)
+
                                 readonly property string summary: (details.createdUtc
                                     ? new Date(details.createdUtc).toLocaleDateString(Qt.locale(), "yyyy/M/d") + " 创建"
                                     : "创建日期未记录") + " · " + (details.noteCount || 0) + " 篇笔记"
-                                width: childFolderList.width; height: tokens.noteRowHeight
-                                leftPadding: 12; rightPadding: 12; topPadding: 12; bottomPadding: 12
+                                width: childFolderList.width
+                                height: contentItem.implicitHeight + topPadding + bottomPadding
+                                leftPadding: organizer.folderSelectionMode ? 36 : 12
+                                rightPadding: 12; topPadding: 7; bottomPadding: 7
+                                readonly property bool bulkSelected: organizer.selectedFolderPaths.includes(modelData)
                                 focusPolicy: Qt.StrongFocus; activeFocusOnTab: false
-                                function activate() { root.browseCategory("folder:" + modelData) }
+                                function activate() {
+                                    if (organizer.folderSelectionMode) organizer.toggleFolder(modelData)
+                                    else root.browseCategory("folder:" + modelData)
+                                }
                                 function openContext(position) { organizer.openFolderMenu(modelData, childFolderRow, position || Qt.point(width / 2, height / 2)) }
                                 Keys.onPressed: function(event) { childFolderList.handleKey(event) }
                                 onActiveFocusChanged: if (activeFocus) { childFolderList.currentIndex = index; childFolderList.cursorKey = modelData }
-                                background: Rectangle {
-                                    radius: 10; border.width: 0
-                                    color: childFolderRow.hovered ? AppTheme.controlBackground : "transparent"
+                                background: Item {
+                                    Rectangle {
+                                        anchors.fill: parent; anchors.margins: 4
+                                        radius: 7; border.width: 0
+                                        color: childFolderRow.bulkSelected ? tokens.navigationSelected : childFolderRow.hovered ? AppTheme.controlBackground : "transparent"
+                                    }
                                 }
                                 contentItem: Column {
                                     spacing: 3
-                                    Row {
+                                    RowLayout {
                                         width: parent.width; spacing: 6
                                         Item {
-                                            width: 16; height: 18
-                                            VectorIcon { anchors.centerIn: parent; visible: !childFolderRow.iconUrl; name: childFolderRow.folderIcon; size: 16; color: tokens.primaryYellow }
-                                            Image { anchors.centerIn: parent; visible: !!childFolderRow.iconUrl; source: childFolderRow.iconUrl; width: 16; height: 16; sourceSize: Qt.size(32, 32) }
+                                            Layout.preferredWidth: 16; Layout.preferredHeight: 16
+                                            Layout.alignment: Qt.AlignVCenter
+                                            VectorIcon { anchors.centerIn: parent; name: childFolderRow.folderIcon; size: 16; color: tokens.primaryYellow }
+
                                         }
                                         Label {
-                                            width: parent.width - 22
+                                            Layout.fillWidth: true; Layout.minimumWidth: 0
+                                            Layout.alignment: Qt.AlignVCenter
                                             text: childFolderRow.modelData.split("/").pop(); textFormat: Text.PlainText
                                             elide: Text.ElideRight; font.pixelSize: 14; font.weight: Font.DemiBold; color: AppTheme.text
                                         }
@@ -803,15 +869,24 @@ ApplicationWindow {
                                 }
                                 OrganizePointer {
                                     folderPath: childFolderRow.modelData; enabled: !controller.busy
+                                    dragEnabled: !organizer.folderSelectionMode
                                     onClickedItem: function(button, modifiers, position) {
                                         childFolderRow.forceActiveFocus(Qt.MouseFocusReason)
                                         if (button === Qt.RightButton) childFolderRow.openContext(position)
                                         else childFolderRow.activate()
                                     }
                                 }
+                                NotesSelectionBox {
+                                    visible: organizer.folderSelectionMode; enabled: !controller.busy
+                                    x: 6; y: 7; width: 24; height: 24; padding: 4
+                                    checked: childFolderRow.bulkSelected; text: ""
+                                    Accessible.name: "选择文件夹 " + childFolderRow.modelData.split("/").join(" › ")
+                                    onClicked: organizer.toggleFolder(childFolderRow.modelData)
+                                }
                                 FolderDropTarget { folderPath: childFolderRow.modelData }
                                 onClicked: activate()
                                 Accessible.role: Accessible.ListItem
+                                Accessible.selected: bulkSelected
                                 Accessible.name: "文件夹 " + modelData.split("/").pop() + "，" + summary
                                 Accessible.onPressAction: activate()
                             }
@@ -853,6 +928,7 @@ ApplicationWindow {
                     Keys.onPressed: function(event) { ListView.view.handleKey(event) }
                     onActiveFocusChanged: if (activeFocus) { ListView.view.currentIndex = index; ListView.view.cursorKey = ListView.view.keyAt(index) }
                     function activate() {
+                        if (organizer.noteSelectionMode) { organizer.toggle(modelData.path); return }
                         organizer.clearSelection()
                         organizer.selectionAnchor = modelData.path
                         controller.openNote(modelData.path, modelData.match === undefined ? -1 : modelData.match)
@@ -874,8 +950,8 @@ ApplicationWindow {
                         color: AppTheme.border; opacity: 0.6
                     }
                     // Show selection controls only during an explicit multi-selection.
-                    leftPadding: organizer.selectionMode ? 36 : 12; topPadding: contentTopInset + groupHeight; bottomPadding: 12
-                    highlighted: organizer.selectionMode ? bulkSelected : organizer.contextPath ? modelData.path === organizer.contextPath : (modelData.id === controller.selectedId && modelData.path === controller.path)
+                    leftPadding: organizer.noteSelectionMode ? 36 : 12; topPadding: contentTopInset + groupHeight; bottomPadding: 12
+                    highlighted: organizer.noteSelectionMode ? bulkSelected : organizer.contextPath ? modelData.path === organizer.contextPath : (modelData.id === controller.selectedId && modelData.path === controller.path)
                     background: Rectangle {
                         y: noteRow.groupHeight; height: noteRow.height - y
                         radius: 10; color: noteRow.highlighted ? tokens.notesYellow : noteRow.hovered ? AppTheme.controlBackground : "transparent"
@@ -909,7 +985,7 @@ ApplicationWindow {
                     }
                     NotesSelectionBox {
                         id: noteSelectionBox
-                        visible: organizer.selectionMode
+                        visible: organizer.noteSelectionMode
                         x: 6; y: noteRow.groupHeight + noteRow.contentTopInset; width: 24; height: 24
                         padding: 4
                         checked: noteRow.bulkSelected; text: ""
@@ -919,7 +995,7 @@ ApplicationWindow {
                     onClicked: activate()
                     Accessible.role: Accessible.ListItem
                     Accessible.focusable: true
-                    Accessible.selected: organizer.selectionMode ? bulkSelected : highlighted
+                    Accessible.selected: organizer.noteSelectionMode ? bulkSelected : highlighted
                     Accessible.onPressAction: activate()
                     Accessible.name: modelData.title + "，" + root.noteLocation(modelData.path) + (rowStatus ? ", " + rowStatus : "")
                 }
@@ -956,8 +1032,16 @@ ApplicationWindow {
         id: editorChrome
         visible: root.hasLibrary && !root.trashView && root.editorX < root.width
         x: root.editorX; width: root.width - x; height: parent.height
+        NoteNameEditor {
+            id: noteNameEditor
+            visible: source.visible && !controller.externalDocument
+            x: tokens.editorInset; y: 8; width: Math.max(0, parent.width - tokens.editorInset * 2)
+            height: implicitHeight
+            controller: root.controller; canRename: root.canEdit
+            onSubmitted: root.editNote()
+        }
         ColumnLayout {
-            id: findBar; visible: false; x: tokens.inset; y: formatBar.y + formatBar.height + 8 + (controller.externalDocument ? 36 : 0); width: parent.width - tokens.inset * 2; spacing: 4
+            id: findBar; visible: false; x: tokens.editorInset; y: 8 + (controller.externalDocument ? 36 : noteNameEditor.height + 8); width: Math.max(0, parent.width - tokens.editorInset * 2); spacing: 4
             RowLayout {
                 Layout.fillWidth: true; spacing: 4
                 LiquidTextField { id: localFind; Layout.fillWidth: true; implicitHeight: 26; materialForm: true; placeholderText: "查找当前正文"; Accessible.name: "正文查找"; onTextEdited: if (!inputMethodComposing) root.updateSearch(); onInputMethodComposingChanged: if (!inputMethodComposing) root.updateSearch(); onAccepted: root.findNext() }
@@ -976,7 +1060,7 @@ ApplicationWindow {
         }
         RowLayout {
             visible: controller.externalDocument
-            x: tokens.inset; y: formatBar.y + formatBar.height + 8; width: parent.width - tokens.inset * 2
+            x: tokens.editorInset; y: 8; width: Math.max(0, parent.width - tokens.editorInset * 2)
             Label { Layout.fillWidth: true; text: "外部文件 · " + controller.path.slice(9); textFormat: Text.PlainText; elide: Text.ElideMiddle; color: AppTheme.mutedText; font.pixelSize: 12 }
             LiquidActionButton { text: "导入为笔记…"; materialForm: true; enabled: !controller.busy; onClicked: controller.importExternal() }
             LiquidActionButton { text: "结束临时编辑"; materialForm: true; enabled: !controller.busy; onClicked: controller.closeExternal() }
@@ -994,7 +1078,7 @@ ApplicationWindow {
         x: root.hasLibrary && root.editorX < root.width ? root.editorX : 16; width: Math.max(0, root.width - x - 16)
         anchors.bottom: parent.bottom; spacing: 6
         visible: (!root.trashView && root.editorX < root.width) || !!controller.error
-        Label { Layout.fillWidth: true; elide: Text.ElideRight; text: controller.status + (controller.path && source.editorState.stats && source.editorState.stats.characters !== undefined ? " · " + source.editorState.stats.characters + " 字 · " + (source.editorState.stats.approximate ? "约 " : "") + source.editorState.stats.words + " 词 · 约 " + source.editorState.stats.minutes + " 分钟" + (source.editorState.stats.selected ? " · 选中 " + source.editorState.stats.selected + " 字" : "") : ""); color: AppTheme.mutedText; font.pixelSize: 10; leftPadding: tokens.inset; bottomPadding: controller.error ? 0 : 12 }
+        Label { Layout.fillWidth: true; elide: Text.ElideRight; text: controller.status + (source.visible && session.formatState ? " · " + session.formatState : "") + (controller.path && source.editorState.stats && source.editorState.stats.characters !== undefined ? " · " + source.editorState.stats.characters + " 字 · " + (source.editorState.stats.approximate ? "约 " : "") + source.editorState.stats.words + " 词 · 约 " + source.editorState.stats.minutes + " 分钟" + (source.editorState.stats.selected ? " · 选中 " + source.editorState.stats.selected + " 字" : "") : ""); color: AppTheme.mutedText; font.pixelSize: 10; leftPadding: tokens.editorInset; bottomPadding: controller.error ? 0 : 12 }
         Rectangle {
             visible: !!controller.error
             Layout.fillWidth: true; implicitHeight: errorColumn.implicitHeight + 24; radius: 8; color: AppTheme.controlBackground
@@ -1019,16 +1103,30 @@ ApplicationWindow {
     }
     function restoreEditorFocus() {
         // A menu action may open another panel or the local search field.
-        if (!root.popupsOpen && !localFind.activeFocus && source.visible)
+        if (!root.popupsOpen && !localFind.activeFocus && !noteNameEditor.editing && source.visible)
             source.editor.forceActiveFocus(Qt.OtherFocusReason)
     }
     function updateSearch() { source.action("search", {query: localFind.text, caseSensitive: caseSensitive.checked}) }
     function findNext() { if (localFind.text) { updateSearch(); source.action("findNext", {direction: 1}) } }
     function showRecovery() { controller.inspectRecovery(); recoveryDialog.open() }
     function askName(kind, anchor, originMenu) {
-        namePanel.kind = kind
-        nameField.text = kind === "copy" ? "笔记副本" : kind === "move" ? (root.currentNote.title || controller.path.split("/").pop().replace(/\.md$/i, "")) : ""
+        if (kind === "move") { Qt.callLater(noteNameEditor.edit); return }
+        nameField.text = "笔记副本"
         if (originMenu) namePanel.openFromMenu(originMenu); else namePanel.openFromButton(anchor)
+    }
+    NotesPopover {
+        id: paragraphMenu; anchorItem: paragraphButton; sourceItem: readingScene
+        onClosed: Qt.callLater(root.restoreEditorFocus)
+        Repeater {
+            model: ["正文", "标题 1", "标题 2", "标题 3", "标题 4", "标题 5", "标题 6"]
+            LiquidPopoverItem {
+                required property string modelData
+                required property int index
+                text: modelData; font.bold: session.headingLevel === index
+                enabled: root.canFormat
+                onTriggered: root.applyFormat(index === 0 ? "paragraph" : "heading" + index)
+            }
+        }
     }
     NotesPopover {
         id: formatMenu; anchorItem: insertButton; sourceItem: readingScene
@@ -1090,7 +1188,7 @@ ApplicationWindow {
         LiquidPopoverItem { text: root.currentNote.pinned ? "取消置顶" : "置顶"; visible: !controller.externalDocument; height: visible ? implicitHeight : 0; enabled: !!controller.path && !controller.busy; onTriggered: controller.organize(root.currentNote.pinned ? "unpin" : "pin", [controller.path]) }
         LiquidPopoverItem { text: root.currentNote.favorite ? "取消收藏" : "收藏"; visible: !controller.externalDocument; height: visible ? implicitHeight : 0; enabled: !!controller.path && !controller.busy; onTriggered: controller.favorite() }
         LiquidPopoverItem { text: "移动到文件夹…"; visible: !controller.externalDocument; height: visible ? implicitHeight : 0; enabled: !!controller.path && !controller.busy; onTriggered: organizer.moveNotes([controller.path], null, actionMenu) }
-        LiquidPopoverItem { text: "修改标题…"; enabled: !!controller.path && !controller.externalDocument && !controller.busy; onTriggered: root.askName("move", null, actionMenu) }
+        LiquidPopoverItem { text: "修改笔记名称…"; enabled: !!controller.path && !controller.externalDocument && !controller.busy; onTriggered: root.askName("move", null, actionMenu) }
         LiquidPopoverItem { text: "笔记信息…"; enabled: !!controller.path && !controller.externalDocument && !controller.busy; onTriggered: knowledgePanel.open("properties") }
         LiquidPopoverItem { text: "分享与导出…"; enabled: !!controller.path && !controller.busy; onTriggered: outputMenu.openFromMenu(actionMenu) }
         LiquidPopoverItem { text: "创建副本"; enabled: !!controller.path && !controller.externalDocument && !controller.busy; onTriggered: controller.organize("duplicate", [controller.path]) }
@@ -1108,20 +1206,18 @@ ApplicationWindow {
     NotesContentPopover {
         id: namePanel; sourceItem: readingScene; preferredWidth: 330
         onOpened: nameField.forceActiveFocus()
-        property string kind: "move"
-        readonly property bool validName: !!nameField.text.trim() && !/[\r\n]/.test(nameField.text) && (kind === "move" ? nameField.text.trim().length <= 300 : !/[\\/]/.test(nameField.text) && ![".", "..", ".git", ".nextnotes"].includes(nameField.text.trim()))
+        readonly property bool validName: !!nameField.text.trim() && !/[\r\n\\/]/.test(nameField.text) && ![".", "..", ".git", ".nextnotes"].includes(nameField.text.trim())
         contentItem: ColumnLayout {
-            Label { text: namePanel.kind === "move" ? "修改笔记标题" : "保存独立副本"; font.weight: Font.DemiBold; color: AppTheme.text }
-            Label { Layout.fillWidth: true; text: namePanel.kind === "move" ? "修改列表中的标题；正文开头若有标题，也会一并更新。" : "创建一篇独立笔记。"; wrapMode: Text.Wrap; color: AppTheme.mutedText; font.pixelSize: 12 }
-            LiquidTextField { id: nameField; Layout.fillWidth: true; materialForm: true; Accessible.name: namePanel.kind === "move" ? "笔记标题" : "副本名称"; placeholderText: Accessible.name; onAccepted: namePanel.submit() }
+            Label { text: "保存独立副本"; font.weight: Font.DemiBold; color: AppTheme.text }
+            Label { Layout.fillWidth: true; text: "创建一篇独立笔记。"; wrapMode: Text.Wrap; color: AppTheme.mutedText; font.pixelSize: 12 }
+            LiquidTextField { id: nameField; Layout.fillWidth: true; materialForm: true; Accessible.name: "副本名称"; placeholderText: Accessible.name; onAccepted: namePanel.submit() }
             LiquidActionButton { text: "确认"; materialForm: true; enabled: namePanel.validName && !nameField.inputMethodComposing && !controller.busy; onClicked: namePanel.submit() }
         }
         function submit() {
             if (!validName || nameField.inputMethodComposing) return
             const value = nameField.text.trim()
             const folder = controller.path.includes("/") ? controller.path.slice(0, controller.path.lastIndexOf("/") + 1) : ""
-            if (kind === "move") controller.renameNote(value)
-            else controller.saveCopy((controller.externalDocument ? "" : folder) + value.replace(/\.md$/i, "") + ".md")
+            controller.saveCopy((controller.externalDocument ? "" : folder) + value.replace(/\.md$/i, "") + ".md")
             close()
         }
     }
@@ -1140,7 +1236,7 @@ ApplicationWindow {
                 }
                 delegate: NavigationRow {
                     iconName: controller.folderIcons[modelData] || "folder"
-                    iconSource: FolderIcons.source(iconName, tokens.primaryYellow)
+
                     required property var modelData
                     required property int index
                     width: ListView.view.width; text: modelData.split("/").join(" › "); specificationForm: true
@@ -1196,7 +1292,14 @@ ApplicationWindow {
     Shortcut { sequence: "Ctrl+Shift+I"; enabled: !root.popupsOpen && !controller.busy && !session.composing; onActivated: libraryActions.importFiles() }
 
     LibraryActions { id: libraryActions; anchors.fill: parent; controller: root.controller; sceneItem: readingScene; onBrowseRequested: root.revealList() }
-    NotesOrganizer { id: organizer; anchors.fill: parent; controller: root.controller; sceneItem: readingScene; onSmartFolderRequested: smartDialog.open(); onExportRequested: function(paths, folder) { libraryActions.exportSelection(paths, folder) } }
+    NotesOrganizer {
+        id: organizer; anchors.fill: parent
+        controller: root.controller; sceneItem: readingScene
+        selectableFolders: root.childFolders
+        onFolderSelectionModeChanged: if (folderSelectionMode) root.childFoldersExpanded = true
+        onSmartFolderRequested: smartDialog.open()
+        onExportRequested: function(paths, folder) { libraryActions.exportSelection(paths, folder) }
+    }
     LiquidDialog {
         acceptText: "放弃修改"; rejectText: "取消"; closeText: "关闭"
         id: discardDialog; title: "放弃当前本地输入？"; sourceItem: readingScene

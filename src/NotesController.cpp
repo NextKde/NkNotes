@@ -110,10 +110,15 @@ void NotesController::createNote() {
         if (!m_filter.startsWith("folder:")) m_filter = "all";
         ++m_searchSerial;
         const QString path = folder + "笔记-" + QUuid::createUuid().toString(QUuid::WithoutBraces).left(8) + ".md";
-        m_loading = true; send("create", {{"path", path}, {"text", "# 未命名笔记\n\n"}});
+        m_loading = true; send("create", {{"path", path}, {"text", "---\ntitle: 未命名笔记\n---\n\n"}});
     });
 }
-void NotesController::createFolder(const QString &path) { if (!busy()) send("createFolder", {{"path", path}}); }
+void NotesController::createFolder(const QString &path, const QString &icon) {
+    if (busy()) return;
+    m_organizing = true;
+    send("createFolder", {{"path", path}, {"icon", icon}});
+    emit changed();
+}
 void NotesController::save() {
     if (!dirty() || m_saving || m_path.isEmpty() || m_session->composing() || m_loading) return;
     if (m_conflict) { m_error = "文件已在外部改变。本地输入仍保留；请另存副本，或明确放弃本地输入后重新读取。"; emit changed(); return; }
@@ -303,12 +308,16 @@ void NotesController::receive(quint64 id, const QString &op, const QVariantMap &
     if (documentOp && !p.args.value("recoveryCopy").toBool() && p.epoch != m_epoch) return;
     if(r.contains("undoState"))m_undoState=r.value("undoState").toMap();
     if(r.value("historyRecorded").toBool() || op=="undo" || op=="redo")m_organizationHistory=true;
-    if(op=="undo" || op=="redo" || op=="editFolder" || op=="moveFolder" || op=="purgeFolder")m_organizing=false;
+    if(op=="undo" || op=="redo" || op=="editFolder" || op=="createFolder" || op=="moveFolder" || op=="purgeFolder")m_organizing=false;
     if (op == "save") m_saving = 0;
     if (op == "createWiki" || op == "tagBatch" || op == "fromTemplate" || op == "dailyNote" || op == "setProperty" || op == "historyVersion" || op == "trashBatch" || op == "batch" || op == "rename" || op == "renameFolder" || op == "removeFolder" || op == "trashFolder" || op == "restoreFolder" || op == "importPreview" || op == "importNotes" || op == "exportNotes" || op == "renameNote" || op == "backup" || op == "restoreBackup") m_organizing = false;
     if(op == "importPreview" || op == "importNotes")m_operationProgress.clear();
     if ((documentOp && !p.args.value("recoveryCopy").toBool()) || op == "selectLibrary") m_loading = false;
     if (!r.value("ok").toBool()) {
+        if (op == "createFolder") {
+            m_status = r.value("error") == "alreadyExists" ? QStringLiteral("这个位置已有同名文件夹（可能在最近删除中），请修改名称或父级文件夹。") : organizerError(r.value("error").toString());
+            emit changed(); emit folderCreationFailed(m_status); return;
+        }
         if (op == "trashFolder" || op == "purgeFolder") {
             m_status = organizerError(r.value("error").toString());
             emit changed(); emit folderDeleted(false, m_status); return;

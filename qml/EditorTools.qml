@@ -66,7 +66,7 @@ Item {
     LiquidActionButton {
         id: handle
         visible: !!root.state.block && root.state.block.y >= 0 && root.state.block.y < root.height && root.editable
-        x: Math.max(0, root.state.block ? root.state.block.x - 28 : 0); y: Math.max(0, root.state.block ? root.state.block.y : 0)
+        x: Math.max(12, root.state.block ? root.state.block.x - width - 8 : 12); y: Math.max(0, root.state.block ? root.state.block.y : 0)
         implicitWidth: 26; implicitHeight: 26; iconOnly: true; iconName: "more"; iconSize: 16
         materialForm: true
         Accessible.name: "块操作，可拖动块，或使用 Alt+Shift+方向键移动"
@@ -96,7 +96,7 @@ Item {
         }
         KosToolTip { target: handle; text: "拖动移动块，点击打开块操作" }
     }
-    Rectangle { visible: root.dragging; x: 28; y: root.dragY; width: Math.max(0, root.width - root.outlineWidth - 52); height: 2; color: AppTheme.border }
+    Rectangle { visible: root.dragging; x: root.source.inset; y: root.dragY; width: Math.max(0, root.width - root.outlineWidth - root.source.inset * 2); height: 2; color: AppTheme.border }
     Component {
         id: outlineView
         ColumnLayout {

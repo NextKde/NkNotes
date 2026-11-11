@@ -1,4 +1,5 @@
 #include <QGuiApplication>
+#include <QIcon>
 #include <QQmlApplicationEngine>
 #include <QCommandLineParser>
 #include <QDir>
@@ -68,6 +69,7 @@ int main(int argc, char **argv) {
     app.setOrganizationName("NextKde");
     app.setApplicationName("NextNotes");
     app.setDesktopFileName("org.nextks.notes");
+    app.setWindowIcon(QIcon(QStringLiteral(":/nextnotes/icons/org.nextks.notes.svg")));
     if (qEnvironmentVariableIsEmpty("QTWEBENGINE_DICTIONARIES_PATH")) {
         const QString folder = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation) + "/dictionaries-v1";
         QFile dictionary(":/editor/vendor/dictionaries/en-US.bdic");

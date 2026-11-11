@@ -94,7 +94,7 @@ public:
     Q_INVOKABLE void openNote(const QString &path, int match = -1);
     Q_INVOKABLE void createNote();
     Q_INVOKABLE void renameNote(const QString &title);
-    Q_INVOKABLE void createFolder(const QString &);
+    Q_INVOKABLE void createFolder(const QString &, const QString &icon = QStringLiteral("folder"));
     Q_INVOKABLE void save();
     Q_INVOKABLE void requestClose();
     Q_INVOKABLE void refresh(bool indexed = false);
@@ -187,6 +187,7 @@ signals:
     void notesChanged();
     void foldersChanged();
     void folderCreated(const QString &path);
+    void folderCreationFailed(const QString &message);
     void folderEdited(bool success, const QString &message);
     void folderDeleted(bool success, const QString &message);
     void batchFinished();
