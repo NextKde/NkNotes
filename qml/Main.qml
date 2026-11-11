@@ -100,8 +100,8 @@ ApplicationWindow {
         onSidebarRequested: root.toggleNavigation()
         onSearchRequested: root.openGlobalSearch()
         onNewNoteRequested: root.newNote()
-        onFindRequested: { findBar.visible = true; localFind.forceActiveFocus() }
-        onReplaceRequested: { findBar.visible = true; replacement.forceActiveFocus() }
+        onFindRequested: root.openFind(false)
+        onReplaceRequested: root.openFind(true)
     }
     // One Tab stop per list; arrows move the keyboard cursor without opening a
     // document. Activation still goes through the controller's save/drain path.
@@ -652,6 +652,7 @@ ApplicationWindow {
             x: root.editorX; y: 8 + (controller.externalDocument ? 36 : noteNameEditor.height + 8) + (findBar.visible ? findBar.implicitHeight + 8 : 0)
             width: Math.max(0, parent.width - x); height: Math.max(0, parent.height - y - statusArea.height)
             bodySize: notesSettings.bodySize; readingWidth: tokens.readingWidth; inset: tokens.editorInset
+            onDocumentReady: if (findBar.visible) root.updateSearch()
         }
 
 
@@ -1037,20 +1038,27 @@ ApplicationWindow {
         }
         ColumnLayout {
             id: findBar; visible: false; x: tokens.editorInset; y: 8 + (controller.externalDocument ? 36 : noteNameEditor.height + 8); width: Math.max(0, parent.width - tokens.editorInset * 2); spacing: 4
+            property bool replaceVisible: false
+            readonly property bool hasMatches: !!source.editorState.search && source.editorState.search.total > 0
+            Keys.onEscapePressed: function(event) {
+                if (localFind.inputMethodComposing || replacement.inputMethodComposing) { event.accepted = false; return }
+                root.closeFind()
+            }
             RowLayout {
                 Layout.fillWidth: true; spacing: 4
                 LiquidTextField { id: localFind; Layout.fillWidth: true; implicitHeight: 26; materialForm: true; placeholderText: "查找当前正文"; Accessible.name: "正文查找"; onTextEdited: if (!inputMethodComposing) root.updateSearch(); onInputMethodComposingChanged: if (!inputMethodComposing) root.updateSearch(); onAccepted: root.findNext() }
                 Label { text: (source.editorState.search ? source.editorState.search.current : 0) + "/" + (source.editorState.search ? source.editorState.search.total : 0); font.pixelSize: 11; color: AppTheme.mutedText }
-                LiquidActionButton { id: caseSensitive; text: "Aa"; checkable: true; materialForm: true; implicitHeight: 26; Accessible.name: "区分大小写"; onToggled: root.updateSearch() }
-                LiquidActionButton { text: "上一个"; materialForm: true; implicitHeight: 26; onClicked: source.action("findNext", {direction: -1}) }
-                LiquidActionButton { text: "下一个"; materialForm: true; implicitHeight: 26; onClicked: root.findNext() }
-                LiquidActionButton { text: "关闭"; materialForm: true; implicitHeight: 26; onClicked: { findBar.visible = false; source.action("search", {query: ""}); source.editor.forceActiveFocus() } }
+                LiquidActionButton { id: caseSensitive; text: "Aa"; checkable: true; materialForm: true; implicitWidth: 30; implicitHeight: 26; leftPadding: 0; rightPadding: 0; Accessible.name: "区分大小写"; onToggled: root.updateSearch(); KosToolTip { target: caseSensitive; text: "区分大小写" } }
+                ToolbarAction { iconName: "chevron"; contentItem.rotation: 180; help: "上一个匹配"; materialForm: true; implicitHeight: 26; enabled: findBar.hasMatches; onClicked: source.action("findNext", {direction: -1}) }
+                ToolbarAction { iconName: "chevron"; help: "下一个匹配"; materialForm: true; implicitHeight: 26; enabled: findBar.hasMatches; onClicked: root.findNext() }
+                LiquidActionButton { text: "替换"; checkable: true; checked: findBar.replaceVisible; materialForm: true; implicitWidth: 48; implicitHeight: 26; leftPadding: 6; rightPadding: 6; enabled: root.canFormat; onClicked: findBar.replaceVisible = !findBar.replaceVisible }
+                ToolbarAction { iconName: "plus"; contentItem.rotation: 45; help: "关闭正文查找 · Escape"; materialForm: true; implicitHeight: 26; onClicked: root.closeFind() }
             }
             RowLayout {
-                Layout.fillWidth: true; spacing: 4
-                LiquidTextField { id: replacement; Layout.fillWidth: true; implicitHeight: 26; materialForm: true; placeholderText: "替换为"; Accessible.name: "正文替换文本"; onAccepted: if (!inputMethodComposing) source.action("replace", {replacement: text}) }
-                LiquidActionButton { text: "替换"; materialForm: true; implicitHeight: 26; enabled: root.canFormat && !replacement.inputMethodComposing; onClicked: source.action("replace", {replacement: replacement.text}) }
-                LiquidActionButton { text: "全部替换"; materialForm: true; implicitHeight: 26; enabled: root.canFormat && !replacement.inputMethodComposing; onClicked: source.action("replaceAll", {replacement: replacement.text}) }
+                Layout.fillWidth: true; spacing: 4; visible: findBar.replaceVisible && root.canFormat
+                LiquidTextField { id: replacement; Layout.fillWidth: true; implicitHeight: 26; materialForm: true; placeholderText: "替换为"; Accessible.name: "正文替换文本"; onAccepted: if (root.canFormat && findBar.hasMatches && !inputMethodComposing) source.action("replace", {replacement: text}) }
+                LiquidActionButton { text: "替换"; materialForm: true; implicitHeight: 26; enabled: root.canFormat && findBar.hasMatches && !replacement.inputMethodComposing; onClicked: source.action("replace", {replacement: replacement.text}) }
+                LiquidActionButton { text: "全部替换"; materialForm: true; implicitHeight: 26; enabled: root.canFormat && findBar.hasMatches && !replacement.inputMethodComposing; onClicked: source.action("replaceAll", {replacement: replacement.text}) }
             }
         }
         RowLayout {
@@ -1102,6 +1110,18 @@ ApplicationWindow {
             source.editor.forceActiveFocus(Qt.OtherFocusReason)
     }
     function updateSearch() { source.action("search", {query: localFind.text, caseSensitive: caseSensitive.checked}) }
+    function openFind(withReplacement) {
+        findBar.replaceVisible = withReplacement && canFormat
+        findBar.visible = true
+        updateSearch()
+        if (findBar.replaceVisible) replacement.forceActiveFocus()
+        else { localFind.forceActiveFocus(); localFind.selectAll() }
+    }
+    function closeFind() {
+        findBar.visible = false
+        source.action("search", {query: ""})
+        source.editor.forceActiveFocus()
+    }
     function findNext() { if (localFind.text) { updateSearch(); source.action("findNext", {direction: 1}) } }
     function showRecovery() { controller.inspectRecovery(); recoveryDialog.open() }
     function askName(kind, anchor, originMenu) {

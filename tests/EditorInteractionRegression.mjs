@@ -1,0 +1,84 @@
+// VM-only integration against an isolated running app and disposable note.
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+const endpoint=process.env.NEXTNOTES_CDP_URL||'http://127.0.0.1:9237';
+const fixture=process.env.NEXTNOTES_TEST_FILE;
+assert.ok(fixture,'Provide the disposable NEXTNOTES_TEST_FILE opened in the VM.');
+const target=(await (await fetch(endpoint+'/json/list')).json()).find(item=>item.url==='qrc:/editor/index.html');
+assert.ok(target,'The isolated editor must be running.');
+const ws=new WebSocket(target.webSocketDebuggerUrl);
+await new Promise((resolve,reject)=>{ws.onopen=resolve;ws.onerror=reject;});
+let sequence=0;const requests=new Map();
+ws.onmessage=event=>{const result=JSON.parse(event.data),request=requests.get(result.id);if(request){requests.delete(result.id);result.error?request.reject(result.error):request.resolve(result.result);}};
+const call=(method,params={})=>new Promise((resolve,reject)=>{const id=++sequence;requests.set(id,{resolve,reject});ws.send(JSON.stringify({id,method,params}));});
+const run=async expression=>{const result=await call('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});if(result.exceptionDetails)throw Error(JSON.stringify(result.exceptionDetails));return result.result.value;};
+const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+const action=(name,args={})=>run('nextnotes.tools('+JSON.stringify(name)+','+JSON.stringify(args)+')');
+const state=()=>run('nextnotes.toolsState()');
+const source=()=>run('nextnotes.snapshot().source');
+const command=name=>run('nextnotes.command('+JSON.stringify(name)+')');
+const key=async(key,code,vk)=>{await call('Input.dispatchKeyEvent',{type:'keyDown',key,code,windowsVirtualKeyCode:vk});await call('Input.dispatchKeyEvent',{type:'keyUp',key,code,windowsVirtualKeyCode:vk});await wait(100);};
+const select=pos=>run('(()=>{const v=nextnotes.view();v.dispatch(v.state.tr.setSelection(v.state.selection.constructor.create(v.state.doc,'+pos+')));v.focus();})()');
+const boxes=()=>run('(()=>{const v=nextnotes.view(),out=[];v.state.doc.forEach((node,pos)=>{const r=v.nodeDOM(pos).getBoundingClientRect();out.push({pos,title:node.textContent,top:r.top,bottom:r.bottom,height:r.height,left:r.left,width:r.width});});return out;})()');
+async function load(text){
+ await run('nextnotes.load({epoch:nextnotes.snapshot().epoch,baseUrl:nextnotes.snapshot().baseUrl,source:'+JSON.stringify(text)+'})');
+ await wait(250);await run('nextnotes.view().focus()');await wait(80);
+}
+const results=[];
+function pass(name){results.push(name);console.log('PASS: '+name);}
+try{
+ assert.equal(decodeURIComponent(new URL(await run('nextnotes.snapshot().baseUrl')).pathname),fixture);
+ assert.ok(fs.existsSync(fixture));
+ await load('A\n\nBB\n\nCCC\n\nDDDD\n');
+ let rects=await boxes();
+ await call('Input.dispatchMouseEvent',{type:'mouseMoved',x:rects[0].left+50,y:rects[0].top+10});
+ await wait(80);assert.equal((await state()).block.title,'A');
+ await action('contextBlock',{x:rects[2].left+50,y:rects[2].top+10,request:1});
+ assert.equal((await state()).context.block.title,'CCC');
+ assert.equal((await state()).block.title,'A');
+ pass('context target follows the click independently of previous hover');
+ const pointerY=rects[1].top+2;
+ await action('previewBlockMove',{pos:rects[3].pos,y:pointerY});await wait(80);
+ const preview=(await state()).dropTarget;
+ assert.equal(preview.pos,rects[1].pos);
+ assert.equal(preview.y,(rects[0].bottom+rects[1].top)/2);
+ assert.equal(preview.width,rects[1].width);
+ const original=await source();
+ await action('cancelBlockMove');await wait(80);
+ assert.equal((await state()).dropTarget,null);assert.equal(await source(),original);
+ await action('moveBlock',{pos:rects[3].pos,y:pointerY});await action('cancelBlockMove');
+ assert.deepEqual((await boxes()).map(item=>item.title),['A','DDDD','BB','CCC']);
+ await command('undo');assert.equal(await source(),original);
+ pass('real DOM drop preview agrees with release; cancellation and undo preserve content');
+ await load('# Heading\n\nHidden paragraph\n\n# Next\n\nLast\n');
+ rects=await boxes();await action('toggleFold',{pos:0});await wait(80);
+ assert.equal((await boxes())[1].height,0);
+ await action('previewBlockMove',{pos:rects[3].pos,y:(await boxes())[2].top+1});await wait(80);
+ assert.equal((await state()).dropTarget.pos,rects[2].pos,'hidden content does not become an invisible target');
+ await action('cancelBlockMove');
+ pass('folded content is skipped when computing insertion boundaries');
+ await load('/\n');await select(2);await wait(100);
+ assert.equal((await state()).slash.items.length,16);
+ for(let i=0;i<15;i++)await key('ArrowDown','ArrowDown',40);
+ assert.equal((await state()).slash.items[(await state()).slash.index].command,'toc');
+ await key('Enter','Enter',13);assert.ok((await source()).includes('[toc]'));
+ pass('all slash entries are keyboard reachable, including the final insertion');
+ await load('/H2\n\n/\n');await select(4);
+ await call('Input.insertText',{text:' '});await wait(100);
+ assert.equal((await state()).slash.items[0].command,'heading2');
+ await key('Escape','Escape',27);await wait(150);
+ assert.equal((await state()).slash,null,'Escape must not reopen after the native menu closes');
+ await select(8);await wait(100);assert.ok((await state()).slash);
+ await key('Escape','Escape',27);
+ await load('/\n');await select(2);await wait(100);assert.ok((await state()).slash);
+ pass('dismissal preserves uppercase/space queries and does not leak across paragraphs or document loads');
+ await load('/not-a-command\n');await select(15);await wait(100);
+ assert.equal((await state()).slash.items.length,0);
+ await key('Enter','Enter',13);
+ assert.ok((await boxes()).length>=2,'no-result query must allow ordinary editing');
+ pass('an empty slash result does not trap ordinary Enter navigation');
+ await load('A\n\nBB\n\nCCC\n\nDDDD\n');
+}finally{
+ if(process.env.NEXTNOTES_TEST_REPORT)fs.writeFileSync(process.env.NEXTNOTES_TEST_REPORT,JSON.stringify({results},null,2));
+ ws.close();
+}

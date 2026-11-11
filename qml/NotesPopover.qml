@@ -11,7 +11,9 @@ LiquidPopover {
     preferredSide: "bottom"
     anchorAlignment: "center"
     arrowEnabled: invocation === "button"
-    height: Math.min(implicitHeight, parent ? parent.height - margins * 2 : implicitHeight)
+    // Keep height limits in one binding for both caret and button menus.
+    property real maxHeight: Number.POSITIVE_INFINITY
+    height: Math.min(implicitHeight, maxHeight, parent ? parent.height - margins * 2 : implicitHeight)
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnReleaseOutside
 
     function updatePosition() {

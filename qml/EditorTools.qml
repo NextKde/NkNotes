@@ -18,8 +18,22 @@ Item {
     property var spellSuggestions: []
     property int documentEpoch: -1
     property bool dragging: false
+    property real dragX: 0
     property real dragY: 0
-    function closeSlash() { slashMenu.close() }
+    property var pressedBlock: null
+    property var pendingContext: null
+    property int contextSequence: 0
+    readonly property var handleBlock: pressedBlock || state.block
+    readonly property bool dragInside: dragX >= 0 && dragX < width - outlineWidth && dragY >= 0 && dragY < height
+    function cancelDrag() {
+        if (handlePointer && handlePointer.pressed) handlePointer.gestureCanceled = true
+        dragging = false; pressedBlock = null; post("cancelBlockMove")
+    }
+    function previewDrag() {
+        if (dragInside) post("previewBlockMove", {pos: pressedBlock.pos, y: dragY})
+        else post("cancelBlockMove")
+    }
+    function closeSlash() { slashMenu.suppressOnClose = false; slashMenu.close() }
     function post(name, args) { source.action(name, args || {}) }
     function toggleOutline(anchor, originMenu) {
         if (width > 600) { outlineVisible = !outlineVisible; controller.setPreference("editorOutline", outlineVisible) }
@@ -29,8 +43,8 @@ Item {
     function showShortcuts(anchor) { helpPanel.openFromButton(anchor) }
     function openMenu(anchor) { toolsMenu.openFromButton(anchor) }
     function openContext(x, y, suggestions) {
-        block = state.block || {}; spellSuggestions = suggestions || []
-        blockMenu.openAtPoint(root, Qt.point(x, y))
+        pendingContext = {x: x, y: y, suggestions: suggestions || [], request: ++contextSequence}
+        post("contextBlock", {x: x, y: y, request: contextSequence})
     }
     function openMath(originMenu) {
         const value = state.math || {}; mathPanel.targetPos = value.pos === undefined ? -1 : value.pos
@@ -38,7 +52,8 @@ Item {
         if (originMenu) mathPanel.openFromMenu(originMenu); else mathPanel.openFromButton(handle.visible ? handle : caretAnchor)
     }
     function openCode(originMenu) {
-        const value = state.code || {}; codePanel.targetPos = value.pos === undefined ? (state.block ? state.block.pos : 0) : value.pos
+        const value = originMenu === blockMenu ? block : (state.code || {})
+        codePanel.targetPos = value.pos === undefined ? 0 : value.pos
         const index = language.model.indexOf(value.language || "plain"); language.currentIndex = index < 0 ? 0 : index
         if (originMenu) codePanel.openFromMenu(originMenu); else codePanel.openFromButton(handle.visible ? handle : caretAnchor)
     }
@@ -51,55 +66,85 @@ Item {
     function uiChanged() {
         if (state.epoch !== undefined && documentEpoch !== state.epoch) {
             documentEpoch = state.epoch
-            slashMenu.close(); blockMenu.close(); toolsMenu.close(); mathPanel.close(); codePanel.close(); imagePanel.close(); helpPanel.close(); attachmentsPanel.close(); outlinePanel.close()
-            dragging = false
+            closeSlash(); blockMenu.close(); toolsMenu.close(); mathPanel.close(); codePanel.close(); imagePanel.close(); helpPanel.close(); attachmentsPanel.close(); outlinePanel.close()
+            dragging = false; pressedBlock = null; pendingContext = null
+        }
+        if (pendingContext && state.context && state.context.request === pendingContext.request) {
+            const pending = pendingContext; pendingContext = null
+            block = state.context.block || {}; spellSuggestions = pending.suggestions
+            if (state.context.block) blockMenu.openAtPoint(root, Qt.point(pending.x, pending.y))
         }
         const slash = state.slash
         if (slash && slash.items.length && editable) {
             caretAnchor.x = Math.max(0, Math.min(width - outlineWidth - 30, slash.x)); caretAnchor.y = Math.max(0, Math.min(height - 22, slash.y))
             slashMenu.currentIndex = slash.index
             if (!slashMenu.visible) slashMenu.openForCaret(caretAnchor)
-        } else if (slashMenu.visible) slashMenu.close()
+        } else if (slashMenu.visible) closeSlash()
     }
     onStateChanged: uiChanged()
+    onEditableChanged: if (!editable) cancelDrag()
+    onVisibleChanged: if (!visible) cancelDrag()
+    Shortcut { sequence: "Escape"; enabled: root.dragging; onActivated: root.cancelDrag() }
     Item { id: caretAnchor; width: 8; height: 18; x: 32; y: 18 }
     LiquidActionButton {
         id: handle
+        objectName: "editorBlockHandle"
         // Only a fresh paragraph's first editing session suppresses its handle.
-        visible: !!root.state.blockHandleVisible
-            && !!root.state.block && root.state.block.y >= 0 && root.state.block.y < root.height && root.editable
-        x: Math.max(12, root.state.block ? root.state.block.x - width - 8 : 12); y: Math.max(0, root.state.block ? root.state.block.y : 0)
+        visible: (root.dragging || !!root.state.blockHandleVisible)
+            && !!root.handleBlock && root.handleBlock.y >= 0 && root.handleBlock.y < root.height && root.editable
+        x: Math.max(12, root.handleBlock ? root.handleBlock.x - width - 8 : 12); y: Math.max(0, root.handleBlock ? root.handleBlock.y : 0)
         implicitWidth: 26; implicitHeight: 26; iconOnly: true; iconName: "more"; iconSize: 16
         materialForm: true
         Accessible.name: "块操作，可拖动块，或使用 Alt+Shift+方向键移动"
         onClicked: { root.block = root.state.block; root.spellSuggestions = []; blockMenu.openFromButton(handle) }
         MouseArea {
             anchors.fill: parent
+            id: handlePointer
             cursorShape: pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
             property real startY: 0
             property int startPos: 0
-            onPressed: function(mouse) { startY = mapToItem(root, mouse.x, mouse.y).y; startPos = root.state.block.pos; root.dragging = false }
+            property bool gestureCanceled: false
+            onPressed: function(mouse) {
+                gestureCanceled = false
+                root.pressedBlock = root.state.block
+                startY = mapToItem(root, mouse.x, mouse.y).y; startPos = root.pressedBlock.pos; root.dragging = false
+            }
             onPositionChanged: function(mouse) {
-                if (!pressed) return
+                if (!pressed || gestureCanceled) return
                 const point = mapToItem(root, mouse.x, mouse.y)
                 if (Math.abs(point.y - startY) > 6) root.dragging = true
                 if (root.dragging) {
-                    root.dragY = point.y
-                    if (point.y < 35) root.post("dragScroll", {delta: -20})
-                    else if (point.y > root.height - 35) root.post("dragScroll", {delta: 20})
+                    root.dragX = point.x; root.dragY = point.y
+                    root.previewDrag()
                 }
             }
             onReleased: function(mouse) {
-                if (root.dragging) root.post("moveBlock", {pos: startPos, y: root.dragY})
+                if (gestureCanceled) { root.cancelDrag(); return }
+                if (root.dragging) {
+                    const point = mapToItem(root, mouse.x, mouse.y)
+                    root.dragX = point.x; root.dragY = point.y
+                    if (root.dragInside) root.post("moveBlock", {pos: startPos, y: point.y})
+                }
                 else if (mouse.modifiers & Qt.ShiftModifier) root.post("selectBlock", {pos: startPos, extend: true})
-                else { root.block = root.state.block; root.spellSuggestions = []; blockMenu.openFromButton(handle) }
-                root.dragging = false
+                else if (containsMouse) { root.block = root.pressedBlock; root.spellSuggestions = []; blockMenu.openFromButton(handle) }
+                root.cancelDrag()
             }
-            onCanceled: root.dragging = false
+            onCanceled: root.cancelDrag()
         }
         KosToolTip { target: handle; text: "拖动移动块，点击打开块操作" }
     }
-    Rectangle { visible: root.dragging; x: root.source.inset; y: root.dragY; width: Math.max(0, root.width - root.outlineWidth - root.source.inset * 2); height: 2; color: AppTheme.border }
+    Timer {
+        interval: 40; repeat: true
+        running: root.dragging && root.dragInside && (root.dragY < 35 || root.dragY > root.height - 35)
+        onTriggered: { root.post("dragScroll", {delta: root.dragY < 35 ? -16 : 16}); root.previewDrag() }
+    }
+    Rectangle {
+        objectName: "editorBlockDropIndicator"
+        readonly property var target: root.state.dropTarget
+        visible: root.dragging && root.dragInside && !!target && target.y >= 0 && target.y < root.height
+        x: target ? target.x : 0; y: target ? target.y : 0
+        width: target ? target.width : 0; height: 2; radius: 1; color: AppTheme.mutedText
+    }
     Component {
         id: outlineView
         ColumnLayout {
@@ -141,7 +186,12 @@ Item {
     }
     NotesPopover {
         id: slashMenu; sourceItem: root.sceneItem; anchorItem: caretAnchor; focus: false
-        onClosed: root.post("dismissSlash")
+        maxHeight: 320
+        property bool suppressOnClose: true
+        onOpened: suppressOnClose = true
+        // Filtering, applying an entry and changing documents also close this menu.
+        // Only an explicit dismissal should suppress the current slash query.
+        onClosed: if (suppressOnClose && root.state.slash && root.state.slash.items.length && root.editable) root.post("dismissSlash")
         Instantiator {
             model: root.state.slash ? root.state.slash.items : []
             delegate: LiquidPopoverItem {
@@ -160,16 +210,16 @@ Item {
         LiquidPopoverItem { text: "选择块"; enabled: root.editable; onTriggered: root.post("selectBlock", {pos: root.block.pos}) }
         LiquidPopoverItem { text: "复制块"; enabled: root.editable; onTriggered: root.post("copyBlock", {pos: root.block.pos, selection: true}) }
         LiquidPopoverItem { text: "创建块副本"; enabled: root.editable; onTriggered: root.post("duplicateBlock", {pos: root.block.pos, selection: true}) }
-        LiquidPopoverItem { text: "粘贴块"; enabled: root.editable; onTriggered: root.post("pasteBlock", {pos: root.block.pos}) }
-        LiquidPopoverItem { text: "上移块    Alt+Shift+↑"; enabled: root.editable; onTriggered: root.post("moveBlock", {pos: root.block.pos, direction: "up", selection: true}) }
-        LiquidPopoverItem { text: "下移块    Alt+Shift+↓"; enabled: root.editable; onTriggered: root.post("moveBlock", {pos: root.block.pos, direction: "down", selection: true}) }
-        LiquidPopoverItem { text: "转换为正文"; enabled: root.editable; onTriggered: root.post("blockType", {pos: root.block.pos, command: "paragraph"}) }
-        LiquidPopoverItem { text: "转换为二级标题"; enabled: root.editable; onTriggered: root.post("blockType", {pos: root.block.pos, command: "heading2"}) }
+        LiquidPopoverItem { text: "粘贴块"; enabled: root.editable && !!root.state.canPasteBlock; onTriggered: root.post("pasteBlock", {pos: root.block.pos}) }
+        LiquidPopoverItem { text: "上移块    Alt+Shift+↑"; enabled: root.editable && !!root.block.canMoveUp; onTriggered: root.post("moveBlock", {pos: root.block.pos, direction: "up", selection: true}) }
+        LiquidPopoverItem { text: "下移块    Alt+Shift+↓"; enabled: root.editable && !!root.block.canMoveDown; onTriggered: root.post("moveBlock", {pos: root.block.pos, direction: "down", selection: true}) }
+        LiquidPopoverItem { text: "转换为正文"; enabled: root.editable && !!root.block.canConvert; onTriggered: root.post("blockType", {pos: root.block.pos, command: "paragraph"}) }
+        LiquidPopoverItem { text: "转换为二级标题"; enabled: root.editable && !!root.block.canConvert; onTriggered: root.post("blockType", {pos: root.block.pos, command: "heading2"}) }
         LiquidPopoverItem { text: "折叠 / 展开标题"; enabled: root.block.type === "heading"; onTriggered: root.post("toggleFold", {pos: root.block.pos}) }
         LiquidPopoverItem { text: "删除块"; enabled: root.editable; onTriggered: root.post("deleteBlock", {pos: root.block.pos, selection: true}) }
-        LiquidPopoverItem { text: "代码语言与复制…"; visible: !!root.state.code; onTriggered: root.openCode(blockMenu) }
-        LiquidPopoverItem { text: "编辑数学公式…"; visible: !!root.state.math; enabled: root.editable; onTriggered: root.openMath(blockMenu) }
-        LiquidPopoverItem { text: "图片属性…"; visible: !!root.state.image; onTriggered: root.openImage(blockMenu) }
+        LiquidPopoverItem { text: "代码语言与复制…"; visible: root.block.type === "code_block"; onTriggered: root.openCode(blockMenu) }
+        LiquidPopoverItem { text: "编辑数学公式…"; visible: !!root.state.math && root.state.math.pos >= root.block.pos && root.state.math.pos < root.block.end; enabled: root.editable; onTriggered: root.openMath(blockMenu) }
+        LiquidPopoverItem { text: "图片属性…"; visible: !!root.state.image && root.state.image.pos >= root.block.pos && root.state.image.pos < root.block.end; onTriggered: root.openImage(blockMenu) }
         Instantiator {
             model: root.spellSuggestions.slice(0, 5)
             delegate: LiquidPopoverItem { required property string modelData; text: "更正为：" + modelData; onTriggered: root.source.correctSpelling(modelData) }

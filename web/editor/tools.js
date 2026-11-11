@@ -14,7 +14,7 @@ const slashEntries=[
 export function makeTools(env){
  let view,hover=0,blockHandleVisible=false,collapsed=new Set(),query='',caseSensitive=false,searchIndex=-1,slashIndex=0,lastSlash='',uiTimer,lastUI='',layoutToken=0;
  let cachedDoc,cachedText='',cachedStats={},cachedOutline=[],cachedMatchesDoc,cachedMatchesQuery,cachedMatchesCase,cachedMatches=[];
- let suppressedSlash=null,blockSelection=false,newParagraphPos=null;let pending=0,request=0,clipboardBlock=null;const imports=new Map(),bookmarks=new Map();
+ let suppressedSlash=null,blockSelection=false,newParagraphPos=null,dragPreview=null,contextRequest=null;let pending=0,request=0,clipboardBlock=null;const imports=new Map(),bookmarks=new Map();
  const key=new PluginKey('nextnotesTools');
  const editable=()=>env.canEdit()&&!env.busy();
  const notify=text=>env.bridge()?.notice(text);
@@ -71,14 +71,20 @@ export function makeTools(env){
   if(query&&!env.busy())for(const m of matches(state.doc))items.push(Decoration.inline(m.from,m.to,{class:'editor-search-match'},{sourceSearch:true}));
   return DecorationSet.create(state.doc,items);
  }
+ function slashParagraph($from){
+  if($from.parent.type.name!=='paragraph')return false;
+  for(let depth=$from.depth-1;depth>0;depth--)if($from.node(depth).type.name==='list_item')return false;
+  return true;
+ }
  function slash(){
   if(!view||!editable()||!view.state.selection.empty)return null;
-  const {$from}=view.state.selection;if($from.parent.type.name!=='paragraph')return null;
-  const text=$from.parent.textBetween(0,$from.parentOffset,'\n','\uFFFC');const match=/^\/([^/\n]{0,40})$/.exec(text);if(!match)return null;
-  if(text===suppressedSlash)return null;
-  if(text!==suppressedSlash)suppressedSlash=null;
+  const {$from}=view.state.selection;
+  const text=$from.parent.textBetween(0,$from.parentOffset,'\n','\uFFFC');
+  if(suppressedSlash&&($from.pos!==suppressedSlash.pos||text!==suppressedSlash.text))suppressedSlash=null;
+  if(!slashParagraph($from)||suppressedSlash)return null;
+  const match=/^\/([^/\n]{0,40})$/.exec(text);if(!match)return null;
   const term=match[1].trim().toLocaleLowerCase();
-  const items=slashEntries.filter(entry=>entry[2].includes(term)||entry[1].includes(term)).slice(0,10).map(([command,label])=>({command,label}));
+  const items=slashEntries.filter(entry=>entry[2].includes(term)||entry[1].includes(term)).map(([command,label])=>({command,label}));
   if(text!==lastSlash){lastSlash=text;slashIndex=0;}
   slashIndex=Math.max(0,Math.min(slashIndex,items.length-1));
   const r=view.coordsAtPos($from.pos);
@@ -86,7 +92,11 @@ export function makeTools(env){
  }
  function geometry(block){
   if(!block||block.node.type.name==='raw_source')return null;const dom=view.nodeDOM(block.pos);if(!(dom instanceof Element))return null;
-  const r=dom.getBoundingClientRect();if(r.height<=0)return null;return {x:r.left,pos:block.pos,type:block.node.type.name,title:block.node.textContent.slice(0,40),y:r.top,height:r.height};
+  const r=dom.getBoundingClientRect();if(r.height<=0)return null;
+  const selectedRange=range({pos:block.pos,selection:true});
+  return {x:r.left,pos:block.pos,end:block.pos+block.node.nodeSize,type:block.node.type.name,title:block.node.textContent.slice(0,40),y:r.top,height:r.height,
+   canMoveUp:selectedRange.from>0,canMoveDown:selectedRange.to<view.state.doc.content.size,canConvert:block.node.isTextblock,
+   ...(block.node.type.name==='code_block'?{source:block.node.textContent,language:block.node.attrs.language||''}:{})};
  }
  function ui(){
   uiTimer=null;if(!view||!env.bridge())return;
@@ -107,7 +117,9 @@ export function makeTools(env){
   trackNewParagraph(view.state,view.hasFocus());
   const editingBlock=newParagraphPos===null?null:topBlock(newParagraphPos+1);
   const state={epoch:env.epoch(),outline,stats:{...cachedStats,selected:Array.from(selected.replace(/\s/g,'')).length},
-   block:geometry(topBlock(hover)),blockHandleVisible:blockHandleVisible&&editable()&&editingBlock?.pos!==hover,slash:slash(),search:{total:matches().length,current:searchIndex+1},pending};
+   block:geometry(topBlock(hover)),blockHandleVisible:blockHandleVisible&&editable()&&editingBlock?.pos!==hover,slash:slash(),search:{total:matches().length,current:searchIndex+1},pending,
+   canPasteBlock:!!clipboardBlock,dropTarget:dragPreview&&editable()?dropTarget(dragPreview):null,
+   context:contextRequest?{request:contextRequest.request,block:geometry(topBlock(contextRequest.pos))}:null};
   const block=topBlock(view.state.selection.from);
   if(block?.node.type.name==='code_block')state.code={pos:block.pos,source:block.node.textContent,language:block.node.attrs.language||''};
   state.tableWidths=blocks.filter(b=>b.node.type.name==='table').map(b=>Array.from({length:b.node.firstChild.childCount},(_,i)=>b.node.firstChild.child(i).attrs.colwidth));
@@ -130,17 +142,26 @@ export function makeTools(env){
   if(args.selection&&!view.state.selection.empty){const first=topBlock(view.state.selection.from),last=topBlock(Math.max(view.state.selection.from,view.state.selection.to-1));if(block.pos>=first.pos&&block.pos<=last.pos)return {from:first.pos,to:last.pos+last.node.nodeSize};}
   return {from:block.pos,to:block.pos+block.node.nodeSize};
  }
+ // Preview and release share one calculation: the line marks a real block boundary.
+ // Ignore folded nodes, and use the gap between visible blocks rather than pointer y.
+ function dropTarget(args){
+  const r=range(args);if(!r||!Number.isFinite(args.y))return null;
+  const blocks=rootBlocks().map(block=>({block,rect:view.nodeDOM(block.pos)?.getBoundingClientRect()})).filter(item=>item.rect?.height>0);
+  if(!blocks.length)return null;
+  const before=blocks.findIndex(item=>args.y<item.rect.top+item.rect.height/2);
+  const next=before>=0?blocks[before]:null,previous=before>0?blocks[before-1]:before<0?blocks.at(-1):null;
+  const pos=next?next.block.pos:view.state.doc.content.size;
+  if(pos>=r.from&&pos<=r.to)return null;
+  const rect=next?.rect||previous.rect;
+  return {pos,x:rect.left,y:next?(previous?(previous.rect.bottom+rect.top)/2:rect.top):rect.bottom,width:rect.width};
+ }
  function moveBlock(args){
   const r=range(args);if(!r)return false;
   let target;
   const blocks=rootBlocks(),idx=blocks.findIndex(b=>b.pos===r.from);
   if(args.direction==='up')target=blocks[idx-1]?.pos;
   else if(args.direction==='down'){const after=blocks.find(b=>b.pos>=r.to);target=after?after.pos+after.node.nodeSize:undefined;}
-  else if(typeof args.y==='number'){
-   const hit=view.posAtCoords({left:view.dom.getBoundingClientRect().left+24,top:args.y});
-   const b=hit?topBlock(hit.pos):null;
-   target=b?(args.y>view.nodeDOM(b.pos).getBoundingClientRect().top+view.nodeDOM(b.pos).getBoundingClientRect().height/2?b.pos+b.node.nodeSize:b.pos):(args.y<0?0:view.state.doc.content.size);
-  }
+  else if(typeof args.y==='number')target=dropTarget(args)?.pos;
   if(target===undefined||target>=r.from&&target<=r.to)return false;
   const content=view.state.doc.slice(r.from,r.to).content;let tr=view.state.tr.delete(r.from,r.to);
   const at=tr.mapping.map(target,-1);tr=tr.insert(at,content);
@@ -188,7 +209,12 @@ export function makeTools(env){
  function run(name,args={}){
   if(!view)return false;
   if(typeof args==='string')args={value:args};
-  if(name==='dismissSlash'){const p=view.state.selection.$from;suppressedSlash=p.parent.textBetween(0,p.parentOffset);schedule();return true;}
+  if(name==='dismissSlash'){const p=view.state.selection.$from;suppressedSlash={pos:p.pos,text:p.parent.textBetween(0,p.parentOffset,'\n','\uFFFC')};schedule();return true;}
+  if(name==='contextBlock'){
+   const hit=view.posAtCoords({left:args.x,top:args.y});
+   contextRequest={request:args.request,pos:hit?.pos??view.state.selection.from};ui();return true;
+  }
+  if(name==='cancelBlockMove'){dragPreview=null;schedule();return true;}
   if(name==='search'){query=args.query||'';caseSensitive=!!args.caseSensitive;searchIndex=-1;refresh();return true;}
   if(name==='findNext')return navigateSearch(args.direction||1);
   if(name==='dragScroll'){window.scrollBy(0,args.delta||0);schedule();return true;}
@@ -203,6 +229,7 @@ export function makeTools(env){
    let tr=view.state.tr;for(const m of [...chosen].reverse())tr=tr.insertText(args.replacement||'',m.from,m.to);commit(tr);notify(`已替换 ${chosen.length} 处`);return true;
   }
   if(!editable())return false;
+  if(name==='previewBlockMove'){dragPreview=args;schedule();return true;}
   if(name==='slashChoose')return applySlash(args.index);
   if(name==='selectBlock'){
    const b=targetBlock(args);if(!b)return false;
@@ -288,6 +315,7 @@ export function makeTools(env){
  }
  const plugin=new Plugin({key,
   state:{init:()=>DecorationSet.empty,apply(tr,old,oldState,newState){
+   if(tr.selectionSet||tr.docChanged)suppressedSlash=null;
    // Capture an empty paragraph before its first keystroke, even between UI reports.
    trackNewParagraph(oldState,!!view?.hasFocus());
    if(newParagraphPos!==null&&tr.docChanged){
@@ -316,19 +344,19 @@ export function makeTools(env){
      return base.add(state.doc,items);
     }
     // Decorate only the current empty paragraph; no text or document mutation.
-    if(!editable()||!empty||$from.parent.type.name!=='paragraph'||$from.parent.content.size)return base;
+    if(!editable()||!empty||!slashParagraph($from)||$from.parent.content.size)return base;
     const pos=$from.before();
     return base.add(state.doc,[Decoration.node(pos,pos+$from.parent.nodeSize,
      {class:'editor-empty-line','data-placeholder':'输入"/"进入选择'})]);
    },
    handleKeyDown(v,event){
     if(env.busy())return false;const state=slash();
-    if(state&&['ArrowDown','ArrowUp','Enter','Escape'].includes(event.key)){
-     if(event.key==='Escape'){suppressedSlash='/'+state.query;lastSlash='';view.dispatch(view.state.tr.setSelection(TextSelection.near(view.state.doc.resolve(view.state.selection.to))));env.bridge()?.dismissSlash();return true;}
+    if(state&&(state.items.length||event.key==='Escape')&&['ArrowDown','ArrowUp','Enter','Escape'].includes(event.key)){
+     if(event.key==='Escape'){run('dismissSlash');lastSlash='';env.bridge()?.dismissSlash();return true;}
      if(event.key==='Enter')return applySlash();
      slashIndex=(slashIndex+(event.key==='ArrowDown'?1:-1)+Math.max(1,state.items.length))%Math.max(1,state.items.length);schedule();return true;
     }
-    if(event.altKey&&event.shiftKey&&['ArrowUp','ArrowDown'].includes(event.key))return moveBlock({pos:topBlock(v.state.selection.from)?.pos,direction:event.key==='ArrowUp'?'up':'down',selection:true});
+    if(editable()&&event.altKey&&event.shiftKey&&['ArrowUp','ArrowDown'].includes(event.key))return moveBlock({pos:topBlock(v.state.selection.from)?.pos,direction:event.key==='ArrowUp'?'up':'down',selection:true});
     return false;
    },
    handleDOMEvents:{
@@ -346,7 +374,7 @@ export function makeTools(env){
   view(v){view=v;const observer=new ResizeObserver(schedule);observer.observe(v.dom);schedule();return {update(){env.refreshToc?.();schedule();},destroy(){observer.disconnect();clearTimeout(uiTimer);uiTimer=null;}};}
  });
  return {plugin,run,refresh,state:()=>lastUI?JSON.parse(lastUI):{},ui:schedule,uiNow:ui,uploader,importResult,exportReady,hasPending:()=>pending>0,
-  reset(){clearTimeout(uiTimer);uiTimer=null;collapsed.clear();hover=0;blockHandleVisible=false;blockSelection=false;newParagraphPos=null;query='';lastUI='';searchIndex=-1;lastSlash='';for(const item of imports.values())item.resolve({ok:false});imports.clear();bookmarks.clear();pending=0;},
+  reset(){clearTimeout(uiTimer);uiTimer=null;collapsed.clear();hover=0;blockHandleVisible=false;blockSelection=false;newParagraphPos=null;dragPreview=null;contextRequest=null;suppressedSlash=null;slashIndex=0;query='';lastUI='';searchIndex=-1;lastSlash='';for(const item of imports.values())item.resolve({ok:false});imports.clear();bookmarks.clear();pending=0;},
   selectedCode:()=>topBlock(view.state.selection.from),
  };
 }

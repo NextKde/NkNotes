@@ -29,6 +29,25 @@ try{
  assert.ok((await run('nextnotes.toolsState().slash.items')).some(x=>x.command==='heading2'));
  await key('Enter','Enter',13);assert.equal((await doc()).content[0].type,'heading');assert.equal((await doc()).content[0].attrs.level,2);
  await command('undo');assert.equal(await plain(),'/h2');await command('redo');await text('Slash title');ok('slash_filter_keyboard_conversion_single_undo');
+ for(const kind of ['bullet','ordered','task']){
+  await load('');await run('nextnotes.view().focus()');await text('/');await wait(120);
+  const entries=await run('nextnotes.toolsState().slash.items');
+  await action('slashChoose',{index:entries.findIndex(entry=>entry.command===kind)});await wait(120);
+  assert.equal(await run('document.querySelectorAll("li .editor-empty-line").length'),0,'list items must not advertise slash insertion');
+  await text('/');await wait(120);
+  assert.equal(await run('nextnotes.toolsState().slash'),null,'slash inside '+kind+' is literal text');
+  assert.equal(await plain(),'/');
+  await key('Backspace','Backspace',8);await key('Enter','Enter',13);await text('/');await wait(120);
+  assert.ok(await run('nextnotes.toolsState().slash'),'slash insertion returns after leaving '+kind);
+ }
+ ok('slash_lists_literal_input_and_exit');
+ await load('- [ ] Task\n');await run('nextnotes.view().focus()');
+ const taskBox=()=>run(`(()=>{const box=getComputedStyle(document.querySelector('li[data-checked]'),'::before');return {width:box.width,height:box.height,left:box.left,top:box.top,border:box.borderWidth};})()`);
+ const uncheckedBox=await taskBox();assert.ok(parseFloat(uncheckedBox.width)>0);
+ await command('check');assert.equal(await run('document.querySelector("li[data-checked]").dataset.checked'),'true');
+ assert.deepEqual(await taskBox(),uncheckedBox,'checking a task must not resize or move its box');
+ await command('check');assert.equal(await run('document.querySelector("li[data-checked]").dataset.checked'),'false');
+ assert.deepEqual(await taskBox(),uncheckedBox);ok('task_checkbox_stable_geometry');
  await load('A\n\nB\n\nC\n');await action('duplicateBlock',{pos:3});assert.equal(await plain(),'A\nB\nB\nC');await command('undo');assert.equal(await plain(),'A\nB\nC');
  await action('moveBlock',{pos:3,direction:'up'});assert.equal(await plain(),'B\nA\nC');await command('undo');
  await action('moveBlock',{pos:3,direction:'down'});assert.equal(await plain(),'A\nC\nB');await command('undo');
