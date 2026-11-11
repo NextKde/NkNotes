@@ -36,7 +36,7 @@ try{
   assert.equal(await run('document.querySelectorAll("li .editor-empty-line").length'),0,'list items must not advertise slash insertion');
   await text('/');await wait(120);
   assert.equal(await run('nextnotes.toolsState().slash'),null,'slash inside '+kind+' is literal text');
-  assert.equal(await plain(),'/');
+  assert.equal(await run('nextnotes.view().state.selection.$from.parent.textContent'),'/','literal slash stays in the active list paragraph');
   await key('Backspace','Backspace',8);await key('Enter','Enter',13);await text('/');await wait(120);
   assert.ok(await run('nextnotes.toolsState().slash'),'slash insertion returns after leaving '+kind);
  }
