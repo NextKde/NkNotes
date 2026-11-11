@@ -12,9 +12,9 @@ const slashEntries=[
  ['math','数学公式','math latex 数学 公式'],['footnote','脚注','footnote 脚注'],['attachment','图片或附件','image file 图片 附件'],['toc','插入目录','toc contents 目录'],
 ];
 export function makeTools(env){
- let view,hover=0,collapsed=new Set(),query='',caseSensitive=false,searchIndex=-1,slashIndex=0,lastSlash='',uiTimer,lastUI='',layoutToken=0;
+ let view,hover=0,blockHandleVisible=false,collapsed=new Set(),query='',caseSensitive=false,searchIndex=-1,slashIndex=0,lastSlash='',uiTimer,lastUI='',layoutToken=0;
  let cachedDoc,cachedText='',cachedStats={},cachedOutline=[],cachedMatchesDoc,cachedMatchesQuery,cachedMatchesCase,cachedMatches=[];
- let suppressedSlash=null;let pending=0,request=0,clipboardBlock=null;const imports=new Map(),bookmarks=new Map();
+ let suppressedSlash=null,blockSelection=false,newParagraphPos=null;let pending=0,request=0,clipboardBlock=null;const imports=new Map(),bookmarks=new Map();
  const key=new PluginKey('nextnotesTools');
  const editable=()=>env.canEdit()&&!env.busy();
  const notify=text=>env.bridge()?.notice(text);
@@ -25,6 +25,13 @@ export function makeTools(env){
   const last=doc.lastChild;return last?{pos:doc.content.size-last.nodeSize,node:last}:null;
  }
  function targetBlock(args={}){return topBlock(Number.isInteger(args.pos)?args.pos:hover);}
+ function trackNewParagraph(state,focused){
+  const {$from}=state.selection;
+  if(!focused||!(state.selection instanceof TextSelection)||$from.parent.type.name!=='paragraph'){newParagraphPos=null;return;}
+  const pos=$from.before();
+  if(newParagraphPos!==pos)newParagraphPos=null;
+  if(!$from.parent.content.size)newParagraphPos=pos;
+ }
  function rootBlocks(){const out=[];view.state.doc.forEach((node,pos)=>out.push({node,pos}));return out;}
  function matches(doc=view.state.doc){
   if(!query)return [];
@@ -95,8 +102,12 @@ export function makeTools(env){
   }
   const outline=cachedOutline.map(b=>({...b,folded:collapsed.has(b.pos)}));
   const selected=view.state.selection.empty?'':view.state.doc.textBetween(view.state.selection.from,view.state.selection.to,'\n');
+  // A fresh paragraph stays unobstructed for its first editing session.
+  // Existing content remains draggable even while its text has focus.
+  trackNewParagraph(view.state,view.hasFocus());
+  const editingBlock=newParagraphPos===null?null:topBlock(newParagraphPos+1);
   const state={epoch:env.epoch(),outline,stats:{...cachedStats,selected:Array.from(selected.replace(/\s/g,'')).length},
-   block:geometry(topBlock(hover)),slash:slash(),search:{total:matches().length,current:searchIndex+1},pending};
+   block:geometry(topBlock(hover)),blockHandleVisible:blockHandleVisible&&editable()&&editingBlock?.pos!==hover,slash:slash(),search:{total:matches().length,current:searchIndex+1},pending};
   const block=topBlock(view.state.selection.from);
   if(block?.node.type.name==='code_block')state.code={pos:block.pos,source:block.node.textContent,language:block.node.attrs.language||''};
   state.tableWidths=blocks.filter(b=>b.node.type.name==='table').map(b=>Array.from({length:b.node.firstChild.childCount},(_,i)=>b.node.firstChild.child(i).attrs.colwidth));
@@ -110,6 +121,7 @@ export function makeTools(env){
   const encoded=JSON.stringify(state);if(encoded!==lastUI){lastUI=encoded;env.bridge().ui(encoded);}
  }
  function schedule(){if(!uiTimer)uiTimer=setTimeout(ui,35);}
+ function hideBlockHandle(){if(blockHandleVisible){blockHandleVisible=false;schedule();}return false;}
  function refresh(){if(view&&!env.busy())view.dispatch(view.state.tr.setMeta(key,'refresh'));schedule();}
  function boundary(tr){return closeHistory(tr);}
  function commit(tr){view.dispatch(boundary(tr));view.dispatch(closeHistory(view.state.tr));env.report();schedule();}
@@ -131,7 +143,9 @@ export function makeTools(env){
   }
   if(target===undefined||target>=r.from&&target<=r.to)return false;
   const content=view.state.doc.slice(r.from,r.to).content;let tr=view.state.tr.delete(r.from,r.to);
-  const at=tr.mapping.map(target,-1);tr=tr.insert(at,content);tr.setSelection(TextSelection.near(tr.doc.resolve(Math.min(tr.doc.content.size,at+1))));commit(tr.scrollIntoView());return true;
+  const at=tr.mapping.map(target,-1);tr=tr.insert(at,content);
+  tr.setMeta('nextnotesMovedBlock',{from:r.from,to:r.to,at});
+  tr.setSelection(TextSelection.near(tr.doc.resolve(Math.min(tr.doc.content.size,at+1))));commit(tr.scrollIntoView());return true;
  }
  function navigateSearch(direction=1){
   const all=matches();if(!all.length){searchIndex=-1;schedule();return false;}
@@ -193,7 +207,7 @@ export function makeTools(env){
   if(name==='selectBlock'){
    const b=targetBlock(args);if(!b)return false;
    const selection=args.extend?TextSelection.between(view.state.doc.resolve(Math.min(view.state.selection.from,b.pos)),view.state.doc.resolve(Math.max(view.state.selection.to,b.pos+b.node.nodeSize))):NodeSelection.create(view.state.doc,b.pos);
-   view.dispatch(view.state.tr.setSelection(selection));view.focus();return true;
+   view.dispatch(view.state.tr.setSelection(selection).setMeta(key,'block-selection'));view.focus();return true;
   }
   if(name==='moveBlock')return moveBlock(args);
   if(name==='duplicateBlock'||name==='deleteBlock'||name==='copyBlock'){
@@ -262,20 +276,51 @@ export function makeTools(env){
   // Wait for diagram rendering and decode images before PDF capture.
   await env.waitForPreview?.();
   await Promise.all(Array.from(view.dom.querySelectorAll('img')).map(image=>image.decode?.().catch(()=>{})));
-  const clone=view.dom.cloneNode(true);clone.classList.remove('ProseMirror-focused');
+  const clone=view.dom.cloneNode(true);clone.classList.remove('ProseMirror-focused','editor-block-selection');
+  for(const el of clone.querySelectorAll('.editor-selected-block,.ProseMirror-selectednode'))el.classList.remove('editor-selected-block','ProseMirror-selectednode');
   for(const el of clone.querySelectorAll('[contenteditable]'))el.removeAttribute('contenteditable');
   for(const el of clone.querySelectorAll('.folded-content'))el.classList.remove('folded-content');
   for(const el of clone.querySelectorAll('.editor-search-match'))el.classList.remove('editor-search-match');
+  for(const el of clone.querySelectorAll('.editor-empty-line')){el.classList.remove('editor-empty-line');el.removeAttribute('data-placeholder');}
   for(const el of clone.querySelectorAll('.ProseMirror-gapcursor,.ProseMirror-separator,.ProseMirror-trailingBreak,.ProseMirror-widget,.column-resize-handle'))el.remove();
   env.bridge().exportReady(token,env.epoch(),clone.outerHTML);
   return clone.outerHTML;
  }
  const plugin=new Plugin({key,
-  state:{init:()=>DecorationSet.empty,apply(tr,old){
-   if(tr.docChanged){collapsed=new Set(Array.from(collapsed,p=>tr.mapping.map(p)));hover=tr.mapping.map(hover);for(const item of bookmarks.values())item.bookmark=item.bookmark.map(tr.mapping);}
+  state:{init:()=>DecorationSet.empty,apply(tr,old,oldState,newState){
+   // Capture an empty paragraph before its first keystroke, even between UI reports.
+   trackNewParagraph(oldState,!!view?.hasFocus());
+   if(newParagraphPos!==null&&tr.docChanged){
+    const mapped=tr.mapping.mapResult(newParagraphPos);
+    newParagraphPos=mapped.deleted||tr.getMeta('nextnotesMovedBlock')?null:mapped.pos;
+   }
+   trackNewParagraph(newState,!!view?.hasFocus());
+   if(tr.selectionSet||tr.docChanged)blockSelection=tr.getMeta(key)==='block-selection';
+   if(tr.docChanged){
+    collapsed=new Set(Array.from(collapsed,p=>tr.mapping.map(p)));
+    // A move is delete + insert: ordinary mapping loses the moved block's identity.
+    const moved=tr.getMeta('nextnotesMovedBlock');
+    hover=moved&&hover>=moved.from&&hover<moved.to?moved.at+hover-moved.from:tr.mapping.map(hover);
+    for(const item of bookmarks.values())item.bookmark=item.bookmark.map(tr.mapping);
+   }
    return env.busy()?old.map(tr.mapping,tr.doc):(tr.docChanged||tr.getMeta(key)?decorations(tr.doc===view?.state.doc?view.state:{doc:tr.doc}):old);
   }},
-  props:{decorations:state=>key.getState(state),
+  props:{attributes:()=>blockSelection?{class:'editor-block-selection'}:{},
+   decorations(state){
+    const base=key.getState(state),{$from,empty}=state.selection;
+    if(blockSelection&&!empty){
+     const items=[];
+     state.doc.nodesBetween(state.selection.from,state.selection.to,(node,pos)=>{
+      items.push(Decoration.node(pos,pos+node.nodeSize,{class:'editor-selected-block'}));return false;
+     });
+     return base.add(state.doc,items);
+    }
+    // Decorate only the current empty paragraph; no text or document mutation.
+    if(!editable()||!empty||$from.parent.type.name!=='paragraph'||$from.parent.content.size)return base;
+    const pos=$from.before();
+    return base.add(state.doc,[Decoration.node(pos,pos+$from.parent.nodeSize,
+     {class:'editor-empty-line','data-placeholder':'输入"/"进入选择'})]);
+   },
    handleKeyDown(v,event){
     if(env.busy())return false;const state=slash();
     if(state&&['ArrowDown','ArrowUp','Enter','Escape'].includes(event.key)){
@@ -286,12 +331,22 @@ export function makeTools(env){
     if(event.altKey&&event.shiftKey&&['ArrowUp','ArrowDown'].includes(event.key))return moveBlock({pos:topBlock(v.state.selection.from)?.pos,direction:event.key==='ArrowUp'?'up':'down',selection:true});
     return false;
    },
-   handleDOMEvents:{mousemove(v,event){const hit=v.posAtCoords({left:event.clientX,top:event.clientY});if(hit){const b=topBlock(hit.pos);if(b&&b.pos!==hover){hover=b.pos;schedule();}}return false;}}
+   handleDOMEvents:{
+    focus(){schedule();return false;},blur(){newParagraphPos=null;schedule();return false;},
+    mousemove(v,event){
+     if(event.buttons||!editable())return hideBlockHandle();
+     const hit=v.posAtCoords({left:event.clientX,top:event.clientY});
+     const b=hit?topBlock(hit.pos):null;
+     if(!b||b.node.type.name==='raw_source')return hideBlockHandle();
+     if(!blockHandleVisible||b.pos!==hover){hover=b.pos;blockHandleVisible=true;schedule();}
+     return false;
+    }
+   }
   },
   view(v){view=v;const observer=new ResizeObserver(schedule);observer.observe(v.dom);schedule();return {update(){env.refreshToc?.();schedule();},destroy(){observer.disconnect();clearTimeout(uiTimer);uiTimer=null;}};}
  });
  return {plugin,run,refresh,state:()=>lastUI?JSON.parse(lastUI):{},ui:schedule,uiNow:ui,uploader,importResult,exportReady,hasPending:()=>pending>0,
-  reset(){clearTimeout(uiTimer);uiTimer=null;collapsed.clear();hover=0;query='';lastUI='';searchIndex=-1;lastSlash='';for(const item of imports.values())item.resolve({ok:false});imports.clear();bookmarks.clear();pending=0;},
+  reset(){clearTimeout(uiTimer);uiTimer=null;collapsed.clear();hover=0;blockHandleVisible=false;blockSelection=false;newParagraphPos=null;query='';lastUI='';searchIndex=-1;lastSlash='';for(const item of imports.values())item.resolve({ok:false});imports.clear();bookmarks.clear();pending=0;},
   selectedCode:()=>topBlock(view.state.selection.from),
  };
 }

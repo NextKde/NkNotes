@@ -312,23 +312,18 @@ ApplicationWindow {
     Shortcut { sequence: "Escape"; enabled: organizer.dragging; onActivated: { organizePreview.Drag.cancel(); organizer.endDrag() } }
     component ToolbarAction: LiquidActionButton {
         property string help: ""
-        iconOnly: true; implicitWidth: 32; implicitHeight: 26
+        iconOnly: true; toolbarAction: true
         materialForm: false; backdrop: readingBackdrop
         focusPolicy: Qt.TabFocus
         Accessible.name: help
         KosToolTip { target: parent; backdrop: readingBackdrop; text: parent.help }
     }
     component HeaderAction: ToolbarAction {
-        implicitWidth: tokens.headerButtonHeight
-        implicitHeight: tokens.headerButtonHeight
-        width: tokens.headerButtonHeight; height: tokens.headerButtonHeight
-        Layout.minimumHeight: tokens.headerButtonHeight
-        Layout.maximumHeight: tokens.headerButtonHeight
-        iconSize: tokens.headerIconSize
+        Layout.minimumHeight: implicitHeight
+        Layout.maximumHeight: implicitHeight
     }
     component ListNavigationActions: LiquidActionButtonGroup {
         id: listActions
-        buttonSize: tokens.headerButtonHeight
         materialForm: false; backdrop: readingBackdrop
         icons: root.currentFolder ? ["back", "more"] : ["more"]
         labels: root.currentFolder
@@ -426,7 +421,7 @@ ApplicationWindow {
         ToolbarAction {
             id: entryMenu
             anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
-            implicitWidth: 26; implicitHeight: 26; iconName: "more"
+            iconName: "more"
             visible: entry.showMenuButton && (entryHover.hovered || entryButton.activeFocus || activeFocus)
             help: entry.folderPath.split("/").pop() + "的文件夹操作"
             enabled: !controller.busy
@@ -459,11 +454,11 @@ ApplicationWindow {
             KosSidebarToggle {
                 id: sidebarButton
                 objectName: "sidebarToggleButton"
-                implicitWidth: tokens.headerButtonHeight; implicitHeight: tokens.headerButtonHeight
+                implicitWidth: LiquidStyle.toolbarButtonHeight; implicitHeight: LiquidStyle.toolbarButtonHeight
                 scale: 1
                 // Keep the shared rounded sidebar glyph used by the other apps.
-                // Scale its original 18px width; do not substitute panelLeft.
-                contentItem.scale: tokens.headerIconSize / 18
+                // Scale from the shared glyph size; do not substitute panelLeft.
+                contentItem.scale: LiquidStyle.toolbarIconSize / contentItem.size
                 glyphColor: AppTheme.text; glyphPaneColor: glyphColor
                 focusPolicy: Qt.TabFocus
                 Accessible.name: "显示或隐藏导航 · Ctrl+Shift+B"
@@ -488,7 +483,7 @@ ApplicationWindow {
             LiquidActionButton {
                 visible: root.trashView ? recycleBin.selectionMode : organizer.selectionMode
                 text: "取消"; Accessible.name: "取消选择"
-                implicitWidth: 52; implicitHeight: 26; materialForm: true
+                toolbarAction: true; materialForm: true
                 onClicked: root.trashView ? recycleBin.clearSelection() : organizer.clearSelection()
             }
             ListNavigationActions {}
@@ -499,8 +494,8 @@ ApplicationWindow {
             x: root.editorX < root.width ? Math.max(178, root.editorX + 12) : 178
             anchors.verticalCenter: parent.verticalCenter
             readonly property real controlsLeft: windowControls.x + (windowControls.buttonLayout.length ? windowControls.buttonLayout[0].x : 0)
-            width: Math.max(0, controlsLeft - 10 - x); height: tokens.headerButtonHeight
-            readonly property bool wideSearch: root.width >= 1320 && width >= noteActions.implicitWidth + editorActions.implicitWidth + tokens.headerButtonHeight + 210
+            width: Math.max(0, controlsLeft - 10 - x); height: LiquidStyle.toolbarButtonHeight
+            readonly property bool wideSearch: root.width >= 1320 && width >= noteActions.implicitWidth + editorActions.implicitWidth + LiquidStyle.toolbarButtonHeight + 210
             readonly property bool searchShown: wideSearch || root.searchOpen || controller.query.length > 0
             readonly property bool searching: !wideSearch && searchShown
             Row {
@@ -514,7 +509,7 @@ ApplicationWindow {
                 id: editorActionsViewport
                 visible: !headerActions.searching
                 readonly property real availableWidth: Math.max(0, globalActions.x - noteActions.width - 24)
-                width: Math.min(editorActions.implicitWidth, availableWidth); height: tokens.headerButtonHeight
+                width: Math.min(editorActions.implicitWidth, availableWidth); height: LiquidStyle.toolbarButtonHeight
                 anchors.verticalCenter: parent.verticalCenter
                 x: Math.max(noteActions.width + 12, Math.min((parent.width - width) / 2, globalActions.x - 12 - width))
                 contentWidth: editorActions.implicitWidth; contentHeight: height
@@ -550,10 +545,10 @@ ApplicationWindow {
                 LiquidActionButtonGroup {
                     id: editorActions
                     objectName: "bodyEditingButtonGroup"
-                    height: tokens.headerButtonHeight
+                    height: LiquidStyle.toolbarButtonHeight
                     anchors.verticalCenter: parent.verticalCenter
                     clip: false
-                    buttonSize: tokens.headerButtonHeight; materialForm: false; backdrop: readingBackdrop
+                    materialForm: false; backdrop: readingBackdrop
                     icons: session.sourceMode ? ["undo", "forward", ""] : ["undo", "forward", "", "", "", "", "reminder", "grid", "more"]
                     labels: session.sourceMode ? [controller.undoText, controller.redoText, "返回正文"]
                         : [controller.undoText, controller.redoText, "段落样式", "粗体 · Ctrl+B", "斜体 · Ctrl+I", "删除线 · Ctrl+Shift+X", "列表与插入", "表格与行列操作", "更多编辑工具"]
@@ -608,10 +603,10 @@ ApplicationWindow {
                         anchors.fill: parent
                         materialForm: false; liquidFinish: true; liquidIntensity: "light"; backdrop: readingBackdrop
                         placeholderText: "搜索笔记"; text: controller.query
-                        leftPadding: 30; rightPadding: headerActions.searching ? 36 : 10
+                        leftPadding: 30; rightPadding: headerActions.searching ? LiquidStyle.toolbarButtonHeight + 10 : 10
                         VectorIcon {
                             x: 8; anchors.verticalCenter: parent.verticalCenter
-                            name: "search"; size: tokens.headerIconSize; color: search.textColor
+                            name: "search"; size: LiquidStyle.toolbarIconSize; color: search.textColor
                         }
                         onTextEdited: if (!inputMethodComposing) root.updateGlobalQuery(text)
                         onInputMethodComposingChanged: if (!inputMethodComposing && text !== controller.query) root.updateGlobalQuery(text)

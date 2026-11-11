@@ -65,7 +65,9 @@ Item {
     Item { id: caretAnchor; width: 8; height: 18; x: 32; y: 18 }
     LiquidActionButton {
         id: handle
-        visible: !!root.state.block && root.state.block.y >= 0 && root.state.block.y < root.height && root.editable
+        // Only a fresh paragraph's first editing session suppresses its handle.
+        visible: !!root.state.blockHandleVisible
+            && !!root.state.block && root.state.block.y >= 0 && root.state.block.y < root.height && root.editable
         x: Math.max(12, root.state.block ? root.state.block.x - width - 8 : 12); y: Math.max(0, root.state.block ? root.state.block.y : 0)
         implicitWidth: 26; implicitHeight: 26; iconOnly: true; iconName: "more"; iconSize: 16
         materialForm: true
@@ -73,6 +75,7 @@ Item {
         onClicked: { root.block = root.state.block; root.spellSuggestions = []; blockMenu.openFromButton(handle) }
         MouseArea {
             anchors.fill: parent
+            cursorShape: pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
             property real startY: 0
             property int startPos: 0
             onPressed: function(mouse) { startY = mapToItem(root, mouse.x, mouse.y).y; startPos = root.state.block.pos; root.dragging = false }
