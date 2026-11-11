@@ -88187,9 +88187,9 @@
     ["toc", "\u63D2\u5165\u76EE\u5F55", "toc contents \u76EE\u5F55"]
   ];
   function makeTools(env) {
-    let view2, hover = 0, collapsed = /* @__PURE__ */ new Set(), query = "", caseSensitive = false, searchIndex = -1, slashIndex = 0, lastSlash = "", uiTimer, lastUI = "", layoutToken = 0;
+    let view2, hover = 0, blockHandleVisible = false, collapsed = /* @__PURE__ */ new Set(), query = "", caseSensitive = false, searchIndex = -1, slashIndex = 0, lastSlash = "", uiTimer, lastUI = "", layoutToken = 0;
     let cachedDoc, cachedText = "", cachedStats = {}, cachedOutline = [], cachedMatchesDoc, cachedMatchesQuery, cachedMatchesCase, cachedMatches = [];
-    let suppressedSlash = null;
+    let suppressedSlash = null, blockSelection = false, newParagraphPos = null;
     let pending = 0, request = 0, clipboardBlock = null;
     const imports = /* @__PURE__ */ new Map(), bookmarks = /* @__PURE__ */ new Map();
     const key4 = new PluginKey("nextnotesTools");
@@ -88211,6 +88211,16 @@
     }
     function targetBlock(args = {}) {
       return topBlock(Number.isInteger(args.pos) ? args.pos : hover);
+    }
+    function trackNewParagraph(state, focused) {
+      const { $from } = state.selection;
+      if (!focused || !(state.selection instanceof TextSelection) || $from.parent.type.name !== "paragraph") {
+        newParagraphPos = null;
+        return;
+      }
+      const pos = $from.before();
+      if (newParagraphPos !== pos) newParagraphPos = null;
+      if (!$from.parent.content.size) newParagraphPos = pos;
     }
     function rootBlocks() {
       const out = [];
@@ -88329,11 +88339,14 @@
       }
       const outline = cachedOutline.map((b) => ({ ...b, folded: collapsed.has(b.pos) }));
       const selected = view2.state.selection.empty ? "" : view2.state.doc.textBetween(view2.state.selection.from, view2.state.selection.to, "\n");
+      trackNewParagraph(view2.state, view2.hasFocus());
+      const editingBlock = newParagraphPos === null ? null : topBlock(newParagraphPos + 1);
       const state = {
         epoch: env.epoch(),
         outline,
         stats: { ...cachedStats, selected: Array.from(selected.replace(/\s/g, "")).length },
         block: geometry(topBlock(hover)),
+        blockHandleVisible: blockHandleVisible && editable2() && editingBlock?.pos !== hover,
         slash: slash(),
         search: { total: matches2().length, current: searchIndex + 1 },
         pending
@@ -88358,6 +88371,13 @@
     }
     function schedule() {
       if (!uiTimer) uiTimer = setTimeout(ui, 35);
+    }
+    function hideBlockHandle() {
+      if (blockHandleVisible) {
+        blockHandleVisible = false;
+        schedule();
+      }
+      return false;
     }
     function refresh() {
       if (view2 && !env.busy()) view2.dispatch(view2.state.tr.setMeta(key4, "refresh"));
@@ -88400,6 +88420,7 @@
       let tr = view2.state.tr.delete(r2.from, r2.to);
       const at = tr.mapping.map(target, -1);
       tr = tr.insert(at, content4);
+      tr.setMeta("nextnotesMovedBlock", { from: r2.from, to: r2.to, at });
       tr.setSelection(TextSelection.near(tr.doc.resolve(Math.min(tr.doc.content.size, at + 1))));
       commit(tr.scrollIntoView());
       return true;
@@ -88549,7 +88570,7 @@
         const b = targetBlock(args);
         if (!b) return false;
         const selection = args.extend ? TextSelection.between(view2.state.doc.resolve(Math.min(view2.state.selection.from, b.pos)), view2.state.doc.resolve(Math.max(view2.state.selection.to, b.pos + b.node.nodeSize))) : NodeSelection.create(view2.state.doc, b.pos);
-        view2.dispatch(view2.state.tr.setSelection(selection));
+        view2.dispatch(view2.state.tr.setSelection(selection).setMeta(key4, "block-selection"));
         view2.focus();
         return true;
       }
@@ -88690,26 +88711,57 @@
       await Promise.all(Array.from(view2.dom.querySelectorAll("img")).map((image2) => image2.decode?.().catch(() => {
       })));
       const clone = view2.dom.cloneNode(true);
-      clone.classList.remove("ProseMirror-focused");
+      clone.classList.remove("ProseMirror-focused", "editor-block-selection");
+      for (const el of clone.querySelectorAll(".editor-selected-block,.ProseMirror-selectednode")) el.classList.remove("editor-selected-block", "ProseMirror-selectednode");
       for (const el of clone.querySelectorAll("[contenteditable]")) el.removeAttribute("contenteditable");
       for (const el of clone.querySelectorAll(".folded-content")) el.classList.remove("folded-content");
       for (const el of clone.querySelectorAll(".editor-search-match")) el.classList.remove("editor-search-match");
+      for (const el of clone.querySelectorAll(".editor-empty-line")) {
+        el.classList.remove("editor-empty-line");
+        el.removeAttribute("data-placeholder");
+      }
       for (const el of clone.querySelectorAll(".ProseMirror-gapcursor,.ProseMirror-separator,.ProseMirror-trailingBreak,.ProseMirror-widget,.column-resize-handle")) el.remove();
       env.bridge().exportReady(token, env.epoch(), clone.outerHTML);
       return clone.outerHTML;
     }
     const plugin = new Plugin({
       key: key4,
-      state: { init: () => DecorationSet.empty, apply(tr, old) {
+      state: { init: () => DecorationSet.empty, apply(tr, old, oldState, newState) {
+        trackNewParagraph(oldState, !!view2?.hasFocus());
+        if (newParagraphPos !== null && tr.docChanged) {
+          const mapped = tr.mapping.mapResult(newParagraphPos);
+          newParagraphPos = mapped.deleted || tr.getMeta("nextnotesMovedBlock") ? null : mapped.pos;
+        }
+        trackNewParagraph(newState, !!view2?.hasFocus());
+        if (tr.selectionSet || tr.docChanged) blockSelection = tr.getMeta(key4) === "block-selection";
         if (tr.docChanged) {
           collapsed = new Set(Array.from(collapsed, (p) => tr.mapping.map(p)));
-          hover = tr.mapping.map(hover);
+          const moved = tr.getMeta("nextnotesMovedBlock");
+          hover = moved && hover >= moved.from && hover < moved.to ? moved.at + hover - moved.from : tr.mapping.map(hover);
           for (const item of bookmarks.values()) item.bookmark = item.bookmark.map(tr.mapping);
         }
         return env.busy() ? old.map(tr.mapping, tr.doc) : tr.docChanged || tr.getMeta(key4) ? decorations2(tr.doc === view2?.state.doc ? view2.state : { doc: tr.doc }) : old;
       } },
       props: {
-        decorations: (state) => key4.getState(state),
+        attributes: () => blockSelection ? { class: "editor-block-selection" } : {},
+        decorations(state) {
+          const base2 = key4.getState(state), { $from, empty: empty3 } = state.selection;
+          if (blockSelection && !empty3) {
+            const items = [];
+            state.doc.nodesBetween(state.selection.from, state.selection.to, (node2, pos2) => {
+              items.push(Decoration.node(pos2, pos2 + node2.nodeSize, { class: "editor-selected-block" }));
+              return false;
+            });
+            return base2.add(state.doc, items);
+          }
+          if (!editable2() || !empty3 || $from.parent.type.name !== "paragraph" || $from.parent.content.size) return base2;
+          const pos = $from.before();
+          return base2.add(state.doc, [Decoration.node(
+            pos,
+            pos + $from.parent.nodeSize,
+            { class: "editor-empty-line", "data-placeholder": '\u8F93\u5165"/"\u8FDB\u5165\u9009\u62E9' }
+          )]);
+        },
         handleKeyDown(v2, event) {
           if (env.busy()) return false;
           const state = slash();
@@ -88729,17 +88781,29 @@
           if (event.altKey && event.shiftKey && ["ArrowUp", "ArrowDown"].includes(event.key)) return moveBlock({ pos: topBlock(v2.state.selection.from)?.pos, direction: event.key === "ArrowUp" ? "up" : "down", selection: true });
           return false;
         },
-        handleDOMEvents: { mousemove(v2, event) {
-          const hit = v2.posAtCoords({ left: event.clientX, top: event.clientY });
-          if (hit) {
-            const b = topBlock(hit.pos);
-            if (b && b.pos !== hover) {
+        handleDOMEvents: {
+          focus() {
+            schedule();
+            return false;
+          },
+          blur() {
+            newParagraphPos = null;
+            schedule();
+            return false;
+          },
+          mousemove(v2, event) {
+            if (event.buttons || !editable2()) return hideBlockHandle();
+            const hit = v2.posAtCoords({ left: event.clientX, top: event.clientY });
+            const b = hit ? topBlock(hit.pos) : null;
+            if (!b || b.node.type.name === "raw_source") return hideBlockHandle();
+            if (!blockHandleVisible || b.pos !== hover) {
               hover = b.pos;
+              blockHandleVisible = true;
               schedule();
             }
+            return false;
           }
-          return false;
-        } }
+        }
       },
       view(v2) {
         view2 = v2;
@@ -88772,6 +88836,9 @@
         uiTimer = null;
         collapsed.clear();
         hover = 0;
+        blockHandleVisible = false;
+        blockSelection = false;
+        newParagraphPos = null;
         query = "";
         lastUI = "";
         searchIndex = -1;

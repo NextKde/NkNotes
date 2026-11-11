@@ -12,9 +12,6 @@ QtObject {
     readonly property int sidebarWidth: 224
     readonly property int listWidth: 285
     readonly property int toolbarHeight: 47
-    // nextkdeAppDemo LiquidActionButton: toolbar height 26, standard icon 16.
-    readonly property int headerButtonHeight: 26
-    readonly property int headerIconSize: 16
     readonly property int navigationSize: 13
     readonly property int navigationHeight: 28
     readonly property int noteRowHeight: 68
