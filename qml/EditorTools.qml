@@ -25,9 +25,11 @@ Item {
     property int contextSequence: 0
     readonly property var handleBlock: pressedBlock || state.block
     readonly property bool dragInside: dragX >= 0 && dragX < width - outlineWidth && dragY >= 0 && dragY < height
-    function cancelDrag() {
+    function cancelDrag(restoreFocus) {
+        const restore = restoreFocus && handle.activeFocus && visible && editable && !popupActive
         if (handlePointer && handlePointer.pressed) handlePointer.gestureCanceled = true
         dragging = false; pressedBlock = null; post("cancelBlockMove")
+        if (restore) source.editor.forceActiveFocus()
     }
     function previewDrag() {
         if (dragInside) post("previewBlockMove", {pos: pressedBlock.pos, y: dragY})
@@ -77,14 +79,13 @@ Item {
         const slash = state.slash
         if (slash && slash.items.length && editable) {
             caretAnchor.x = Math.max(0, Math.min(width - outlineWidth - 30, slash.x)); caretAnchor.y = Math.max(0, Math.min(height - 22, slash.y))
-            slashMenu.currentIndex = slash.index
             if (!slashMenu.visible) slashMenu.openForCaret(caretAnchor)
+            Qt.callLater(slashMenu.syncSelection)
         } else if (slashMenu.visible) closeSlash()
     }
     onStateChanged: uiChanged()
     onEditableChanged: if (!editable) cancelDrag()
     onVisibleChanged: if (!visible) cancelDrag()
-    Shortcut { sequence: "Escape"; enabled: root.dragging; onActivated: root.cancelDrag() }
     Item { id: caretAnchor; width: 8; height: 18; x: 32; y: 18 }
     LiquidActionButton {
         id: handle
@@ -96,6 +97,13 @@ Item {
         implicitWidth: 26; implicitHeight: 26; iconOnly: true; iconName: "more"; iconSize: 16
         materialForm: true
         Accessible.name: "块操作，可拖动块，或使用 Alt+Shift+方向键移动"
+        Keys.onShortcutOverride: function(event) {
+            if (root.dragging && event.key === Qt.Key_Escape) event.accepted = true
+        }
+        Keys.onEscapePressed: function(event) {
+            if (root.dragging) { root.cancelDrag(true); event.accepted = true }
+            else event.accepted = false
+        }
         onClicked: { root.block = root.state.block; root.spellSuggestions = []; blockMenu.openFromButton(handle) }
         MouseArea {
             anchors.fill: parent
@@ -112,7 +120,10 @@ Item {
             onPositionChanged: function(mouse) {
                 if (!pressed || gestureCanceled) return
                 const point = mapToItem(root, mouse.x, mouse.y)
-                if (Math.abs(point.y - startY) > 6) root.dragging = true
+                if (!root.dragging && Math.abs(point.y - startY) > 6) {
+                    handle.forceActiveFocus(Qt.MouseFocusReason)
+                    root.dragging = true
+                }
                 if (root.dragging) {
                     root.dragX = point.x; root.dragY = point.y
                     root.previewDrag()
@@ -127,9 +138,9 @@ Item {
                 }
                 else if (mouse.modifiers & Qt.ShiftModifier) root.post("selectBlock", {pos: startPos, extend: true})
                 else if (containsMouse) { root.block = root.pressedBlock; root.spellSuggestions = []; blockMenu.openFromButton(handle) }
-                root.cancelDrag()
+                root.cancelDrag(true)
             }
-            onCanceled: root.cancelDrag()
+            onCanceled: root.cancelDrag(true)
         }
         KosToolTip { target: handle; text: "拖动移动块，点击打开块操作" }
     }
@@ -188,7 +199,14 @@ Item {
         id: slashMenu; sourceItem: root.sceneItem; anchorItem: caretAnchor; focus: false
         maxHeight: 320
         property bool suppressOnClose: true
-        onOpened: suppressOnClose = true
+        function syncSelection() {
+            const slash = root.state.slash
+            if (!visible || !slash || !slash.items.length) return
+            currentIndex = slash.index
+            if (contentItem && contentItem.positionViewAtIndex)
+                contentItem.positionViewAtIndex(currentIndex, ListView.Contain)
+        }
+        onOpened: { suppressOnClose = true; Qt.callLater(syncSelection) }
         // Filtering, applying an entry and changing documents also close this menu.
         // Only an explicit dismissal should suppress the current slash query.
         onClosed: if (suppressOnClose && root.state.slash && root.state.slash.items.length && root.editable) root.post("dismissSlash")
@@ -200,8 +218,8 @@ Item {
                 text: modelData.label; highlighted: slashMenu.currentIndex === index
                 onTriggered: root.post("slashChoose", {index: index})
             }
-            onObjectAdded: function(index, object) { slashMenu.insertItem(index, object) }
-            onObjectRemoved: function(index, object) { slashMenu.removeItem(object) }
+            onObjectAdded: function(index, object) { slashMenu.insertItem(index, object); Qt.callLater(slashMenu.syncSelection) }
+            onObjectRemoved: function(index, object) { slashMenu.removeItem(object); Qt.callLater(slashMenu.syncSelection) }
         }
     }
     NotesPopover {
