@@ -4,7 +4,7 @@
   "reason": "Automatic approval blocked transferring updated source files into kos-vm-dev. No alternate transfer path was used.",
   "files": {
     "qml/Main.qml": "813422b43a5c493f1bae7ded896e4c8396168fe39aa13c4cf2a66c5cfeef12e4",
-    "qml/SourceEditor.qml": "7bb5ca24bbd6ffb8549fca87233d1158c6a83d86972dd1c008da8c2a0af3a1",
+    "qml/SourceEditor.qml": "7bb5ca24bbd6ffb8549fca87233d1158c6a83d86972dd1c008da8c2a91e0e9aa",
     "qml/EditorTools.qml": "ae5f5eb3e7ac68b9d7ded2d1825313c4ef379b9af0ff13ec045beb4dae4ede7c"
   },
   "changes": [
