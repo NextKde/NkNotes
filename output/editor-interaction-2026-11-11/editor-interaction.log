@@ -1,0 +1,6 @@
+PASS: context target follows the click independently of previous hover
+PASS: real DOM drop preview agrees with release; cancellation and undo preserve content
+PASS: folded content is skipped when computing insertion boundaries
+PASS: all slash entries are keyboard reachable, including the final insertion
+PASS: dismissal preserves uppercase/space queries and does not leak across paragraphs or document loads
+PASS: an empty slash result does not trap ordinary Enter navigation

@@ -1,0 +1,61 @@
+{
+  "results": [
+    {
+      "name": "slash_filter_keyboard_conversion_single_undo",
+      "passed": true
+    }
+  ],
+  "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\n'/\\n' !== '/'\n\n    at file:///home/amao/nknotes-review-agent-20261111/source/tests/AdvancedEditorRegression.mjs:39:10",
+  "snapshot": {
+    "epoch": 2,
+    "baseUrl": "file:///home/amao/nknotes-review-agent-20261111/fixture/review.md",
+    "source": "* /\n",
+    "fullSource": "---\ncustom: untouched\n---\n* /\n",
+    "sourceMode": false,
+    "doc": {
+      "type": "doc",
+      "attrs": {
+        "sourceContext": 0
+      },
+      "content": [
+        {
+          "type": "bullet_list",
+          "attrs": {
+            "spread": false
+          },
+          "content": [
+            {
+              "type": "list_item",
+              "attrs": {
+                "label": "•",
+                "listType": "bullet",
+                "spread": true,
+                "checked": null
+              },
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "/"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "paragraph"
+        }
+      ]
+    },
+    "composing": false,
+    "selection": {
+      "type": "text",
+      "anchor": 4,
+      "head": 4
+    }
+  }
+}
