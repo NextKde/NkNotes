@@ -45,6 +45,31 @@ TestCase {
         controller = createTemporaryObject(controllerComponent, testCase)
         organizer = createTemporaryObject(organizerComponent, testCase, {controller: controller})
     }
+    function test_view_choices_belong_to_browser_menu() {
+        organizer.openMenu(menuButton, "")
+        const menu = findChild(organizer, "noteListMenu")
+        const listView = findChild(organizer, "listViewMenuItem")
+        const galleryView = findChild(organizer, "galleryViewMenuItem")
+        tryCompare(menu, "visible", true)
+        verify(listView.visible)
+        verify(galleryView.visible)
+        verify(listView.checked)
+        const spy = signalSpyComponent.createObject(testCase, {target: organizer, signalName: "viewModeRequested"})
+        galleryView.triggered()
+        compare(spy.count, 1)
+        compare(spy.signalArguments[0][0], "gallery")
+        organizer.viewMode = "gallery"
+        verify(galleryView.checked)
+        verify(!listView.checked)
+        menu.close()
+        organizer.openMenu(row, "a.md", Qt.point(30, 12))
+        tryCompare(menu, "visible", true)
+        verify(!galleryView.visible)
+        verify(!listView.visible)
+        menu.close()
+        spy.destroy()
+    }
+    Component { id: signalSpyComponent; SignalSpy {} }
     function test_toolbar_can_enter_note_selection_without_an_active_note() {
         controller.path = "outside-filter.md"
         organizer.openMenu(menuButton, "")

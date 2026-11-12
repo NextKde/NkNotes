@@ -12,6 +12,8 @@ Item {
     readonly property var folderIconChoices: FolderIcons.choices
     signal exportRequested(var paths, string folder)
     signal smartFolderRequested()
+    property string viewMode: "list"
+    signal viewModeRequested(string mode)
     property var selectedPaths: []
     property var selectedFolderPaths: []
     property var selectableFolders: []
@@ -232,6 +234,19 @@ Item {
         property bool rowMenu: false
         readonly property bool allPinned: root.targetNotes.length > 0 && root.targetNotes.every(n => n.pinned)
         readonly property bool allFavorite: root.targetNotes.length > 0 && root.targetNotes.every(n => n.favorite)
+        LiquidPopoverItem {
+            objectName: "listViewMenuItem"
+            visible: !menu.rowMenu; height: visible ? implicitHeight : 0
+            text: "列表视图"; checkable: true; checked: root.viewMode === "list"
+            onTriggered: root.viewModeRequested("list")
+        }
+        LiquidPopoverItem {
+            objectName: "galleryViewMenuItem"
+            visible: !menu.rowMenu; height: visible ? implicitHeight : 0
+            text: "画廊视图"; checkable: true; checked: root.viewMode === "gallery"
+            onTriggered: root.viewModeRequested("gallery")
+        }
+        Rectangle { visible: !menu.rowMenu; height: visible ? 1 : 0; width: parent.width; color: AppTheme.border }
         LiquidPopoverItem {
             objectName: "selectNotesMenuItem"
             text: root.noteSelectionMode ? "取消选择笔记" : "选择笔记"

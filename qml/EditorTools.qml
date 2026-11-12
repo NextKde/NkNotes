@@ -13,7 +13,7 @@ Item {
     readonly property real outlineWidth: outlineVisible && width > 600 ? 200 : 0
     readonly property var state: source.editorState
     readonly property bool editable: !source.readOnly && !session.composing
-    readonly property bool popupActive: slashMenu.visible || blockMenu.visible || toolsMenu.visible || mathPanel.visible || codePanel.visible || imagePanel.visible || helpPanel.visible || attachmentsPanel.visible || outlinePanel.visible
+    readonly property bool popupActive: slashMenu.visible || blockMenu.visible || mathPanel.visible || codePanel.visible || imagePanel.visible || attachmentsPanel.visible || outlinePanel.visible
     property var block: ({})
     property var spellSuggestions: []
     property int documentEpoch: -1
@@ -32,7 +32,7 @@ Item {
         if (restore) source.editor.forceActiveFocus()
     }
     function previewDrag() {
-        if (dragInside) post("previewBlockMove", {pos: pressedBlock.pos, y: dragY})
+        if (dragInside) post("previewBlockMove", {pos: pressedBlock.pos, x: dragX, y: dragY, offsetY: handlePointer.startY - pressedBlock.y})
         else post("cancelBlockMove")
     }
     function closeSlash() { slashMenu.suppressOnClose = false; slashMenu.close() }
@@ -42,8 +42,16 @@ Item {
         else if (originMenu) outlinePanel.openFromMenu(originMenu)
         else outlinePanel.openFromButton(anchor)
     }
-    function showShortcuts(anchor) { helpPanel.openFromButton(anchor) }
-    function openMenu(anchor) { toolsMenu.openFromButton(anchor) }
+    function openTool(name, originMenu) {
+        if (name === "math") openMath(originMenu)
+        else if (name === "image") openImage(originMenu)
+        else if (name === "code") openCode(originMenu)
+        else if (name === "outline") toggleOutline(null, originMenu)
+        else if (name === "attachments") {
+            controller.inspectAttachments()
+            attachmentsPanel.openFromMenu(originMenu)
+        }
+    }
     function openContext(x, y, suggestions) {
         pendingContext = {x: x, y: y, suggestions: suggestions || [], request: ++contextSequence}
         post("contextBlock", {x: x, y: y, request: contextSequence})
@@ -68,7 +76,7 @@ Item {
     function uiChanged() {
         if (state.epoch !== undefined && documentEpoch !== state.epoch) {
             documentEpoch = state.epoch
-            closeSlash(); blockMenu.close(); toolsMenu.close(); mathPanel.close(); codePanel.close(); imagePanel.close(); helpPanel.close(); attachmentsPanel.close(); outlinePanel.close()
+            closeSlash(); blockMenu.close(); mathPanel.close(); codePanel.close(); imagePanel.close(); attachmentsPanel.close(); outlinePanel.close()
             dragging = false; pressedBlock = null; pendingContext = null
         }
         if (pendingContext && state.context && state.context.request === pendingContext.request) {
@@ -109,18 +117,23 @@ Item {
             anchors.fill: parent
             id: handlePointer
             cursorShape: pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+            hoverEnabled: true
+            preventStealing: true
+            property real startX: 0
             property real startY: 0
             property int startPos: 0
             property bool gestureCanceled: false
             onPressed: function(mouse) {
                 gestureCanceled = false
                 root.pressedBlock = root.state.block
-                startY = mapToItem(root, mouse.x, mouse.y).y; startPos = root.pressedBlock.pos; root.dragging = false
+                const point = mapToItem(root, mouse.x, mouse.y)
+                startX = point.x; startY = point.y; startPos = root.pressedBlock.pos; root.dragging = false
             }
             onPositionChanged: function(mouse) {
                 if (!pressed || gestureCanceled) return
                 const point = mapToItem(root, mouse.x, mouse.y)
-                if (!root.dragging && Math.abs(point.y - startY) > 6) {
+                if (!root.dragging && Math.hypot(point.x - startX, point.y - startY) > 6) {
+                    root.post("selectBlock", {pos: startPos, focus: false})
                     handle.forceActiveFocus(Qt.MouseFocusReason)
                     root.dragging = true
                 }
@@ -142,7 +155,12 @@ Item {
             }
             onCanceled: root.cancelDrag(true)
         }
-        KosToolTip { target: handle; text: "拖动移动块，点击打开块操作" }
+        KosToolTip {
+            target: handle; text: "拖动移动块，点击打开块操作"
+            delay: 1400; showOnFocus: false
+            hovered: handlePointer.containsMouse
+            when: !handlePointer.pressed && !root.dragging && !root.popupActive
+        }
     }
     Timer {
         interval: 40; repeat: true
@@ -245,17 +263,6 @@ Item {
             onObjectRemoved: function(index, object) { blockMenu.removeItem(object) }
         }
     }
-    NotesPopover {
-        id: toolsMenu; sourceItem: root.sceneItem
-        LiquidPopoverItem { text: "大纲 / 折叠"; onTriggered: root.toggleOutline(null, toolsMenu) }
-        LiquidPopoverItem { text: "插入自动目录"; enabled: root.editable; onTriggered: root.post("insertToc") }
-        LiquidPopoverItem { text: "插入图片或附件…"; enabled: root.editable && !root.controller.externalDocument; onTriggered: root.post("chooseAttachment") }
-        LiquidPopoverItem { text: "图片属性…"; enabled: !!root.state.image; onTriggered: root.openImage(toolsMenu) }
-        LiquidPopoverItem { text: "附件管理…"; enabled: !root.controller.externalDocument; onTriggered: { root.controller.inspectAttachments(); attachmentsPanel.openFromMenu(toolsMenu) } }
-        LiquidPopoverItem { text: "数学公式…"; enabled: root.editable; onTriggered: root.openMath(toolsMenu) }
-        LiquidPopoverItem { text: "插入脚注"; enabled: root.editable; onTriggered: root.post("footnote") }
-        LiquidPopoverItem { text: "代码语言与复制…"; enabled: !!root.state.code; onTriggered: root.openCode(toolsMenu) }
-    }
     NotesContentPopover {
         id: mathPanel; sourceItem: root.sceneItem; preferredWidth: 370
         onOpened: formula.forceActiveFocus()
@@ -324,16 +331,6 @@ Item {
                 ScrollBar.vertical: ScrollBar {}
             }
             Label { Layout.fillWidth: true; text: "只回收未被笔记引用的附件，可在附件回收区恢复。"; wrapMode: Text.WordWrap; color: AppTheme.mutedText; font.pixelSize: 11 }
-        }
-    }
-    NotesContentPopover {
-        id: helpPanel; sourceItem: root.sceneItem; preferredWidth: 370
-        contentItem: ColumnLayout {
-            Label { text: "正文快捷键"; font.bold: true; color: AppTheme.text }
-            Repeater {
-                model: ["/  插入与转换内容块", "Ctrl+B / Ctrl+I  粗体 / 斜体", "Ctrl+Shift+X  删除线", "Ctrl+E  行内代码", "Ctrl+Z / Ctrl+Shift+Z  撤销 / 重做", "Ctrl+F / Ctrl+H  查找 / 替换", "Alt+Shift+↑ / ↓  移动块", "Enter / Shift+Enter  分段 / 段内换行", "Tab / Shift+Tab  列表缩进、表格导航", "Ctrl+Enter  退出表格", "Ctrl+点击链接  打开链接", "大纲左右键 / 右键  折叠与展开"]
-                Label { required property string modelData; text: modelData; color: AppTheme.text; font.pixelSize: 12; topPadding: 2; bottomPadding: 2 }
-            }
         }
     }
 }
