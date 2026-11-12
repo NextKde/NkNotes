@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" NEXTNOTES_VERSION LIMIT_COUNT 1)
 project(NextNotes VERSION ${NEXTNOTES_VERSION} LANGUAGES CXX)
-set(NEXTNOTES_RELEASE_DATE "2026-11-09" CACHE STRING "AppStream release date")
+set(NEXTNOTES_RELEASE_DATE "2026-11-12" CACHE STRING "AppStream release date")
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Qml Quick QuickControls2 QuickDialogs2 Svg WebEngineCore WebEngineQuick WebChannel)
