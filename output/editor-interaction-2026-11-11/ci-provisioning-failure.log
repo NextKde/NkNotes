@@ -1,0 +1,518 @@
+build	Set up job	﻿2026-11-11T14:05:02.5323801Z Current runner version: '2.338.2'
+build	Set up job	2026-11-11T14:05:02.5361100Z ##[group]Runner Image Provisioner
+build	Set up job	2026-11-11T14:05:02.5362487Z Hosted Compute Agent
+build	Set up job	2026-11-11T14:05:02.5363493Z Version: 20261028.624
+build	Set up job	2026-11-11T14:05:02.5364606Z Commit: 54898b74c23fde5556c9b3c3a2290865feef0dfe
+build	Set up job	2026-11-11T14:05:02.5365928Z Build Date: 2026-10-28T21:51:42Z
+build	Set up job	2026-11-11T14:05:02.5367189Z Worker ID: {e36f421a-1a17-47fd-8128-783587109adc}
+build	Set up job	2026-11-11T14:05:02.5368385Z Region: eastus2
+build	Set up job	2026-11-11T14:05:02.5369638Z Cloud: Azure
+build	Set up job	2026-11-11T14:05:02.5370648Z ##[endgroup]
+build	Set up job	2026-11-11T14:05:02.5373494Z ##[group]Operating System
+build	Set up job	2026-11-11T14:05:02.5374657Z Ubuntu
+build	Set up job	2026-11-11T14:05:02.5375525Z 24.04.5
+build	Set up job	2026-11-11T14:05:02.5376396Z LTS
+build	Set up job	2026-11-11T14:05:02.5377389Z ##[endgroup]
+build	Set up job	2026-11-11T14:05:02.5378260Z ##[group]Runner Image
+build	Set up job	2026-11-11T14:05:02.5379660Z Image: ubuntu-24.04
+build	Set up job	2026-11-11T14:05:02.5380661Z Version: 20261101.360.1
+build	Set up job	2026-11-11T14:05:02.5382595Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20261101.360/images/ubuntu/Ubuntu2404-Readme.md
+build	Set up job	2026-11-11T14:05:02.5385723Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20261101.360
+build	Set up job	2026-11-11T14:05:02.5387454Z ##[endgroup]
+build	Set up job	2026-11-11T14:05:02.5389552Z ##[group]GITHUB_TOKEN Permissions
+build	Set up job	2026-11-11T14:05:02.5392505Z Contents: read
+build	Set up job	2026-11-11T14:05:02.5393500Z Metadata: read
+build	Set up job	2026-11-11T14:05:02.5394515Z ##[endgroup]
+build	Set up job	2026-11-11T14:05:02.5397486Z Secret source: Actions
+build	Set up job	2026-11-11T14:05:02.5399305Z Cache mode: write
+build	Set up job	2026-11-11T14:05:02.5400598Z Prepare workflow directory
+build	Set up job	2026-11-11T14:05:02.5976861Z Prepare all required actions
+build	Set up job	2026-11-11T14:05:02.6049973Z Getting action download info
+build	Set up job	2026-11-11T14:05:02.8275365Z Download action repository 'actions/checkout@v4' (SHA:11d5960a326750d5838078e36cf38b85af677262)
+build	Set up job	2026-11-11T14:05:03.0147177Z Download action repository 'actions/upload-artifact@v4' (SHA:ea165f8d65b6e75b540449e92b4886f43607fa02)
+build	Set up job	2026-11-11T14:05:03.2238328Z Complete job name: build
+build	Run actions/checkout@v4	﻿2026-11-11T14:05:03.3174270Z ##[group]Run actions/checkout@v4
+build	Run actions/checkout@v4	2026-11-11T14:05:03.3175194Z with:
+build	Run actions/checkout@v4	2026-11-11T14:05:03.3175680Z   ref: 1a187cbcc101f766e3c2a2b5ca5db5f8d341cb87
+build	Run actions/checkout@v4	2026-11-11T14:05:03.3176277Z   submodules: recursive
+build	Run actions/checkout@v4	2026-11-11T14:05:03.3176760Z   persist-credentials: false
+build	Run actions/checkout@v4	2026-11-11T14:05:03.3177274Z   repository: NextKde/NkNotes
+build	Run actions/checkout@v4	2026-11-11T14:05:03.3181489Z   token: ***
+build	Run actions/checkout@v4	2026-11-11T14:05:03.3181931Z   ssh-strict: true
+build	Run actions/checkout@v4	2026-11-11T14:05:03.3182466Z   ssh-user: git
+build	Run actions/checkout@v4	2026-11-11T14:05:03.3182883Z   clean: true
+build	Run actions/checkout@v4	2026-11-11T14:05:03.3183326Z   sparse-checkout-cone-mode: true
+build	Run actions/checkout@v4	2026-11-11T14:05:03.3183847Z   fetch-depth: 1
+build	Run actions/checkout@v4	2026-11-11T14:05:03.3184265Z   fetch-tags: false
+build	Run actions/checkout@v4	2026-11-11T14:05:03.3184697Z   show-progress: true
+build	Run actions/checkout@v4	2026-11-11T14:05:03.3185135Z   lfs: false
+build	Run actions/checkout@v4	2026-11-11T14:05:03.3185560Z   set-safe-directory: true
+build	Run actions/checkout@v4	2026-11-11T14:05:03.3186068Z   allow-unsafe-pr-checkout: false
+build	Run actions/checkout@v4	2026-11-11T14:05:03.3186852Z ##[endgroup]
+build	Run actions/checkout@v4	2026-11-11T14:05:03.6726664Z Syncing repository: NextKde/NkNotes
+build	Run actions/checkout@v4	2026-11-11T14:05:03.6730027Z ##[group]Getting Git version info
+build	Run actions/checkout@v4	2026-11-11T14:05:03.6731543Z Working directory is '/home/runner/work/NkNotes/NkNotes'
+build	Run actions/checkout@v4	2026-11-11T14:05:03.6733131Z [command]/usr/bin/git version
+build	Run actions/checkout@v4	2026-11-11T14:05:03.6849117Z git version 2.56.0
+build	Run actions/checkout@v4	2026-11-11T14:05:03.6871690Z ##[endgroup]
+build	Run actions/checkout@v4	2026-11-11T14:05:03.6888420Z Temporarily overriding HOME='/home/runner/work/_temp/74cfe893-69ca-4ab6-96c7-2cbd85c0cacf' before making global git config changes
+build	Run actions/checkout@v4	2026-11-11T14:05:03.6891274Z Adding repository directory to the temporary git global config as a safe directory
+build	Run actions/checkout@v4	2026-11-11T14:05:03.6901153Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/NkNotes/NkNotes
+build	Run actions/checkout@v4	2026-11-11T14:05:03.6963147Z Deleting the contents of '/home/runner/work/NkNotes/NkNotes'
+build	Run actions/checkout@v4	2026-11-11T14:05:03.6969158Z ##[group]Initializing the repository
+build	Run actions/checkout@v4	2026-11-11T14:05:03.6999698Z [command]/usr/bin/git init /home/runner/work/NkNotes/NkNotes
+build	Run actions/checkout@v4	2026-11-11T14:05:03.7141533Z hint: Using 'master' as the name for the initial branch. This default branch name
+build	Run actions/checkout@v4	2026-11-11T14:05:03.7143984Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+build	Run actions/checkout@v4	2026-11-11T14:05:03.7146587Z hint: to use in all of your new repositories, which will suppress this warning,
+build	Run actions/checkout@v4	2026-11-11T14:05:03.7148256Z hint: call:
+build	Run actions/checkout@v4	2026-11-11T14:05:03.7149612Z hint:
+build	Run actions/checkout@v4	2026-11-11T14:05:03.7150913Z hint: 	git config --global init.defaultBranch <name>
+build	Run actions/checkout@v4	2026-11-11T14:05:03.7152368Z hint:
+build	Run actions/checkout@v4	2026-11-11T14:05:03.7153742Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+build	Run actions/checkout@v4	2026-11-11T14:05:03.7155920Z hint: 'development'. The just-created branch can be renamed via this command:
+build	Run actions/checkout@v4	2026-11-11T14:05:03.7157784Z hint:
+build	Run actions/checkout@v4	2026-11-11T14:05:03.7159022Z hint: 	git branch -m <name>
+build	Run actions/checkout@v4	2026-11-11T14:05:03.7160310Z hint:
+build	Run actions/checkout@v4	2026-11-11T14:05:03.7163011Z hint: Disable this message with "git config set advice.defaultBranchName false"
+build	Run actions/checkout@v4	2026-11-11T14:05:03.7165393Z Initialized empty Git repository in /home/runner/work/NkNotes/NkNotes/.git/
+build	Run actions/checkout@v4	2026-11-11T14:05:03.7170709Z [command]/usr/bin/git remote add origin https://github.com/NextKde/NkNotes
+build	Run actions/checkout@v4	2026-11-11T14:05:03.7226562Z ##[endgroup]
+build	Run actions/checkout@v4	2026-11-11T14:05:03.7228169Z ##[group]Disabling automatic garbage collection
+build	Run actions/checkout@v4	2026-11-11T14:05:03.7229956Z [command]/usr/bin/git config --local gc.auto 0
+build	Run actions/checkout@v4	2026-11-11T14:05:03.7269463Z ##[endgroup]
+build	Run actions/checkout@v4	2026-11-11T14:05:03.7271518Z ##[group]Setting up auth
+build	Run actions/checkout@v4	2026-11-11T14:05:03.7277509Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+build	Run actions/checkout@v4	2026-11-11T14:05:03.7321914Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+build	Run actions/checkout@v4	2026-11-11T14:05:03.7801391Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+build	Run actions/checkout@v4	2026-11-11T14:05:03.7851859Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+build	Run actions/checkout@v4	2026-11-11T14:05:03.8098836Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+build	Run actions/checkout@v4	2026-11-11T14:05:03.8146406Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+build	Run actions/checkout@v4	2026-11-11T14:05:03.8395561Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+build	Run actions/checkout@v4	2026-11-11T14:05:03.8446947Z ##[endgroup]
+build	Run actions/checkout@v4	2026-11-11T14:05:03.8448010Z ##[group]Fetching the repository
+build	Run actions/checkout@v4	2026-11-11T14:05:03.8461257Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin 1a187cbcc101f766e3c2a2b5ca5db5f8d341cb87
+build	Run actions/checkout@v4	2026-11-11T14:05:04.4375794Z From https://github.com/NextKde/NkNotes
+build	Run actions/checkout@v4	2026-11-11T14:05:04.4378317Z  * branch            1a187cbcc101f766e3c2a2b5ca5db5f8d341cb87 -> FETCH_HEAD
+build	Run actions/checkout@v4	2026-11-11T14:05:04.4382844Z ##[endgroup]
+build	Run actions/checkout@v4	2026-11-11T14:05:04.4384212Z ##[group]Determining the checkout info
+build	Run actions/checkout@v4	2026-11-11T14:05:04.4385785Z ##[endgroup]
+build	Run actions/checkout@v4	2026-11-11T14:05:04.4392273Z [command]/usr/bin/git sparse-checkout disable
+build	Run actions/checkout@v4	2026-11-11T14:05:04.4456457Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+build	Run actions/checkout@v4	2026-11-11T14:05:04.4494693Z ##[group]Checking out the ref
+build	Run actions/checkout@v4	2026-11-11T14:05:04.4498002Z [command]/usr/bin/git checkout --progress --force 1a187cbcc101f766e3c2a2b5ca5db5f8d341cb87
+build	Run actions/checkout@v4	2026-11-11T14:05:04.5369301Z Note: switching to '1a187cbcc101f766e3c2a2b5ca5db5f8d341cb87'.
+build	Run actions/checkout@v4	2026-11-11T14:05:04.5370776Z 
+build	Run actions/checkout@v4	2026-11-11T14:05:04.5371762Z You are in 'detached HEAD' state. You can look around, make experimental
+build	Run actions/checkout@v4	2026-11-11T14:05:04.5374090Z changes and commit them, and you can discard any commits you make in this
+build	Run actions/checkout@v4	2026-11-11T14:05:04.5376339Z state without impacting any branches by switching back to a branch.
+build	Run actions/checkout@v4	2026-11-11T14:05:04.5377773Z 
+build	Run actions/checkout@v4	2026-11-11T14:05:04.5379073Z If you want to create a new branch to retain commits you create, you may
+build	Run actions/checkout@v4	2026-11-11T14:05:04.5381728Z do so (now or later) by using -c with the switch command. Example:
+build	Run actions/checkout@v4	2026-11-11T14:05:04.5383245Z 
+build	Run actions/checkout@v4	2026-11-11T14:05:04.5384067Z   git switch -c <new-branch-name>
+build	Run actions/checkout@v4	2026-11-11T14:05:04.5385830Z 
+build	Run actions/checkout@v4	2026-11-11T14:05:04.5386721Z Or undo this operation with:
+build	Run actions/checkout@v4	2026-11-11T14:05:04.5387872Z 
+build	Run actions/checkout@v4	2026-11-11T14:05:04.5388925Z   git switch -
+build	Run actions/checkout@v4	2026-11-11T14:05:04.5390012Z 
+build	Run actions/checkout@v4	2026-11-11T14:05:04.5391571Z Turn off this advice by setting config variable advice.detachedHead to false
+build	Run actions/checkout@v4	2026-11-11T14:05:04.5393632Z 
+build	Run actions/checkout@v4	2026-11-11T14:05:04.5395169Z HEAD is now at 1a187cb fix(editor): align block feedback and simplify search controls
+build	Run actions/checkout@v4	2026-11-11T14:05:04.5401592Z ##[endgroup]
+build	Run actions/checkout@v4	2026-11-11T14:05:04.5404378Z ##[group]Setting up auth for fetching submodules
+build	Run actions/checkout@v4	2026-11-11T14:05:04.5408082Z [command]/usr/bin/git config --global http.https://github.com/.extraheader AUTHORIZATION: basic ***
+build	Run actions/checkout@v4	2026-11-11T14:05:04.5449331Z [command]/usr/bin/git config --global --unset-all url.https://github.com/.insteadOf
+build	Run actions/checkout@v4	2026-11-11T14:05:04.5577939Z [command]/usr/bin/git config --global --add url.https://github.com/.insteadOf git@github.com:
+build	Run actions/checkout@v4	2026-11-11T14:05:04.5584846Z [command]/usr/bin/git config --global --add url.https://github.com/.insteadOf org-332737949@github.com:
+build	Run actions/checkout@v4	2026-11-11T14:05:04.5589999Z ##[endgroup]
+build	Run actions/checkout@v4	2026-11-11T14:05:04.5591942Z ##[group]Fetching submodules
+build	Run actions/checkout@v4	2026-11-11T14:05:04.5593648Z [command]/usr/bin/git submodule sync --recursive
+build	Run actions/checkout@v4	2026-11-11T14:05:04.5835490Z [command]/usr/bin/git -c protocol.version=2 submodule update --init --force --depth=1 --recursive
+build	Run actions/checkout@v4	2026-11-11T14:05:04.6073506Z Submodule 'third_party/nextkdeAppDemo' (https://github.com/NextKde/nextkdeAppDemo.git) registered for path 'third_party/nextkdeAppDemo'
+build	Run actions/checkout@v4	2026-11-11T14:05:04.6098348Z Cloning into '/home/runner/work/NkNotes/NkNotes/third_party/nextkdeAppDemo'...
+build	Run actions/checkout@v4	2026-11-11T14:05:05.3479789Z Submodule path 'third_party/nextkdeAppDemo': checked out '40c6007a95db864683924056adbf0f6385dcb7e3'
+build	Run actions/checkout@v4	2026-11-11T14:05:05.3511594Z [command]/usr/bin/git submodule foreach --recursive git config --local gc.auto 0
+build	Run actions/checkout@v4	2026-11-11T14:05:05.3740192Z Entering 'third_party/nextkdeAppDemo'
+build	Run actions/checkout@v4	2026-11-11T14:05:05.3804030Z ##[endgroup]
+build	Run actions/checkout@v4	2026-11-11T14:05:05.3856855Z [command]/usr/bin/git log -1 --format=%H
+build	Run actions/checkout@v4	2026-11-11T14:05:05.3890833Z 1a187cbcc101f766e3c2a2b5ca5db5f8d341cb87
+build	Run actions/checkout@v4	2026-11-11T14:05:05.3902089Z ##[group]Removing auth
+build	Run actions/checkout@v4	2026-11-11T14:05:05.3906304Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+build	Run actions/checkout@v4	2026-11-11T14:05:05.3946562Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+build	Run actions/checkout@v4	2026-11-11T14:05:05.4169707Z Entering 'third_party/nextkdeAppDemo'
+build	Run actions/checkout@v4	2026-11-11T14:05:05.4232416Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+build	Run actions/checkout@v4	2026-11-11T14:05:05.4268215Z http.https://github.com/.extraheader
+build	Run actions/checkout@v4	2026-11-11T14:05:05.4280049Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+build	Run actions/checkout@v4	2026-11-11T14:05:05.4333447Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+build	Run actions/checkout@v4	2026-11-11T14:05:05.4556719Z Entering 'third_party/nextkdeAppDemo'
+build	Run actions/checkout@v4	2026-11-11T14:05:05.4614701Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+build	Run actions/checkout@v4	2026-11-11T14:05:05.4657110Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+build	Run actions/checkout@v4	2026-11-11T14:05:05.4884289Z Entering 'third_party/nextkdeAppDemo'
+build	Run actions/checkout@v4	2026-11-11T14:05:05.4916065Z file:/home/runner/work/NkNotes/NkNotes/.git/modules/third_party/nextkdeAppDemo/config	remote.origin.url
+build	Run actions/checkout@v4	2026-11-11T14:05:05.4956960Z [command]/usr/bin/git config --file /home/runner/work/NkNotes/NkNotes/.git/modules/third_party/nextkdeAppDemo/config --name-only --get-regexp ^includeIf\.gitdir:
+build	Run actions/checkout@v4	2026-11-11T14:05:05.4995204Z ##[endgroup]
+build	Provision isolated SDK and runtime	﻿2026-11-11T14:05:05.5218245Z ##[group]Run sudo apt-get update
+build	Provision isolated SDK and runtime	2026-11-11T14:05:05.5219069Z ^[[36;1msudo apt-get update^[[0m
+build	Provision isolated SDK and runtime	2026-11-11T14:05:05.5219743Z ^[[36;1msudo apt-get install -y flatpak flatpak-builder ostree python3-gi gir1.2-flatpak-1.0 xvfb xdotool dbus-x11 imagemagick^[[0m
+build	Provision isolated SDK and runtime	2026-11-11T14:05:05.5220868Z ^[[36;1mflatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo^[[0m
+build	Provision isolated SDK and runtime	2026-11-11T14:05:05.5221771Z ^[[36;1mflatpak install --user --noninteractive --assumeyes flathub org.kde.Sdk//6.11 org.kde.Platform//6.11 io.qt.qtwebengine.BaseApp//6.11^[[0m
+build	Provision isolated SDK and runtime	2026-11-11T14:05:05.5246381Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+build	Provision isolated SDK and runtime	2026-11-11T14:05:05.5246817Z ##[endgroup]
+build	Provision isolated SDK and runtime	2026-11-11T14:05:05.6112349Z Get:1 file:/etc/apt/apt-mirrors.txt Mirrorlist [144 B]
+build	Provision isolated SDK and runtime	2026-11-11T14:05:05.6436576Z Get:6 https://packages.microsoft.com/ubuntu/24.04/prod noble InRelease [3600 B]
+build	Provision isolated SDK and runtime	2026-11-11T14:05:05.7371686Z Get:7 https://packages.microsoft.com/ubuntu/24.04/prod noble/main amd64 Packages [760 kB]
+build	Provision isolated SDK and runtime	2026-11-11T14:05:05.7572833Z Get:8 https://packages.microsoft.com/ubuntu/24.04/prod noble/main armhf Packages [12.6 kB]
+build	Provision isolated SDK and runtime	2026-11-11T14:05:05.7614877Z Get:9 https://packages.microsoft.com/ubuntu/24.04/prod noble/main arm64 Packages [690 kB]
+build	Provision isolated SDK and runtime	2026-11-11T14:05:25.3657644Z Ign:2 http://azure.archive.ubuntu.com/ubuntu noble InRelease
+build	Provision isolated SDK and runtime	2026-11-11T14:05:45.2579845Z Ign:3 http://azure.archive.ubuntu.com/ubuntu noble-updates InRelease
+build	Provision isolated SDK and runtime	2026-11-11T14:06:05.2792968Z Ign:4 http://azure.archive.ubuntu.com/ubuntu noble-backports InRelease
+build	Provision isolated SDK and runtime	2026-11-11T14:06:25.1420093Z Ign:5 http://azure.archive.ubuntu.com/ubuntu noble-security InRelease
+build	Provision isolated SDK and runtime	2026-11-11T14:06:44.5874664Z Ign:2 http://azure.archive.ubuntu.com/ubuntu noble InRelease
+build	Provision isolated SDK and runtime	2026-11-11T14:07:04.6107237Z Ign:2 https://archive.ubuntu.com/ubuntu noble InRelease
+build	Provision isolated SDK and runtime	2026-11-11T14:07:04.6162563Z Ign:3 http://azure.archive.ubuntu.com/ubuntu noble-updates InRelease
+build	Provision isolated SDK and runtime	2026-11-11T14:07:24.1497622Z Ign:4 http://azure.archive.ubuntu.com/ubuntu noble-backports InRelease
+build	Provision isolated SDK and runtime	2026-11-11T14:07:24.6359176Z Err:2 https://security.ubuntu.com/ubuntu noble InRelease
+build	Provision isolated SDK and runtime	2026-11-11T14:07:24.6359974Z   Temporary failure resolving 'azure.archive.ubuntu.com'
+build	Provision isolated SDK and runtime	2026-11-11T14:07:24.6401896Z Ign:3 https://archive.ubuntu.com/ubuntu noble-updates InRelease
+build	Provision isolated SDK and runtime	2026-11-11T14:07:44.1698556Z Ign:5 http://azure.archive.ubuntu.com/ubuntu noble-security InRelease
+build	Provision isolated SDK and runtime	2026-11-11T14:07:44.6645016Z Err:3 https://security.ubuntu.com/ubuntu noble-updates InRelease
+build	Provision isolated SDK and runtime	2026-11-11T14:07:44.6645714Z   Temporary failure resolving 'azure.archive.ubuntu.com'
+build	Provision isolated SDK and runtime	2026-11-11T14:07:44.6685062Z Ign:4 https://archive.ubuntu.com/ubuntu noble-backports InRelease
+build	Provision isolated SDK and runtime	2026-11-11T14:08:00.4686198Z Ign:5 https://archive.ubuntu.com/ubuntu noble-security InRelease
+build	Provision isolated SDK and runtime	2026-11-11T14:08:04.6930376Z Err:4 https://security.ubuntu.com/ubuntu noble-backports InRelease
+build	Provision isolated SDK and runtime	2026-11-11T14:08:04.6931146Z   Temporary failure resolving 'azure.archive.ubuntu.com'
+build	Provision isolated SDK and runtime	2026-11-11T14:08:24.7149949Z Err:5 https://security.ubuntu.com/ubuntu noble-security InRelease
+build	Provision isolated SDK and runtime	2026-11-11T14:08:24.7150931Z   Temporary failure resolving 'azure.archive.ubuntu.com'
+build	Provision isolated SDK and runtime	2026-11-11T14:08:27.2213507Z Fetched 1467 kB in 3min 19s (7365 B/s)
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.3896132Z Reading package lists...
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.4050547Z W: Failed to fetch mirror+file:/etc/apt/apt-mirrors.txt/dists/noble/InRelease  Temporary failure resolving 'azure.archive.ubuntu.com'
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.4052910Z W: Failed to fetch mirror+file:/etc/apt/apt-mirrors.txt/dists/noble-updates/InRelease  Temporary failure resolving 'azure.archive.ubuntu.com'
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.4054599Z W: Failed to fetch mirror+file:/etc/apt/apt-mirrors.txt/dists/noble-backports/InRelease  Temporary failure resolving 'azure.archive.ubuntu.com'
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.4056464Z W: Failed to fetch mirror+file:/etc/apt/apt-mirrors.txt/dists/noble-security/InRelease  Temporary failure resolving 'azure.archive.ubuntu.com'
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.4057801Z W: Some index files failed to download. They have been ignored, or old ones used instead.
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.4267073Z Reading package lists...
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.6451888Z Building dependency tree...
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.6459539Z Reading state information...
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.7934642Z python3-gi is already the newest version (3.48.2-1).
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.7935853Z python3-gi set to manually installed.
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.7936415Z xvfb is already the newest version (2:21.1.12-1ubuntu1.9).
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.7937044Z The following additional packages will be installed:
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.7937759Z   appstream-compose bubblewrap desktop-file-utils elfutils ffmpeg
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.7938584Z   fonts-droid-fallback fonts-noto-mono fonts-urw-base35 ghostscript
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.7939612Z   gsettings-desktop-schemas i965-va-driver imagemagick-6.q16
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.7940441Z   intel-media-va-driver libaacs0 libappstream-compose0 libasm1t64 libass9
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.7941269Z   libasyncns0 libavahi-glib1 libavc1394-0 libavcodec60 libavdevice60
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.7942108Z   libavfilter9 libavformat60 libavutil58 libbdplus0 libblas3 libbluray2
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.7942971Z   libbs2b0 libcaca0 libcdio-cdda2t64 libcdio-paranoia2t64 libcdio19t64
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.7943868Z   libchromaprint1 libcjson1 libcodec2-1.2 libdav1d7 libdc1394-25 libdecor-0-0
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.7944784Z   libdecor-0-plugin-1-gtk libdjvulibre-text libdjvulibre21 libflac12t64
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.7945605Z   libflatpak0 libflite1 libgme0 libgs-common libgs10 libgs10-common libgsm1
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.7946440Z   libhwy1t64 libidn12 libiec61883-0 libigdgmm12 libijs-0.35 libimath-3-1-29t64
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.7947295Z   libjack-jackd2-0 libjbig2dec0 libjxl0.7 libjxr-tools libjxr0t64 liblapack3
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.7948143Z   liblilv-0-0 libmagickcore-6.q16-7-extra libmalcontent-0-0 libmbedcrypto7t64
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.7949161Z   libmp3lame0 libmpg123-0t64 libmysofa1 libnetpbm11t64 libopenal-data
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.7949924Z   libopenal1 libopenexr-3-1-30 libopenmpt0t64 libopus0 libostree-1-1
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.7950788Z   libpaper-utils libpaper1 libpipewire-0.3-0t64 libpipewire-0.3-common
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.7951628Z   libplacebo338 libpocketsphinx3 libpostproc57 libpulse0 librav1e0
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.7952384Z   libraw1394-11 librist4 librsvg2-2 librsvg2-common librubberband2
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.7953219Z   libsamplerate0 libsdl2-2.0-0 libserd-0-0 libshine3 libsndfile1 libsndio7.0
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.7954025Z   libsord-0-0 libsoxr0 libspa-0.2-modules libspeex1 libsphinxbase3t64
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.7954767Z   libsratom-0-0 libsrt1.5-gnutls libssh-gcrypt-4 libsvtav1enc1d1
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.7955492Z   libswresample4 libswscale7 libtheora0 libtwolame0 libudfread0 libunibreak5
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.7956156Z   libva-drm2 libva-x11-2 libva2 libvdpau1 libvidstab1.1 libvorbisenc2 libvpl2
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.7956693Z   libvpx9 libwebrtc-audio-processing1 libwmflite-0.2-7 libx264-164 libx265-199
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.7957220Z   libxcb-shape0 libxdo3 libxv1 libxvidcore4 libzimg2 libzix-0-0 libzvbi-common
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.7957752Z   libzvbi0t64 mesa-va-drivers mesa-vdpau-drivers netpbm ocl-icd-libopencl1
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.7958263Z   optipng pocketsphinx-en-us poppler-data session-migration va-driver-all
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.7959305Z   vdpau-driver-all xdg-dbus-proxy xdg-desktop-portal xdg-desktop-portal-gtk
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.7959757Z   xfonts-encodings xfonts-utils
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.7960009Z Suggested packages:
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.7960313Z   ffmpeg-doc avahi-daemon malcontent-gui brz subversion fonts-noto
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.7960783Z   fonts-freefont-otf | fonts-freefont-ttf fonts-texgyre texlive-binaries
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.7961431Z   i965-va-driver-shaders imagemagick-6-doc autotrace cups-bsd | lpr | lprng
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.7961965Z   enscript gimp gnuplot grads graphviz hp2xx html2ps libwmf-bin mplayer povray
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.7962442Z   radiance sane-utils texlive-base-bin transfig libraw-bin libcuda1
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.7962907Z   libnvcuvid1 libnvidia-encode1 libbluray-bdj jackd2 inkscape libportaudio2
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.7963401Z   opus-tools pipewire pulseaudio libraw1394-doc librsvg2-bin serdi sndiod
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.7964373Z   sordi speex opencl-icd poppler-utils fonts-japanese-mincho
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.7965110Z   | fonts-ipafont-mincho fonts-japanese-gothic | fonts-ipafont-gothic
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.7966153Z   fonts-arphic-ukai fonts-arphic-uming fonts-nanum libvdpau-va-gl1
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.7966850Z   accountsservice evince xdg-desktop-portal-gnome
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.8574342Z The following NEW packages will be installed:
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.8575242Z   appstream-compose bubblewrap dbus-x11 desktop-file-utils elfutils ffmpeg
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.8576179Z   flatpak flatpak-builder fonts-droid-fallback fonts-noto-mono
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.8577078Z   fonts-urw-base35 ghostscript gir1.2-flatpak-1.0 gsettings-desktop-schemas
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.8578104Z   i965-va-driver imagemagick imagemagick-6.q16 intel-media-va-driver libaacs0
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.8579324Z   libappstream-compose0 libasm1t64 libass9 libasyncns0 libavahi-glib1
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.8580224Z   libavc1394-0 libavcodec60 libavdevice60 libavfilter9 libavformat60
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.8581092Z   libavutil58 libbdplus0 libblas3 libbluray2 libbs2b0 libcaca0
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.8581971Z   libcdio-cdda2t64 libcdio-paranoia2t64 libcdio19t64 libchromaprint1 libcjson1
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.8583027Z   libcodec2-1.2 libdav1d7 libdc1394-25 libdecor-0-0 libdecor-0-plugin-1-gtk
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.8584010Z   libdjvulibre-text libdjvulibre21 libflac12t64 libflatpak0 libflite1 libgme0
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.8584932Z   libgs-common libgs10 libgs10-common libgsm1 libhwy1t64 libidn12
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.8585801Z   libiec61883-0 libigdgmm12 libijs-0.35 libimath-3-1-29t64 libjack-jackd2-0
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.8586676Z   libjbig2dec0 libjxl0.7 libjxr-tools libjxr0t64 liblapack3 liblilv-0-0
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.8587601Z   libmagickcore-6.q16-7-extra libmalcontent-0-0 libmbedcrypto7t64 libmp3lame0
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.8588510Z   libmpg123-0t64 libmysofa1 libnetpbm11t64 libopenal-data libopenal1
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.8589521Z   libopenexr-3-1-30 libopenmpt0t64 libopus0 libostree-1-1 libpaper-utils
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.8590410Z   libpaper1 libpipewire-0.3-0t64 libpipewire-0.3-common libplacebo338
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.8591287Z   libpocketsphinx3 libpostproc57 libpulse0 librav1e0 libraw1394-11 librist4
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.8592204Z   librsvg2-2 librsvg2-common librubberband2 libsamplerate0 libsdl2-2.0-0
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.8593140Z   libserd-0-0 libshine3 libsndfile1 libsndio7.0 libsord-0-0 libsoxr0
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.8594067Z   libspa-0.2-modules libspeex1 libsphinxbase3t64 libsratom-0-0
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.8594975Z   libsrt1.5-gnutls libssh-gcrypt-4 libsvtav1enc1d1 libswresample4 libswscale7
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.8595853Z   libtheora0 libtwolame0 libudfread0 libunibreak5 libva-drm2 libva-x11-2
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.8596643Z   libva2 libvdpau1 libvidstab1.1 libvorbisenc2 libvpl2 libvpx9
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.8597458Z   libwebrtc-audio-processing1 libwmflite-0.2-7 libx264-164 libx265-199
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.8598336Z   libxcb-shape0 libxdo3 libxv1 libxvidcore4 libzimg2 libzix-0-0 libzvbi-common
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.8599434Z   libzvbi0t64 mesa-va-drivers mesa-vdpau-drivers netpbm ocl-icd-libopencl1
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.8600335Z   optipng ostree pocketsphinx-en-us poppler-data session-migration
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.8601176Z   va-driver-all vdpau-driver-all xdg-dbus-proxy xdg-desktop-portal
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.8602036Z   xdg-desktop-portal-gtk xdotool xfonts-encodings xfonts-utils
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.8839395Z 0 upgraded, 153 newly installed, 0 to remove and 3 not upgraded.
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.8840376Z Need to get 124 MB of archives.
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.8840953Z After this operation, 332 MB of additional disk space will be used.
+build	Provision isolated SDK and runtime	2026-11-11T14:08:28.8841678Z Get:1 file:/etc/apt/apt-mirrors.txt Mirrorlist [144 B]
+build	Provision isolated SDK and runtime	2026-11-11T14:08:48.9154465Z Ign:2 http://azure.archive.ubuntu.com/ubuntu noble/main amd64 fonts-droid-fallback all 1:6.0.1r16-1.1build1
+build	Provision isolated SDK and runtime	2026-11-11T14:09:08.8700574Z Ign:3 http://azure.archive.ubuntu.com/ubuntu noble/main amd64 poppler-data all 0.4.12-1
+build	Provision isolated SDK and runtime	2026-11-11T14:09:28.8942991Z Ign:4 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 librsvg2-2 amd64 2.58.0+dfsg-1ubuntu0.1
+build	Provision isolated SDK and runtime	2026-11-11T14:09:48.9187774Z Ign:5 http://azure.archive.ubuntu.com/ubuntu noble/main amd64 libappstream-compose0 amd64 1.0.2-1build6
+build	Provision isolated SDK and runtime	2026-11-11T14:10:08.9398446Z Ign:6 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 appstream-compose amd64 1.0.2-1build6
+build	Provision isolated SDK and runtime	2026-11-11T14:10:28.9643954Z Ign:7 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 bubblewrap amd64 0.9.0-1ubuntu0.3
+build	Provision isolated SDK and runtime	2026-11-11T14:10:48.9891475Z Ign:8 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 dbus-x11 amd64 1.14.10-4ubuntu4.1
+build	Provision isolated SDK and runtime	2026-11-11T14:11:09.0148333Z Ign:9 http://azure.archive.ubuntu.com/ubuntu noble/main amd64 desktop-file-utils amd64 0.27-2build1
+build	Provision isolated SDK and runtime	2026-11-11T14:11:29.0388153Z Ign:10 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 libasm1t64 amd64 0.190-1.1ubuntu0.1
+build	Provision isolated SDK and runtime	2026-11-11T14:11:49.0636730Z Ign:11 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 elfutils amd64 0.190-1.1ubuntu0.1
+build	Provision isolated SDK and runtime	2026-11-11T14:12:09.0861089Z Ign:12 http://azure.archive.ubuntu.com/ubuntu noble-updates/universe amd64 libva2 amd64 2.20.0-2ubuntu0.2
+build	Provision isolated SDK and runtime	2026-11-11T14:12:29.1055140Z Ign:13 http://azure.archive.ubuntu.com/ubuntu noble-updates/universe amd64 libva-drm2 amd64 2.20.0-2ubuntu0.2
+build	Provision isolated SDK and runtime	2026-11-11T14:12:46.2300051Z Ign:14 http://azure.archive.ubuntu.com/ubuntu noble-updates/universe amd64 libva-x11-2 amd64 2.20.0-2ubuntu0.2
+build	Provision isolated SDK and runtime	2026-11-11T14:13:05.8843626Z Ign:15 http://azure.archive.ubuntu.com/ubuntu noble/main amd64 libvdpau1 amd64 1.5-2build1
+build	Provision isolated SDK and runtime	2026-11-11T14:13:25.9052128Z Ign:16 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libvpl2 amd64 2023.3.0-1build1
+build	Provision isolated SDK and runtime	2026-11-11T14:13:45.9350327Z Ign:17 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 ocl-icd-libopencl1 amd64 2.3.2-1build1
+build	Provision isolated SDK and runtime	2026-11-11T14:14:05.9551148Z Ign:18 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libavutil58 amd64 7:6.1.1-3ubuntu5
+build	Provision isolated SDK and runtime	2026-11-11T14:14:25.6780132Z Ign:19 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libcodec2-1.2 amd64 1.2.0-2build1
+build	Provision isolated SDK and runtime	2026-11-11T14:14:45.7023921Z Ign:20 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libdav1d7 amd64 1.4.1-1build1
+build	Provision isolated SDK and runtime	2026-11-11T14:15:05.7253932Z Ign:21 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libgsm1 amd64 1.0.22-1build1
+build	Provision isolated SDK and runtime	2026-11-11T14:15:25.4677737Z Ign:22 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libhwy1t64 amd64 1.0.7-8.1build1
+build	Provision isolated SDK and runtime	2026-11-11T14:15:45.4874060Z Ign:23 http://azure.archive.ubuntu.com/ubuntu noble-updates/universe amd64 libjxl0.7 amd64 0.7.0-10.2ubuntu6.1
+build	Provision isolated SDK and runtime	2026-11-11T14:16:05.5119938Z Ign:24 http://azure.archive.ubuntu.com/ubuntu noble/main amd64 libmp3lame0 amd64 3.100-6build1
+build	Provision isolated SDK and runtime	2026-11-11T14:16:25.3675716Z Ign:25 http://azure.archive.ubuntu.com/ubuntu noble/main amd64 libopus0 amd64 1.4-1build1
+build	Provision isolated SDK and runtime	2026-11-11T14:16:45.3922292Z Ign:26 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 librav1e0 amd64 0.7.1-2
+build	Provision isolated SDK and runtime	2026-11-11T14:17:05.1617777Z Ign:27 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libshine3 amd64 3.1.1-2build1
+build	Provision isolated SDK and runtime	2026-11-11T14:17:25.1883577Z Ign:28 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 libspeex1 amd64 1.2.1-2ubuntu2.24.04.1
+build	Provision isolated SDK and runtime	2026-11-11T14:17:45.2107950Z Ign:29 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libsvtav1enc1d1 amd64 1.7.0+dfsg-2build1
+build	Provision isolated SDK and runtime	2026-11-11T14:18:05.2332337Z Ign:30 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libsoxr0 amd64 0.1.3-4build3
+build	Provision isolated SDK and runtime	2026-11-11T14:18:25.2586386Z Ign:31 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libswresample4 amd64 7:6.1.1-3ubuntu5
+build	Provision isolated SDK and runtime	2026-11-11T14:18:45.2811458Z Ign:32 http://azure.archive.ubuntu.com/ubuntu noble/main amd64 libtheora0 amd64 1.1.1+dfsg.1-16.1build3
+build	Provision isolated SDK and runtime	2026-11-11T14:19:05.3058077Z Ign:33 http://azure.archive.ubuntu.com/ubuntu noble/main amd64 libtwolame0 amd64 0.4.0-2build3
+build	Provision isolated SDK and runtime	2026-11-11T14:19:25.3267433Z Ign:34 http://azure.archive.ubuntu.com/ubuntu noble/main amd64 libvorbisenc2 amd64 1.3.7-1build3
+build	Provision isolated SDK and runtime	2026-11-11T14:19:45.3509673Z Ign:35 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 libvpx9 amd64 1.14.0-1ubuntu2.3
+build	Provision isolated SDK and runtime	2026-11-11T14:20:05.3748386Z Ign:36 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libx264-164 amd64 2:0.164.3108+git31e19f9-1
+build	Provision isolated SDK and runtime	2026-11-11T14:20:25.3993124Z Ign:37 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libx265-199 amd64 3.5-2build1
+build	Provision isolated SDK and runtime	2026-11-11T14:20:45.4240919Z Ign:38 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libxvidcore4 amd64 2:1.3.7-1build1
+build	Provision isolated SDK and runtime	2026-11-11T14:21:05.4497832Z Ign:39 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libzvbi-common all 0.2.42-2
+build	Provision isolated SDK and runtime	2026-11-11T14:21:25.4802351Z Ign:40 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libzvbi0t64 amd64 0.2.42-2
+build	Provision isolated SDK and runtime	2026-11-11T14:21:45.5028033Z Ign:41 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libavcodec60 amd64 7:6.1.1-3ubuntu5
+build	Provision isolated SDK and runtime	2026-11-11T14:22:05.5274828Z Ign:42 http://azure.archive.ubuntu.com/ubuntu noble/main amd64 libraw1394-11 amd64 2.1.2-2build3
+build	Provision isolated SDK and runtime	2026-11-11T14:22:25.5498690Z Ign:43 http://azure.archive.ubuntu.com/ubuntu noble/main amd64 libavc1394-0 amd64 0.5.4-5build3
+build	Provision isolated SDK and runtime	2026-11-11T14:22:45.5709933Z Ign:44 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libunibreak5 amd64 5.1-2build1
+build	Provision isolated SDK and runtime	2026-11-11T14:23:05.3087348Z Ign:45 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libass9 amd64 1:0.17.1-2build1
+build	Provision isolated SDK and runtime	2026-11-11T14:23:25.3297391Z Ign:46 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libudfread0 amd64 1.1.2-1build1
+build	Provision isolated SDK and runtime	2026-11-11T14:23:45.3522675Z Ign:47 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libbluray2 amd64 1:1.3.4-1build1
+build	Provision isolated SDK and runtime	2026-11-11T14:24:05.3836137Z Ign:48 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libchromaprint1 amd64 1.5.1-5
+build	Provision isolated SDK and runtime	2026-11-11T14:24:25.3204132Z Ign:49 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libgme0 amd64 0.6.3-7build1
+build	Provision isolated SDK and runtime	2026-11-11T14:24:45.3449305Z Ign:50 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 libmpg123-0t64 amd64 1.32.5-1ubuntu1.1
+build	Provision isolated SDK and runtime	2026-11-11T14:25:05.3703564Z Ign:51 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libopenmpt0t64 amd64 0.7.3-1.1build3
+build	Provision isolated SDK and runtime	2026-11-11T14:25:25.2085005Z Ign:52 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libcjson1 amd64 1.7.17-1
+build	Provision isolated SDK and runtime	2026-11-11T14:25:45.2464734Z Ign:53 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libmbedcrypto7t64 amd64 2.28.8-1
+build	Provision isolated SDK and runtime	2026-11-11T14:26:05.2717017Z Ign:54 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 librist4 amd64 0.2.10+dfsg-2
+build	Provision isolated SDK and runtime	2026-11-11T14:26:25.2965206Z Ign:55 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libsrt1.5-gnutls amd64 1.5.3-1build2
+build	Provision isolated SDK and runtime	2026-11-11T14:26:45.3115816Z Ign:56 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 libssh-gcrypt-4 amd64 0.10.6-2ubuntu0.5
+build	Provision isolated SDK and runtime	2026-11-11T14:27:05.3431730Z Ign:57 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libavformat60 amd64 7:6.1.1-3ubuntu5
+build	Provision isolated SDK and runtime	2026-11-11T14:27:25.3596544Z Ign:58 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libbs2b0 amd64 3.1.0+dfsg-7build1
+build	Provision isolated SDK and runtime	2026-11-11T14:27:45.3847864Z Ign:59 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libflite1 amd64 2.2-6build3
+build	Provision isolated SDK and runtime	2026-11-11T14:28:05.4138976Z Ign:60 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libserd-0-0 amd64 0.32.2-1
+build	Provision isolated SDK and runtime	2026-11-11T14:28:25.4387606Z Ign:61 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libzix-0-0 amd64 0.4.2-2build1
+build	Provision isolated SDK and runtime	2026-11-11T14:28:45.4595432Z Ign:62 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libsord-0-0 amd64 0.16.16-2build1
+build	Provision isolated SDK and runtime	2026-11-11T14:29:05.4825775Z Ign:63 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libsratom-0-0 amd64 0.6.16-1build1
+build	Provision isolated SDK and runtime	2026-11-11T14:29:25.5080416Z Ign:64 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 liblilv-0-0 amd64 0.24.22-1build1
+build	Provision isolated SDK and runtime	2026-11-11T14:29:45.5175424Z Ign:65 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libmysofa1 amd64 1.3.2+dfsg-2ubuntu2
+build	Provision isolated SDK and runtime	2026-11-11T14:30:05.5400860Z Ign:66 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libplacebo338 amd64 6.338.2-2build1
+build	Provision isolated SDK and runtime	2026-11-11T14:30:25.5648121Z Ign:67 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 libblas3 amd64 3.12.0-3build1.1
+build	Provision isolated SDK and runtime	2026-11-11T14:30:45.5911282Z Ign:68 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 liblapack3 amd64 3.12.0-3build1.1
+build	Provision isolated SDK and runtime	2026-11-11T14:31:05.6145807Z Ign:69 http://azure.archive.ubuntu.com/ubuntu noble/main amd64 libasyncns0 amd64 0.8-6build4
+build	Provision isolated SDK and runtime	2026-11-11T14:31:25.6376998Z Ign:70 http://azure.archive.ubuntu.com/ubuntu noble/main amd64 libflac12t64 amd64 1.4.3+ds-2.1ubuntu2
+build	Provision isolated SDK and runtime	2026-11-11T14:31:45.6540042Z Ign:71 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 libsndfile1 amd64 1.2.2-1ubuntu5.24.04.1
+build	Provision isolated SDK and runtime	2026-11-11T14:32:05.6799776Z Ign:72 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 libpulse0 amd64 1:16.1+dfsg1-2ubuntu10.1
+build	Provision isolated SDK and runtime	2026-11-11T14:32:25.6968522Z Ign:73 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libsphinxbase3t64 amd64 0.8+5prealpha+1-17build2
+build	Provision isolated SDK and runtime	2026-11-11T14:32:45.7153327Z Ign:74 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libpocketsphinx3 amd64 0.8.0+real5prealpha+1-15ubuntu5
+build	Provision isolated SDK and runtime	2026-11-11T14:33:05.7371087Z Ign:75 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libpostproc57 amd64 7:6.1.1-3ubuntu5
+build	Provision isolated SDK and runtime	2026-11-11T14:33:25.7614302Z Ign:76 http://azure.archive.ubuntu.com/ubuntu noble/main amd64 libsamplerate0 amd64 0.2.2-4build1
+build	Provision isolated SDK and runtime	2026-11-11T14:33:45.7980889Z Ign:77 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 librubberband2 amd64 3.3.0+dfsg-2build1
+build	Provision isolated SDK and runtime	2026-11-11T14:34:05.8269169Z Ign:78 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libswscale7 amd64 7:6.1.1-3ubuntu5
+build	Provision isolated SDK and runtime	2026-11-11T14:34:25.8502985Z Ign:79 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libvidstab1.1 amd64 1.1.0-2build1
+build	Provision isolated SDK and runtime	2026-11-11T14:34:45.8748860Z Ign:80 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libzimg2 amd64 3.0.5+ds1-1build1
+build	Provision isolated SDK and runtime	2026-11-11T14:35:05.8994371Z Ign:81 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libavfilter9 amd64 7:6.1.1-3ubuntu5
+build	Provision isolated SDK and runtime	2026-11-11T14:35:25.9263590Z Ign:82 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 libcaca0 amd64 0.99.beta20-4ubuntu0.2
+build	Provision isolated SDK and runtime	2026-11-11T14:35:45.9506218Z Ign:83 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 libcdio19t64 amd64 2.1.0-4.1ubuntu1.2
+build	Provision isolated SDK and runtime	2026-11-11T14:36:05.9749467Z Ign:84 http://azure.archive.ubuntu.com/ubuntu noble/main amd64 libcdio-cdda2t64 amd64 10.2+2.0.1-1.1build2
+build	Provision isolated SDK and runtime	2026-11-11T14:36:25.9987967Z Ign:85 http://azure.archive.ubuntu.com/ubuntu noble/main amd64 libcdio-paranoia2t64 amd64 10.2+2.0.1-1.1build2
+build	Provision isolated SDK and runtime	2026-11-11T14:36:46.0237811Z Ign:86 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libdc1394-25 amd64 2.2.6-4build1
+build	Provision isolated SDK and runtime	2026-11-11T14:37:06.0479956Z Ign:87 http://azure.archive.ubuntu.com/ubuntu noble/main amd64 libiec61883-0 amd64 1.2.0-6build1
+build	Provision isolated SDK and runtime	2026-11-11T14:37:26.0847362Z Ign:88 http://azure.archive.ubuntu.com/ubuntu noble/main amd64 libjack-jackd2-0 amd64 1.9.21~dfsg-3ubuntu3
+build	Provision isolated SDK and runtime	2026-11-11T14:37:46.1122859Z Ign:89 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libopenal-data all 1:1.23.1-4build1
+build	Provision isolated SDK and runtime	2026-11-11T14:38:06.1376511Z Ign:90 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libsndio7.0 amd64 1.9.0-0.3build3
+build	Provision isolated SDK and runtime	2026-11-11T14:38:26.1606495Z Ign:91 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libopenal1 amd64 1:1.23.1-4build1
+build	Provision isolated SDK and runtime	2026-11-11T14:38:46.1796155Z Ign:92 http://azure.archive.ubuntu.com/ubuntu noble/main amd64 libdecor-0-0 amd64 0.2.2-1build2
+build	Provision isolated SDK and runtime	2026-11-11T14:39:06.2064124Z Ign:93 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 libsdl2-2.0-0 amd64 2.30.0+dfsg-1ubuntu3.1
+build	Provision isolated SDK and runtime	2026-11-11T14:39:26.2313091Z Ign:94 http://azure.archive.ubuntu.com/ubuntu noble/main amd64 libxcb-shape0 amd64 1.15-1ubuntu2
+build	Provision isolated SDK and runtime	2026-11-11T14:39:46.2134456Z Ign:95 http://azure.archive.ubuntu.com/ubuntu noble/main amd64 libxv1 amd64 2:1.0.11-1.1build1
+build	Provision isolated SDK and runtime	2026-11-11T14:40:06.2370392Z Ign:96 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libavdevice60 amd64 7:6.1.1-3ubuntu5
+build	Provision isolated SDK and runtime	2026-11-11T14:40:26.2582053Z Ign:97 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 ffmpeg amd64 7:6.1.1-3ubuntu5
+build	Provision isolated SDK and runtime	2026-11-11T14:40:46.2797083Z Ign:98 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 xdg-dbus-proxy amd64 0.1.5-1ubuntu0.2
+build	Provision isolated SDK and runtime	2026-11-11T14:41:05.8220935Z Ign:99 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 libmalcontent-0-0 amd64 0.11.1-1ubuntu1.3
+build	Provision isolated SDK and runtime	2026-11-11T14:41:25.8345172Z Ign:100 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 libavahi-glib1 amd64 0.8-13ubuntu6.2
+build	Provision isolated SDK and runtime	2026-11-11T14:41:45.8588338Z Ign:101 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libostree-1-1 amd64 2024.5-1build2
+build	Provision isolated SDK and runtime	2026-11-11T14:42:05.8804453Z Ign:102 http://azure.archive.ubuntu.com/ubuntu noble-updates/universe amd64 flatpak amd64 1.14.6-1ubuntu0.1
+build	Provision isolated SDK and runtime	2026-11-11T14:42:25.8956928Z Ign:103 http://azure.archive.ubuntu.com/ubuntu noble-updates/universe amd64 libflatpak0 amd64 1.14.6-1ubuntu0.1
+build	Provision isolated SDK and runtime	2026-11-11T14:42:45.9203239Z Ign:104 http://azure.archive.ubuntu.com/ubuntu noble-updates/universe amd64 gir1.2-flatpak-1.0 amd64 1.14.6-1ubuntu0.1
+build	Provision isolated SDK and runtime	2026-11-11T14:43:05.9427311Z Ign:105 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 ostree amd64 2024.5-1build2
+build	Provision isolated SDK and runtime	2026-11-11T14:43:25.9624560Z Ign:106 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 flatpak-builder amd64 1.4.2-1build2
+build	Provision isolated SDK and runtime	2026-11-11T14:43:45.9870677Z Ign:107 http://azure.archive.ubuntu.com/ubuntu noble/main amd64 fonts-noto-mono all 20201225-2
+build	Provision isolated SDK and runtime	2026-11-11T14:44:06.0173191Z Ign:108 http://azure.archive.ubuntu.com/ubuntu noble/main amd64 xfonts-encodings all 1:1.0.5-0ubuntu2
+build	Provision isolated SDK and runtime	2026-11-11T14:44:26.0381353Z Ign:109 http://azure.archive.ubuntu.com/ubuntu noble/main amd64 xfonts-utils amd64 1:7.7+6build3
+build	Provision isolated SDK and runtime	2026-11-11T14:44:46.0566712Z Ign:110 http://azure.archive.ubuntu.com/ubuntu noble/main amd64 fonts-urw-base35 all 20200910-8
+build	Provision isolated SDK and runtime	2026-11-11T14:45:06.0742255Z Ign:111 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 libgs-common all 10.02.1~dfsg1-0ubuntu7.10
+build	Provision isolated SDK and runtime	2026-11-11T14:45:26.0906844Z Ign:112 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 libgs10-common all 10.02.1~dfsg1-0ubuntu7.10
+build	Provision isolated SDK and runtime	2026-11-11T14:45:46.1101484Z Ign:113 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 libidn12 amd64 1.42-1ubuntu0.1
+build	Provision isolated SDK and runtime	2026-11-11T14:46:06.1315977Z Ign:114 http://azure.archive.ubuntu.com/ubuntu noble/main amd64 libijs-0.35 amd64 0.35-15.1build1
+build	Provision isolated SDK and runtime	2026-11-11T14:46:26.1518523Z Ign:115 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 libjbig2dec0 amd64 0.20-1ubuntu0.24.04.1
+build	Provision isolated SDK and runtime	2026-11-11T14:46:46.1733691Z Ign:116 http://azure.archive.ubuntu.com/ubuntu noble/main amd64 libpaper1 amd64 1.1.29build1
+build	Provision isolated SDK and runtime	2026-11-11T14:47:06.2011566Z Ign:117 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 libgs10 amd64 10.02.1~dfsg1-0ubuntu7.10
+build	Provision isolated SDK and runtime	2026-11-11T14:47:26.2209009Z Ign:118 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 ghostscript amd64 10.02.1~dfsg1-0ubuntu7.10
+build	Provision isolated SDK and runtime	2026-11-11T14:47:46.2410351Z Ign:119 http://azure.archive.ubuntu.com/ubuntu noble/main amd64 session-migration amd64 0.3.9build1
+build	Provision isolated SDK and runtime	2026-11-11T14:48:06.1097437Z Ign:120 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 gsettings-desktop-schemas all 46.1-0ubuntu1
+build	Provision isolated SDK and runtime	2026-11-11T14:48:26.1342009Z Ign:121 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 imagemagick-6.q16 amd64 8:6.9.12.98+dfsg1-5.2build2
+build	Provision isolated SDK and runtime	2026-11-11T14:48:46.0902978Z Ign:122 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 imagemagick amd64 8:6.9.12.98+dfsg1-5.2build2
+build	Provision isolated SDK and runtime	2026-11-11T14:49:06.1182689Z Ign:123 http://azure.archive.ubuntu.com/ubuntu noble-updates/universe amd64 libigdgmm12 amd64 22.3.17+ds1-1ubuntu1
+build	Provision isolated SDK and runtime	2026-11-11T14:49:26.1354845Z Ign:124 http://azure.archive.ubuntu.com/ubuntu noble-updates/universe amd64 intel-media-va-driver amd64 24.1.0+dfsg1-1ubuntu0.2
+build	Provision isolated SDK and runtime	2026-11-11T14:49:46.1586851Z Ign:125 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libaacs0 amd64 0.11.1-2build1
+build	Provision isolated SDK and runtime	2026-11-11T14:50:06.1910542Z Ign:126 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libbdplus0 amd64 0.2.0-3build1
+build	Provision isolated SDK and runtime	2026-11-11T14:50:26.2172479Z Ign:127 http://azure.archive.ubuntu.com/ubuntu noble/main amd64 libdecor-0-plugin-1-gtk amd64 0.2.2-1build2
+build	Provision isolated SDK and runtime	2026-11-11T14:50:46.2362200Z Ign:128 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 libdjvulibre-text all 3.5.28-2ubuntu0.24.04.2
+build	Provision isolated SDK and runtime	2026-11-11T14:51:06.2643948Z Ign:129 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 libdjvulibre21 amd64 3.5.28-2ubuntu0.24.04.2
+build	Provision isolated SDK and runtime	2026-11-11T14:51:26.2873086Z Ign:130 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libimath-3-1-29t64 amd64 3.1.9-3.1ubuntu2
+build	Provision isolated SDK and runtime	2026-11-11T14:51:46.3329792Z Ign:131 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libjxr0t64 amd64 1.2~git20170615.f752187-5.1ubuntu2
+build	Provision isolated SDK and runtime	2026-11-11T14:52:06.3486713Z Ign:132 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libjxr-tools amd64 1.2~git20170615.f752187-5.1ubuntu2
+build	Provision isolated SDK and runtime	2026-11-11T14:52:25.9855774Z Ign:133 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libopenexr-3-1-30 amd64 3.1.5-5.1build3
+build	Provision isolated SDK and runtime	2026-11-11T14:52:46.0060089Z Ign:134 http://azure.archive.ubuntu.com/ubuntu noble/main amd64 libwmflite-0.2-7 amd64 0.2.13-1.1build3
+build	Provision isolated SDK and runtime	2026-11-11T14:53:06.0300142Z Ign:135 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libmagickcore-6.q16-7-extra amd64 8:6.9.12.98+dfsg1-5.2build2
+build	Provision isolated SDK and runtime	2026-11-11T14:53:26.0508013Z Ign:136 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libnetpbm11t64 amd64 2:11.05.02-1.1build1
+build	Provision isolated SDK and runtime	2026-11-11T14:53:46.0994942Z Ign:137 http://azure.archive.ubuntu.com/ubuntu noble/main amd64 libpaper-utils amd64 1.1.29build1
+build	Provision isolated SDK and runtime	2026-11-11T14:54:06.1229661Z Ign:138 http://azure.archive.ubuntu.com/ubuntu noble/main amd64 libwebrtc-audio-processing1 amd64 0.3.1-0ubuntu6
+build	Provision isolated SDK and runtime	2026-11-11T14:54:26.1501514Z Ign:139 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 libspa-0.2-modules amd64 1.0.5-1ubuntu3.3
+build	Provision isolated SDK and runtime	2026-11-11T14:54:46.1652664Z Ign:140 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 libpipewire-0.3-0t64 amd64 1.0.5-1ubuntu3.3
+build	Provision isolated SDK and runtime	2026-11-11T14:55:06.1856389Z Ign:141 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 libpipewire-0.3-common all 1.0.5-1ubuntu3.3
+build	Provision isolated SDK and runtime	2026-11-11T14:55:26.2109361Z Ign:142 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 librsvg2-common amd64 2.58.0+dfsg-1ubuntu0.1
+build	Provision isolated SDK and runtime	2026-11-11T14:55:46.2361711Z Ign:143 http://azure.archive.ubuntu.com/ubuntu noble-updates/universe amd64 mesa-va-drivers amd64 25.2.8-0ubuntu0.24.04.4
+build	Provision isolated SDK and runtime	2026-11-11T14:56:06.2605748Z Ign:144 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 mesa-vdpau-drivers amd64 25.2.8-0ubuntu0.24.04.4
+build	Provision isolated SDK and runtime	2026-11-11T14:56:26.2981846Z Ign:145 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 netpbm amd64 2:11.05.02-1.1build1
+build	Provision isolated SDK and runtime	2026-11-11T14:56:46.3200336Z Ign:146 http://azure.archive.ubuntu.com/ubuntu noble/main amd64 optipng amd64 0.7.8+ds-1build2
+build	Provision isolated SDK and runtime	2026-11-11T14:57:06.3457211Z Ign:147 http://azure.archive.ubuntu.com/ubuntu noble-updates/universe amd64 i965-va-driver amd64 2.4.1+dfsg1-1ubuntu0.2
+build	Provision isolated SDK and runtime	2026-11-11T14:57:26.3650788Z Ign:148 http://azure.archive.ubuntu.com/ubuntu noble-updates/universe amd64 va-driver-all amd64 2.20.0-2ubuntu0.2
+build	Provision isolated SDK and runtime	2026-11-11T14:57:46.3899833Z Ign:149 http://azure.archive.ubuntu.com/ubuntu noble/main amd64 vdpau-driver-all amd64 1.5-2build1
+build	Provision isolated SDK and runtime	2026-11-11T14:58:06.4095843Z Ign:150 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 xdg-desktop-portal amd64 1.18.4-1ubuntu2.24.04.3
+build	Provision isolated SDK and runtime	2026-11-11T14:58:26.4343058Z Ign:151 http://azure.archive.ubuntu.com/ubuntu noble/main amd64 xdg-desktop-portal-gtk amd64 1.15.1-1build2
+build	Provision isolated SDK and runtime	2026-11-11T14:58:46.4590574Z Ign:152 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libxdo3 amd64 1:3.20160805.1-5build1
+build	Provision isolated SDK and runtime	2026-11-11T14:59:06.4820546Z Ign:153 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 pocketsphinx-en-us all 0.8.0+real5prealpha+1-15ubuntu5
+build	Provision isolated SDK and runtime	2026-11-11T14:59:26.4984019Z Ign:154 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 xdotool amd64 1:3.20160805.1-5build1
+build	Provision isolated SDK and runtime	2026-11-11T14:59:46.5253370Z Ign:2 http://azure.archive.ubuntu.com/ubuntu noble/main amd64 fonts-droid-fallback all 1:6.0.1r16-1.1build1
+build	Provision isolated SDK and runtime	2026-11-11T15:00:06.5494613Z Ign:3 http://azure.archive.ubuntu.com/ubuntu noble/main amd64 poppler-data all 0.4.12-1
+build	Provision isolated SDK and runtime	2026-11-11T15:00:06.5548812Z Ign:2 https://archive.ubuntu.com/ubuntu noble/main amd64 fonts-droid-fallback all 1:6.0.1r16-1.1build1
+build	Provision isolated SDK and runtime	2026-11-11T15:00:26.5673330Z Ign:4 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 librsvg2-2 amd64 2.58.0+dfsg-1ubuntu0.1
+build	Provision isolated SDK and runtime	2026-11-11T15:00:26.5769373Z Ign:3 https://archive.ubuntu.com/ubuntu noble/main amd64 poppler-data all 0.4.12-1
+build	Provision isolated SDK and runtime	2026-11-11T15:00:26.5891104Z Err:2 https://security.ubuntu.com/ubuntu noble/main amd64 fonts-droid-fallback all 1:6.0.1r16-1.1build1
+build	Provision isolated SDK and runtime	2026-11-11T15:00:26.5892172Z   Temporary failure resolving 'azure.archive.ubuntu.com'
+build	Provision isolated SDK and runtime	2026-11-11T15:00:46.5910699Z Ign:5 http://azure.archive.ubuntu.com/ubuntu noble/main amd64 libappstream-compose0 amd64 1.0.2-1build6
+build	Provision isolated SDK and runtime	2026-11-11T15:00:46.5962219Z Ign:4 https://archive.ubuntu.com/ubuntu noble-updates/main amd64 librsvg2-2 amd64 2.58.0+dfsg-1ubuntu0.1
+build	Provision isolated SDK and runtime	2026-11-11T15:00:46.6130708Z Err:3 https://security.ubuntu.com/ubuntu noble/main amd64 poppler-data all 0.4.12-1
+build	Provision isolated SDK and runtime	2026-11-11T15:00:46.6131647Z   Temporary failure resolving 'azure.archive.ubuntu.com'
+build	Provision isolated SDK and runtime	2026-11-11T15:01:06.6075826Z Ign:6 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 appstream-compose amd64 1.0.2-1build6
+build	Provision isolated SDK and runtime	2026-11-11T15:01:06.6212689Z Ign:5 https://archive.ubuntu.com/ubuntu noble/main amd64 libappstream-compose0 amd64 1.0.2-1build6
+build	Provision isolated SDK and runtime	2026-11-11T15:01:06.6346407Z Ign:4 https://security.ubuntu.com/ubuntu noble-updates/main amd64 librsvg2-2 amd64 2.58.0+dfsg-1ubuntu0.1
+build	Provision isolated SDK and runtime	2026-11-11T15:01:06.6348100Z Err:4 mirror+file:/etc/apt/apt-mirrors.txt noble-updates/main amd64 librsvg2-2 amd64 2.58.0+dfsg-1ubuntu0.1
+build	Provision isolated SDK and runtime	2026-11-11T15:01:06.6349500Z   Temporary failure resolving 'azure.archive.ubuntu.com'
+build	Provision isolated SDK and runtime	2026-11-11T15:01:26.6313774Z Ign:7 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 bubblewrap amd64 0.9.0-1ubuntu0.3
+build	Provision isolated SDK and runtime	2026-11-11T15:01:26.6453167Z Ign:6 https://archive.ubuntu.com/ubuntu noble/universe amd64 appstream-compose amd64 1.0.2-1build6
+build	Provision isolated SDK and runtime	2026-11-11T15:01:26.6562427Z Err:5 https://security.ubuntu.com/ubuntu noble/main amd64 libappstream-compose0 amd64 1.0.2-1build6
+build	Provision isolated SDK and runtime	2026-11-11T15:01:26.6563690Z   Temporary failure resolving 'azure.archive.ubuntu.com'
+build	Provision isolated SDK and runtime	2026-11-11T15:01:46.6559312Z Ign:8 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 dbus-x11 amd64 1.14.10-4ubuntu4.1
+build	Provision isolated SDK and runtime	2026-11-11T15:01:46.6692087Z Ign:7 https://archive.ubuntu.com/ubuntu noble-updates/main amd64 bubblewrap amd64 0.9.0-1ubuntu0.3
+build	Provision isolated SDK and runtime	2026-11-11T15:01:46.6881447Z Err:6 https://security.ubuntu.com/ubuntu noble/universe amd64 appstream-compose amd64 1.0.2-1build6
+build	Provision isolated SDK and runtime	2026-11-11T15:01:46.6882287Z   Temporary failure resolving 'azure.archive.ubuntu.com'
+build	Provision isolated SDK and runtime	2026-11-11T15:02:06.6794137Z Ign:9 http://azure.archive.ubuntu.com/ubuntu noble/main amd64 desktop-file-utils amd64 0.27-2build1
+build	Provision isolated SDK and runtime	2026-11-11T15:02:06.6898515Z Ign:8 https://archive.ubuntu.com/ubuntu noble-updates/main amd64 dbus-x11 amd64 1.14.10-4ubuntu4.1
+build	Provision isolated SDK and runtime	2026-11-11T15:02:06.7158617Z Ign:7 https://security.ubuntu.com/ubuntu noble-updates/main amd64 bubblewrap amd64 0.9.0-1ubuntu0.3
+build	Provision isolated SDK and runtime	2026-11-11T15:02:06.7160296Z Err:7 mirror+file:/etc/apt/apt-mirrors.txt noble-updates/main amd64 bubblewrap amd64 0.9.0-1ubuntu0.3
+build	Provision isolated SDK and runtime	2026-11-11T15:02:06.7161125Z   Temporary failure resolving 'azure.archive.ubuntu.com'
+build	Provision isolated SDK and runtime	2026-11-11T15:02:26.7035292Z Ign:10 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 libasm1t64 amd64 0.190-1.1ubuntu0.1
+build	Provision isolated SDK and runtime	2026-11-11T15:02:26.7242265Z Ign:9 https://archive.ubuntu.com/ubuntu noble/main amd64 desktop-file-utils amd64 0.27-2build1
+build	Provision isolated SDK and runtime	2026-11-11T15:02:26.7400757Z Err:8 https://security.ubuntu.com/ubuntu noble-updates/main amd64 dbus-x11 amd64 1.14.10-4ubuntu4.1
+build	Provision isolated SDK and runtime	2026-11-11T15:02:26.7401787Z   Temporary failure resolving 'azure.archive.ubuntu.com'
+build	Provision isolated SDK and runtime	2026-11-11T15:02:46.7274076Z Ign:11 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 elfutils amd64 0.190-1.1ubuntu0.1
+build	Provision isolated SDK and runtime	2026-11-11T15:02:46.7439883Z Ign:10 https://archive.ubuntu.com/ubuntu noble-updates/main amd64 libasm1t64 amd64 0.190-1.1ubuntu0.1
+build	Provision isolated SDK and runtime	2026-11-11T15:02:46.7592653Z Err:9 https://security.ubuntu.com/ubuntu noble/main amd64 desktop-file-utils amd64 0.27-2build1
+build	Provision isolated SDK and runtime	2026-11-11T15:02:46.7593327Z   Temporary failure resolving 'azure.archive.ubuntu.com'
+build	Provision isolated SDK and runtime	2026-11-11T15:03:06.7490392Z Ign:12 http://azure.archive.ubuntu.com/ubuntu noble-updates/universe amd64 libva2 amd64 2.20.0-2ubuntu0.2
+build	Provision isolated SDK and runtime	2026-11-11T15:03:06.7654815Z Ign:11 https://archive.ubuntu.com/ubuntu noble-updates/main amd64 elfutils amd64 0.190-1.1ubuntu0.1
+build	Provision isolated SDK and runtime	2026-11-11T15:03:06.7836852Z Ign:10 https://security.ubuntu.com/ubuntu noble-updates/main amd64 libasm1t64 amd64 0.190-1.1ubuntu0.1
+build	Provision isolated SDK and runtime	2026-11-11T15:03:06.7838079Z Err:10 mirror+file:/etc/apt/apt-mirrors.txt noble-updates/main amd64 libasm1t64 amd64 0.190-1.1ubuntu0.1
+build	Provision isolated SDK and runtime	2026-11-11T15:03:06.7839211Z   Temporary failure resolving 'azure.archive.ubuntu.com'
+build	Provision isolated SDK and runtime	2026-11-11T15:03:26.7727832Z Ign:13 http://azure.archive.ubuntu.com/ubuntu noble-updates/universe amd64 libva-drm2 amd64 2.20.0-2ubuntu0.2
+build	Provision isolated SDK and runtime	2026-11-11T15:03:26.7894384Z Ign:12 https://archive.ubuntu.com/ubuntu noble-updates/universe amd64 libva2 amd64 2.20.0-2ubuntu0.2
+build	Provision isolated SDK and runtime	2026-11-11T15:03:26.8022460Z Ign:11 https://security.ubuntu.com/ubuntu noble-updates/main amd64 elfutils amd64 0.190-1.1ubuntu0.1
+build	Provision isolated SDK and runtime	2026-11-11T15:03:26.8023766Z Err:11 mirror+file:/etc/apt/apt-mirrors.txt noble-updates/main amd64 elfutils amd64 0.190-1.1ubuntu0.1
+build	Provision isolated SDK and runtime	2026-11-11T15:03:26.8024753Z   Temporary failure resolving 'azure.archive.ubuntu.com'
+build	Provision isolated SDK and runtime	2026-11-11T15:03:46.7969978Z Ign:14 http://azure.archive.ubuntu.com/ubuntu noble-updates/universe amd64 libva-x11-2 amd64 2.20.0-2ubuntu0.2
+build	Provision isolated SDK and runtime	2026-11-11T15:03:46.8127083Z Ign:13 https://archive.ubuntu.com/ubuntu noble-updates/universe amd64 libva-drm2 amd64 2.20.0-2ubuntu0.2
+build	Provision isolated SDK and runtime	2026-11-11T15:03:46.8252636Z Ign:12 https://security.ubuntu.com/ubuntu noble-updates/universe amd64 libva2 amd64 2.20.0-2ubuntu0.2
+build	Provision isolated SDK and runtime	2026-11-11T15:03:46.8253714Z Err:12 mirror+file:/etc/apt/apt-mirrors.txt noble-updates/universe amd64 libva2 amd64 2.20.0-2ubuntu0.2
+build	Provision isolated SDK and runtime	2026-11-11T15:03:46.8254383Z   Temporary failure resolving 'azure.archive.ubuntu.com'
+build	Provision isolated SDK and runtime	2026-11-11T15:04:06.8193469Z Ign:15 http://azure.archive.ubuntu.com/ubuntu noble/main amd64 libvdpau1 amd64 1.5-2build1
+build	Provision isolated SDK and runtime	2026-11-11T15:04:06.8366292Z Ign:14 https://archive.ubuntu.com/ubuntu noble-updates/universe amd64 libva-x11-2 amd64 2.20.0-2ubuntu0.2
+build	Provision isolated SDK and runtime	2026-11-11T15:04:06.8509856Z Ign:13 https://security.ubuntu.com/ubuntu noble-updates/universe amd64 libva-drm2 amd64 2.20.0-2ubuntu0.2
+build	Provision isolated SDK and runtime	2026-11-11T15:04:06.8511200Z Err:13 mirror+file:/etc/apt/apt-mirrors.txt noble-updates/universe amd64 libva-drm2 amd64 2.20.0-2ubuntu0.2
+build	Provision isolated SDK and runtime	2026-11-11T15:04:06.8512101Z   Temporary failure resolving 'azure.archive.ubuntu.com'
+build	Provision isolated SDK and runtime	2026-11-11T15:04:26.8051479Z Ign:15 https://archive.ubuntu.com/ubuntu noble/main amd64 libvdpau1 amd64 1.5-2build1
+build	Provision isolated SDK and runtime	2026-11-11T15:04:26.8376362Z Ign:16 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libvpl2 amd64 2023.3.0-1build1
+build	Provision isolated SDK and runtime	2026-11-11T15:04:26.8752111Z Ign:14 https://security.ubuntu.com/ubuntu noble-updates/universe amd64 libva-x11-2 amd64 2.20.0-2ubuntu0.2
+build	Provision isolated SDK and runtime	2026-11-11T15:04:26.8753248Z Err:14 mirror+file:/etc/apt/apt-mirrors.txt noble-updates/universe amd64 libva-x11-2 amd64 2.20.0-2ubuntu0.2
+build	Provision isolated SDK and runtime	2026-11-11T15:04:26.8753854Z   Temporary failure resolving 'azure.archive.ubuntu.com'
+build	Provision isolated SDK and runtime	2026-11-11T15:04:46.8597748Z Ign:16 https://archive.ubuntu.com/ubuntu noble/universe amd64 libvpl2 amd64 2023.3.0-1build1
+build	Provision isolated SDK and runtime	2026-11-11T15:04:46.8599419Z Ign:17 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 ocl-icd-libopencl1 amd64 2.3.2-1build1
+build	Provision isolated SDK and runtime	2026-11-11T15:04:46.8956595Z Err:15 https://security.ubuntu.com/ubuntu noble/main amd64 libvdpau1 amd64 1.5-2build1
+build	Provision isolated SDK and runtime	2026-11-11T15:04:46.8957508Z   Temporary failure resolving 'azure.archive.ubuntu.com'
+build	Provision isolated SDK and runtime	2026-11-11T15:05:06.8829382Z Ign:18 http://azure.archive.ubuntu.com/ubuntu noble/universe amd64 libavutil58 amd64 7:6.1.1-3ubuntu5
+build	Provision isolated SDK and runtime	2026-11-11T15:05:06.8834748Z Ign:17 https://archive.ubuntu.com/ubuntu noble/universe amd64 ocl-icd-libopencl1 amd64 2.3.2-1build1
+build	Provision isolated SDK and runtime	2026-11-11T15:05:06.9144059Z Err:16 https://security.ubuntu.com/ubuntu noble/universe amd64 libvpl2 amd64 2023.3.0-1build1
+build	Provision isolated SDK and runtime	2026-11-11T15:05:06.9144974Z   Temporary failure resolving 'azure.archive.ubuntu.com'
+build	Provision isolated SDK and runtime	2026-11-11T15:05:14.5081985Z ##[error]The operation was canceled.
+build	Post Run actions/checkout@v4	﻿2026-11-11T15:05:14.5244585Z Post job cleanup.
+build	Post Run actions/checkout@v4	2026-11-11T15:05:14.6140254Z [command]/usr/bin/git version
+build	Post Run actions/checkout@v4	2026-11-11T15:05:14.6184681Z git version 2.56.0
+build	Post Run actions/checkout@v4	2026-11-11T15:05:14.6228294Z Temporarily overriding HOME='/home/runner/work/_temp/b9432e8b-ebac-46b3-9bd0-a52d674baa11' before making global git config changes
+build	Post Run actions/checkout@v4	2026-11-11T15:05:14.6229871Z Adding repository directory to the temporary git global config as a safe directory
+build	Post Run actions/checkout@v4	2026-11-11T15:05:14.6234641Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/NkNotes/NkNotes
+build	Post Run actions/checkout@v4	2026-11-11T15:05:14.6274710Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+build	Post Run actions/checkout@v4	2026-11-11T15:05:14.6312808Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+build	Post Run actions/checkout@v4	2026-11-11T15:05:14.6549415Z Entering 'third_party/nextkdeAppDemo'
+build	Post Run actions/checkout@v4	2026-11-11T15:05:14.6644344Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+build	Post Run actions/checkout@v4	2026-11-11T15:05:14.6689800Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+build	Post Run actions/checkout@v4	2026-11-11T15:05:14.6947488Z Entering 'third_party/nextkdeAppDemo'
+build	Post Run actions/checkout@v4	2026-11-11T15:05:14.7099672Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+build	Post Run actions/checkout@v4	2026-11-11T15:05:14.7101716Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+build	Post Run actions/checkout@v4	2026-11-11T15:05:14.7318109Z Entering 'third_party/nextkdeAppDemo'
+build	Post Run actions/checkout@v4	2026-11-11T15:05:14.7337726Z file:/home/runner/work/NkNotes/NkNotes/.git/modules/third_party/nextkdeAppDemo/config	remote.origin.url
+build	Post Run actions/checkout@v4	2026-11-11T15:05:14.7373126Z [command]/usr/bin/git config --file /home/runner/work/NkNotes/NkNotes/.git/modules/third_party/nextkdeAppDemo/config --name-only --get-regexp ^includeIf\.gitdir:
+build	Complete job	﻿2026-11-11T15:05:14.7584326Z Cleaning up orphan processes
+build	Complete job	2026-11-11T15:05:14.7998420Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/

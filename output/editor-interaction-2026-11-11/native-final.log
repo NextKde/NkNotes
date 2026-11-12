@@ -1,0 +1,35 @@
+PASS native drag and repeated drag retain moved block handle
+FAIL Escape and release outside editor cancel native drag AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
++ actual - expected
+
++ '第一段\n\n第四段\n\n第二段\n\n第三段\n'
+- '第一段\n\n第二段\n\n第三段\n\n第四段\n'
+           ^
+
+    at file:///home/amao/nknotes-review-agent-20261111/NativeEditorInteractionRegression.mjs:38:207
+    at async test (file:///home/amao/nknotes-review-agent-20261111/NativeEditorInteractionRegression.mjs:28:34)
+    at async file:///home/amao/nknotes-review-agent-20261111/NativeEditorInteractionRegression.mjs:37:1 {
+  generatedMessage: true,
+  code: 'ERR_ASSERTION',
+  actual: '第一段\n\n第四段\n\n第二段\n\n第三段\n',
+  expected: '第一段\n\n第二段\n\n第三段\n\n第四段\n',
+  operator: 'strictEqual',
+  diff: 'simple'
+}
+FAIL first-block menu disables move-up and empty clipboard paste AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+true !== false
+
+    at file:///home/amao/nknotes-review-agent-20261111/NativeEditorInteractionRegression.mjs:42:134
+    at async test (file:///home/amao/nknotes-review-agent-20261111/NativeEditorInteractionRegression.mjs:28:34)
+    at async file:///home/amao/nknotes-review-agent-20261111/NativeEditorInteractionRegression.mjs:41:1 {
+  generatedMessage: true,
+  code: 'ERR_ASSERTION',
+  actual: true,
+  expected: false,
+  operator: 'strictEqual',
+  diff: 'simple'
+}
+EDGE before {"epoch":2,"outline":[],"stats":{"characters":260,"words":130,"approximate":false,"minutes":1,"selected":0},"block":{"x":48,"pos":0,"end":7,"type":"paragraph","title":"段落 01","y":2,"height":26.390625,"canMoveUp":false,"canMoveDown":true,"canConvert":true},"blockHandleVisible":true,"slash":null,"search":{"total":0,"current":0},"pending":0,"canPasteBlock":true,"dropTarget":{"pos":119,"x":48,"y":648.640625,"width":660},"context":null,"tableWidths":[]}
+EDGE samples {"s0":32,"s1":304,"s2":512}
+PASS stationary pointer at edge keeps scrolling and Escape stops it

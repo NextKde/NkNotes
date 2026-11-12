@@ -1,0 +1,4 @@
+PASS outside release cancels without changing content
+KEY EVENTS []
+AFTER ESCAPE {"epoch":2,"outline":[],"stats":{"characters":12,"words":8,"approximate":false,"minutes":1,"selected":0},"block":{"x":48,"pos":15,"end":20,"type":"paragraph","title":"第四段","y":133.171875,"height":26.390625,"canMoveUp":true,"canMoveDown":false,"canConvert":true},"blockHandleVisible":true,"slash":null,"search":{"total":0,"current":0},"pending":0,"canPasteBlock":false,"dropTarget":null,"context":null,"tableWidths":[]}
+PASS Escape cancels preview before mouse release

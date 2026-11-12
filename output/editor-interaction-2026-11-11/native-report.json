@@ -1,0 +1,12 @@
+{
+  "results": [
+    {
+      "name": "outside release cancels without changing content",
+      "passed": true
+    },
+    {
+      "name": "Escape cancels preview before mouse release",
+      "passed": true
+    }
+  ]
+}

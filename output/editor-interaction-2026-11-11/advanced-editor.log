@@ -1,0 +1,13 @@
+slash_filter_keyboard_conversion_single_undo
+AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+'/\n' !== '/'
+
+    at file:///home/amao/nknotes-review-agent-20261111/source/tests/AdvancedEditorRegression.mjs:39:10 {
+  generatedMessage: true,
+  code: 'ERR_ASSERTION',
+  actual: '/\n',
+  expected: '/',
+  operator: 'strictEqual',
+  diff: 'simple'
+}

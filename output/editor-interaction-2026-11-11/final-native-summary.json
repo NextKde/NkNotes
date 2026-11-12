@@ -1,0 +1,201 @@
+{
+  "instance": {
+    "base": "/home/amao/nknotes-review-agent-20261111",
+    "pid": 6318,
+    "window": 16777260,
+    "CDP": "http://127.0.0.1:9241",
+    "platform": "xcb on DISPLAY=:0",
+    "viewportOffset": {
+      "x": 509,
+      "y": 91
+    },
+    "fixture": "/home/amao/nknotes-review-agent-20261111/fixture/review.md"
+  },
+  "scope": {
+    "source": "copied old VM source; file SHA256 compared to local; only Main.qml and SourceEditor.qml latest search fix absent",
+    "submodule": "40c6007a95db864683924056adbf0f6385dcb7e3, all snapshot files matched",
+    "sourceHashes": "source-hashes.json",
+    "bundleSHA256": "b76af6b3adb816ccd930cdeb78b50c2b0015cb6c09e7878d07d1410b2a0af3a1",
+    "newLocalSlashFix": "not transferred or run; source transfer denied by automatic approval"
+  },
+  "results": [
+    {
+      "name": "npm editor build and Qt Release app build",
+      "status": "pass",
+      "evidence": [
+        "editor-build.log",
+        "configure.log",
+        "build.log"
+      ]
+    },
+    {
+      "name": "BlockHandleRegression original",
+      "status": "pass",
+      "evidence": [
+        "block-handle.log"
+      ]
+    },
+    {
+      "name": "EditorInteractionRegression original six checks",
+      "status": "pass",
+      "evidence": [
+        "editor-interaction.log",
+        "editor-interaction-report.json"
+      ],
+      "limit": "CDP editor behavior; does not establish native popup visibility"
+    },
+    {
+      "name": "real mouse drag and repeat drag",
+      "status": "pass",
+      "evidence": [
+        "native.log",
+        "native-final.log",
+        "native-drag-report.json"
+      ],
+      "expectedOrders": [
+        [
+          "第一段",
+          "第四段",
+          "第二段",
+          "第三段"
+        ],
+        [
+          "第一段",
+          "第二段",
+          "第三段",
+          "第四段"
+        ]
+      ]
+    },
+    {
+      "name": "outside release cancellation",
+      "status": "pass",
+      "evidence": [
+        "native-cancel-explicit.log",
+        "native-cancel-report.json"
+      ]
+    },
+    {
+      "name": "Escape cancellation independent drag",
+      "status": "pass",
+      "evidence": [
+        "native-cancel-explicit.log"
+      ],
+      "input": "xdotool keydown/keyup --window, after real body click"
+    },
+    {
+      "name": "Escape cancellation following repeat drag",
+      "status": "fail",
+      "evidence": [
+        "native-final.log"
+      ],
+      "observed": "preview survived Escape; releasing moved fourth paragraph before second; independent case passes"
+    },
+    {
+      "name": "stationary edge scroll and timer stop",
+      "status": "pass",
+      "evidence": [
+        "native.log",
+        "native-final.log"
+      ],
+      "samples": [
+        {
+          "s0": 176,
+          "s1": 432,
+          "s2": 624
+        },
+        {
+          "s0": 32,
+          "s1": 304,
+          "s2": 512
+        }
+      ]
+    },
+    {
+      "name": "block menu first block move-up and empty paste disabled",
+      "status": "pass",
+      "evidence": [
+        "screenshots/copy-menu-before.png"
+      ],
+      "limit": "final rerun paste assertion expected false after preceding copy and failed due test precondition; initial no-copy state was visually disabled"
+    },
+    {
+      "name": "native copy immediately reopen enables paste",
+      "status": "pass",
+      "evidence": [
+        "native-copy.log",
+        "native-copy-report.json",
+        "screenshots/copy-menu-after.png"
+      ],
+      "canPasteBlockAfterCopy": false,
+      "canPasteBlockAfterReopen": true
+    },
+    {
+      "name": "find empty state and opt-in replacement",
+      "status": "pass",
+      "evidence": [
+        "screenshots/find-native.png",
+        "screenshots/replace-native.png"
+      ]
+    },
+    {
+      "name": "native query 01 highlight and enabled navigation/replacement",
+      "status": "pass",
+      "evidence": [
+        "screenshots/replace-query.png",
+        "screenshots/find-query.png"
+      ],
+      "limit": "01 query matching and native next click observed; replacement mutation not exercised in this path"
+    },
+    {
+      "name": "slash final command editor state",
+      "status": "pass",
+      "evidence": [
+        "slash-cdp.log",
+        "slash-cdp-report.json"
+      ],
+      "index": 15,
+      "command": "toc",
+      "limit": "raw report says native popup; only editor state was asserted"
+    },
+    {
+      "name": "slash native popup final item visible and highlighted",
+      "status": "fail",
+      "evidence": [
+        "screenshots/slash-settled.png"
+      ],
+      "observed": "popup stays at top, highlights paragraph; toc not visible while CDP slash.index=15"
+    },
+    {
+      "name": "latest cross-document query restoration",
+      "status": "not run",
+      "reason": "Main/SourceEditor transfer denied by automatic approval"
+    },
+    {
+      "name": "AdvancedEditorRegression corrected VM copy sequential run",
+      "status": "fail",
+      "passedChecks": 9,
+      "evidence": [
+        "advanced-final.log",
+        "advanced-final-report.json"
+      ],
+      "error": "Error: Timed out waiting for editor state\n    at until (file:///home/amao/nknotes-review-agent-20261111/AdvancedEditorRegression.safe-cdp.mjs:14:128)\n    at async file:///home/amao/nknotes-review-agent-20261111/AdvancedEditorRegression.safe-cdp.mjs:73:2",
+      "limit": "clipboard image import wait timed out; table width, metadata/schema final checks not reached"
+    }
+  ],
+  "diagnostics": {
+    "input": "xdotool mousemove absolute works; XTEST button/key without --window did not deliver. ydotool key272 press/release supports real drag; xdotool explicit-window button supports menus; discrete ydotool keyboard works for Ctrl+f/query; Escape/Down delivery varies by focus path.",
+    "screenshot": "Qt native and web frames sometimes differ; drag screenshot has missing third-row raster and edge screenshot may lag, so use state/order assertions as evidence. Native slash mismatch persisted on separately captured settled screenshot.",
+    "warnings": "No implicitHeight binding loop or ambiguous shortcut in app.log; AT-SPI GetApplicationBusAddress unsupported warnings only.",
+    "originalAdvancedFailure": "plain() all-doc includes legal trailing paragraph, yielding /\\n rather than /. VM test copy asserts active paragraph text; original failure retained.",
+    "overlap": "One advanced run overlapped native-final due operator mistake; that run is discarded. advanced-final.log/report will contain sequential rerun."
+  },
+  "drivers": [
+    "NativeEditorInteractionRegression.mjs",
+    "native-cancel-explicit.mjs",
+    "native-copy.mjs",
+    "slash-cdp.mjs",
+    "native-slash.mjs"
+  ],
+  "restrictions": "No existing app stopped, no system settings changed, no commit/push, no local app/tests/build executed; only dist editor.js and authorized evidence artifacts retrieved locally."
+}

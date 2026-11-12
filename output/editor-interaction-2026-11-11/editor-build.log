@@ -1,0 +1,9 @@
+
+> nextnotes-markdown-editor@0.1.0 build
+> node build.mjs
+
+
+  dist/diagram.js  11.9mb ⚠️
+  dist/editor.js    3.2mb ⚠️
+
+⚡ Done in 1250ms

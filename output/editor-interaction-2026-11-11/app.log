@@ -1,0 +1,5 @@
+
+DevTools listening on ws://127.0.0.1:9241/devtools/browser/9a4077f1-b7d8-47c8-b8cf-d5d52bb4fc70
+Remote debugging server started successfully. Try pointing a Chromium-based browser to http://127.0.0.1:9241
+qt.accessibility.atspi: AtSpiAdaptor::applicationInterface does not implement "GetApplicationBusAddress" "/org/a11y/atspi/accessible/root"
+qt.accessibility.atspi: AtSpiAdaptor::applicationInterface does not implement "GetApplicationBusAddress" "/org/a11y/atspi/accessible/root"

@@ -1,0 +1,12 @@
+{
+  "qml/Main.qml": "7ebb4fc9d20d07deea3c8332788d70db95b320e6acb9194a1501a377c061cbfb",
+  "qml/SourceEditor.qml": "981dd691e9fbc9aee7eb14160a1756c3c6c4c783e7f83c4fa671120d9bb2d40a",
+  "qml/NotesPopover.qml": "2e04245b94692424a5168e5a8604ba4fcc75385ff9daef91ffa951c176dd0eb0",
+  "qml/EditorTools.qml": "a8fd7001a7c5fc69f9083f9e2db960a2e9d8d20b65dd74ca730fcda53f2906f4",
+  "web/editor/tools.js": "90381dd8e7f81e1cc4cbf8b553cee95c57b457a4cae7e9e886cc6090f9105840",
+  "web/editor/editor.css": "eca19aa131e6404546f4d24b3b53a27d538b7d86e142913304a14ffe58bac1e4",
+  "web/editor/dist/editor.js": "b76af6b3adb816ccd930cdeb78b50c2b0015cb6c09e7878d07d1410b2a0af3a1",
+  "tests/BlockHandleRegression.mjs": "c816023520116f9e193b6501950d72d87d744d7c256c5bfb5c3fc0d6701a2dcb",
+  "tests/EditorInteractionRegression.mjs": "8526c0064d051cc1d5ebb1e57a9abf3624c27975d79e0124d1dcf09d43296475",
+  "tests/AdvancedEditorRegression.mjs": "c67774aa52f1dfc01442fe9e95589efc40d17e58e979d162f910cefb60fd5651"
+}

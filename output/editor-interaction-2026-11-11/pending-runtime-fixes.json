@@ -1,0 +1,21 @@
+{
+  "codeCommit": "2133581",
+  "runtimeStatus": "not_run",
+  "reason": "Automatic approval blocked transferring updated source files into kos-vm-dev. No alternate transfer path was used.",
+  "files": {
+    "qml/Main.qml": "813422b43a5c493f1bae7ded896e4c8396168fe39aa13c4cf2a66c5cfeef12e4",
+    "qml/SourceEditor.qml": "7bb5ca24bbd6ffb8549fca87233d1158c6a83d86972dd1c008da8c2a91e0e9aa",
+    "qml/EditorTools.qml": "ae5f5eb3e7ac68b9d7ded2d1825313c4ef379b9af0ff13ec045beb4dae4ede7c"
+  },
+  "changes": [
+    "Reapply a visible document search after the next document finishes loading.",
+    "Take native handle focus at drag start, accept Escape on that handle, preserve canceled release gating, and restore editor focus only while visible/editable without an active tool popup.",
+    "Synchronize slash menu selection after opening and item recreation, then scroll the selected row into view."
+  ],
+  "sourceReview": "completed; no confirmed blocking defect found",
+  "requiredAcceptance": [
+    "Native move, repeat move, drag again, Escape, release: preview clears and content remains unchanged.",
+    "Native slash menu: 15 ArrowDown presses make toc visibly selected and fully in view; wrap, filtering and reopening preserve selection consistency.",
+    "Keep document find open while switching notes: existing query and count restore after load."
+  ]
+}

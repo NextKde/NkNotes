@@ -4,16 +4,17 @@ import {Schema} from '../web/editor/node_modules/@milkdown/prose/lib/model.js';
 import {EditorState,TextSelection} from '../web/editor/node_modules/@milkdown/prose/lib/state.js';
 import {makeTools} from '../web/editor/tools.js';
 
-// Geometry is irrelevant to this interaction-state regression.
-globalThis.Element=class {getBoundingClientRect(){return {left:48,top:20,height:26,bottom:46};}};
+// Deterministic block boxes let us compare the advertised drop boundary to the move.
+globalThis.Element=class {constructor(index=0){this.index=index;}getBoundingClientRect(){return {left:48,top:20+this.index*40,height:26,bottom:46+this.index*40,width:400};}};
 globalThis.ResizeObserver=class {observe(){} disconnect(){}};
 const schema=new Schema({nodes:{doc:{content:'paragraph+'},paragraph:{content:'text*'},text:{}}});
 let focused=true,hitPos=1;
-const tools=makeTools({canEdit:()=>true,busy:()=>false,bridge:()=>({ui(){}}),epoch:()=>1,report(){}});
+const tools=makeTools({canEdit:()=>true,busy:()=>false,bridge:()=>({ui(){},dismissSlash(){}}),epoch:()=>1,report(){}});
 const paragraph=text=>schema.node('paragraph',null,text?schema.text(text):null);
 const view={
  state:EditorState.create({schema,doc:schema.node('doc',null,[paragraph('第一段'),paragraph('第二段')]),plugins:[tools.plugin]}),
- dom:new Element(),nodeDOM:()=>new Element(),posAtCoords:()=>({pos:hitPos}),hasFocus:()=>focused,
+ dom:new Element(),nodeDOM(pos){let index=0;this.state.doc.forEach((node,at,i)=>{if(at===pos)index=i;});return new Element(index);},posAtCoords:()=>({pos:hitPos}),hasFocus:()=>focused,
+ coordsAtPos:()=>({left:48,bottom:46}),
  dispatch(tr){this.state=this.state.apply(tr);},focus(){focused=true;},
 };
 const lifecycle=tools.plugin.spec.view(view);
@@ -52,17 +53,31 @@ try{
  const expectHandle=text=>{tools.uiNow();assert.equal(tools.state().block.pos,position(text));assert.equal(tools.state().block.title,text);assert.equal(tools.state().blockHandleVisible,true,'moved content remains draggable with editor focus');};
  hover(position('DDDD')+1);
  hitPos=position('BB')+1;
- assert.equal(tools.run('moveBlock',{pos:position('DDDD'),y:20}),true);
+ assert.equal(tools.run('moveBlock',{pos:position('DDDD'),y:60}),true);
  expectHandle('DDDD');
  assert.deepEqual(Array.from({length:view.state.doc.childCount},(_,i)=>view.state.doc.child(i).textContent),['A','DDDD','BB','CCC']);
  hitPos=position('CCC')+1;
- assert.equal(tools.run('moveBlock',{pos:position('DDDD'),y:46}),true);
+ assert.equal(tools.run('moveBlock',{pos:position('DDDD'),y:166}),true);
  expectHandle('DDDD');
  assert.equal(tools.run('moveBlock',{pos:position('DDDD'),direction:'up'}),true);expectHandle('DDDD');
  assert.equal(tools.run('moveBlock',{pos:position('DDDD'),direction:'down'}),true);expectHandle('DDDD');
  // Moving a different block must preserve the actual hovered block too.
  hover(position('BB')+1);
  assert.equal(tools.run('moveBlock',{pos:position('DDDD'),direction:'up'}),true);expectHandle('BB');
+ tools.run('previewBlockMove',{pos:position('DDDD'),y:61});tools.uiNow();
+ assert.equal(tools.state().dropTarget.pos,position('BB'));
+ assert.equal(tools.state().dropTarget.y,53,'indicator sits between blocks, not at the pointer');
+ const beforeCancel=view.state.doc;
+ tools.run('cancelBlockMove');tools.uiNow();assert.equal(tools.state().dropTarget,null);
+ assert.equal(view.state.doc,beforeCancel,'cancelling a preview never changes content');
+ tools.run('previewBlockMove',{pos:0,y:21});tools.uiNow();
+ assert.equal(tools.state().dropTarget,null,'a no-op drop does not advertise a move');
+ hitPos=position('CCC')+1;
+ tools.run('contextBlock',{x:70,y:145,request:7});tools.uiNow();
+ assert.equal(tools.state().context.request,7);
+ assert.equal(tools.state().context.block.title,'CCC','context menu resolves its click, not the last hovered block');
+ assert.equal(tools.state().context.block.canMoveDown,false);
+ assert.equal(tools.state().canPasteBlock,false,'paste is unavailable before a block is copied');
  tools.reset();
  const freshDoc=schema.node('doc',null,[paragraph('Existing'),paragraph()]);
  view.state=EditorState.create({schema,doc:freshDoc,selection:TextSelection.create(freshDoc,11),plugins:[tools.plugin]});
@@ -81,5 +96,18 @@ try{
  assert.equal(hover(view.state.selection.from),false,'first input is tracked without waiting for a UI report');
  focused=false;events.blur();assert.equal(visible(),true,'leaving editing restores the new content handle');
  focused=true;events.focus();assert.equal(visible(),true,'existing content stays draggable after refocus');
- console.log('PASS: new-paragraph typing suppression; existing and moved blocks remain draggable; selection styling.');
+ tools.reset();
+ const slashDoc=schema.node('doc',null,[paragraph('/'),paragraph('/H2 ')]);
+ view.state=EditorState.create({schema,doc:slashDoc,selection:TextSelection.create(slashDoc,2),plugins:[tools.plugin]});
+ tools.uiNow();assert.equal(tools.state().slash.items.length,16,'all insertions remain discoverable without a keyword');
+ const key=key=>tools.plugin.props.handleKeyDown(view,{key});
+ key('Escape');tools.uiNow();assert.equal(tools.state().slash,null);
+ view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc,8)));
+ tools.uiNow();assert.equal(tools.state().slash.items[0].command,'heading2','dismissal belongs to one query and location');
+ key('Escape');tools.uiNow();assert.equal(tools.state().slash,null,'Escape preserves uppercase and whitespace when suppressing a query');
+ tools.reset();tools.uiNow();assert.ok(tools.state().slash,'a document reset clears suppression');
+ view.dispatch(view.state.tr.insertText('no-match'));tools.uiNow();
+ assert.equal(tools.state().slash.items.length,0);
+ assert.equal(key('ArrowDown'),false,'an invisible empty menu must not consume caret navigation');
+ console.log('PASS: block handles, selection, drop boundaries, cancellation, contextual targeting and slash discovery/dismissal.');
 }finally{lifecycle.destroy();}

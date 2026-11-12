@@ -1,0 +1,9 @@
+{
+  "results": [
+    {
+      "name": "native keyboard reaches final slash entry",
+      "passed": false,
+      "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\n0 !== 15\n\n    at file:///home/amao/nknotes-review-agent-20261111/native-slash.mjs:34:59"
+    }
+  ]
+}

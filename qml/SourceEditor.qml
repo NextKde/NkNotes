@@ -15,6 +15,7 @@ Item {
     property alias editor: editorFacade
     required property Item sceneItem
     property var editorState: ({outline: [], stats: {}, block: null, slash: null, search: {total: 0, current: 0}})
+    signal documentReady()
     readonly property bool popupActive: tools.popupActive || attachmentDialog.visible || exportDialog.visible
     property bool exporting: false
     onExportingChanged: controller.setEditorExporting(exporting)
@@ -121,8 +122,10 @@ Item {
         function publish(json) {
             const state = JSON.parse(json)
             if (state.epoch !== root.session.webDocument().epoch) return
+            const wasLoading = root.session.webLoading
             root.session.acceptWebState(state)
             if (!state.loaded) return
+            if (wasLoading && !root.session.webLoading) root.documentReady()
             if (root.pendingRestore) {
                 const position = root.pendingRestore
                 root.pendingRestore = null

@@ -88189,7 +88189,7 @@
   function makeTools(env) {
     let view2, hover = 0, blockHandleVisible = false, collapsed = /* @__PURE__ */ new Set(), query = "", caseSensitive = false, searchIndex = -1, slashIndex = 0, lastSlash = "", uiTimer, lastUI = "", layoutToken = 0;
     let cachedDoc, cachedText = "", cachedStats = {}, cachedOutline = [], cachedMatchesDoc, cachedMatchesQuery, cachedMatchesCase, cachedMatches = [];
-    let suppressedSlash = null, blockSelection = false, newParagraphPos = null;
+    let suppressedSlash = null, blockSelection = false, newParagraphPos = null, dragPreview = null, contextRequest = null;
     let pending = 0, request = 0, clipboardBlock = null;
     const imports = /* @__PURE__ */ new Map(), bookmarks = /* @__PURE__ */ new Map();
     const key4 = new PluginKey("nextnotesTools");
@@ -88293,17 +88293,21 @@
       if (query && !env.busy()) for (const m of matches2(state.doc)) items.push(Decoration.inline(m.from, m.to, { class: "editor-search-match" }, { sourceSearch: true }));
       return DecorationSet.create(state.doc, items);
     }
+    function slashParagraph($from) {
+      if ($from.parent.type.name !== "paragraph") return false;
+      for (let depth = $from.depth - 1; depth > 0; depth--) if ($from.node(depth).type.name === "list_item") return false;
+      return true;
+    }
     function slash() {
       if (!view2 || !editable2() || !view2.state.selection.empty) return null;
       const { $from } = view2.state.selection;
-      if ($from.parent.type.name !== "paragraph") return null;
       const text6 = $from.parent.textBetween(0, $from.parentOffset, "\n", "\uFFFC");
+      if (suppressedSlash && ($from.pos !== suppressedSlash.pos || text6 !== suppressedSlash.text)) suppressedSlash = null;
+      if (!slashParagraph($from) || suppressedSlash) return null;
       const match = /^\/([^/\n]{0,40})$/.exec(text6);
       if (!match) return null;
-      if (text6 === suppressedSlash) return null;
-      if (text6 !== suppressedSlash) suppressedSlash = null;
       const term = match[1].trim().toLocaleLowerCase();
-      const items = slashEntries.filter((entry) => entry[2].includes(term) || entry[1].includes(term)).slice(0, 10).map(([command3, label]) => ({ command: command3, label }));
+      const items = slashEntries.filter((entry) => entry[2].includes(term) || entry[1].includes(term)).map(([command3, label]) => ({ command: command3, label }));
       if (text6 !== lastSlash) {
         lastSlash = text6;
         slashIndex = 0;
@@ -88318,7 +88322,20 @@
       if (!(dom instanceof Element)) return null;
       const r2 = dom.getBoundingClientRect();
       if (r2.height <= 0) return null;
-      return { x: r2.left, pos: block.pos, type: block.node.type.name, title: block.node.textContent.slice(0, 40), y: r2.top, height: r2.height };
+      const selectedRange = range({ pos: block.pos, selection: true });
+      return {
+        x: r2.left,
+        pos: block.pos,
+        end: block.pos + block.node.nodeSize,
+        type: block.node.type.name,
+        title: block.node.textContent.slice(0, 40),
+        y: r2.top,
+        height: r2.height,
+        canMoveUp: selectedRange.from > 0,
+        canMoveDown: selectedRange.to < view2.state.doc.content.size,
+        canConvert: block.node.isTextblock,
+        ...block.node.type.name === "code_block" ? { source: block.node.textContent, language: block.node.attrs.language || "" } : {}
+      };
     }
     function ui() {
       uiTimer = null;
@@ -88349,7 +88366,10 @@
         blockHandleVisible: blockHandleVisible && editable2() && editingBlock?.pos !== hover,
         slash: slash(),
         search: { total: matches2().length, current: searchIndex + 1 },
-        pending
+        pending,
+        canPasteBlock: !!clipboardBlock,
+        dropTarget: dragPreview && editable2() ? dropTarget(dragPreview) : null,
+        context: contextRequest ? { request: contextRequest.request, block: geometry(topBlock(contextRequest.pos)) } : null
       };
       const block = topBlock(view2.state.selection.from);
       if (block?.node.type.name === "code_block") state.code = { pos: block.pos, source: block.node.textContent, language: block.node.attrs.language || "" };
@@ -88401,6 +88421,18 @@
       }
       return { from: block.pos, to: block.pos + block.node.nodeSize };
     }
+    function dropTarget(args) {
+      const r2 = range(args);
+      if (!r2 || !Number.isFinite(args.y)) return null;
+      const blocks = rootBlocks().map((block) => ({ block, rect: view2.nodeDOM(block.pos)?.getBoundingClientRect() })).filter((item) => item.rect?.height > 0);
+      if (!blocks.length) return null;
+      const before = blocks.findIndex((item) => args.y < item.rect.top + item.rect.height / 2);
+      const next = before >= 0 ? blocks[before] : null, previous4 = before > 0 ? blocks[before - 1] : before < 0 ? blocks.at(-1) : null;
+      const pos = next ? next.block.pos : view2.state.doc.content.size;
+      if (pos >= r2.from && pos <= r2.to) return null;
+      const rect = next?.rect || previous4.rect;
+      return { pos, x: rect.left, y: next ? previous4 ? (previous4.rect.bottom + rect.top) / 2 : rect.top : rect.bottom, width: rect.width };
+    }
     function moveBlock(args) {
       const r2 = range(args);
       if (!r2) return false;
@@ -88410,11 +88442,7 @@
       else if (args.direction === "down") {
         const after = blocks.find((b) => b.pos >= r2.to);
         target = after ? after.pos + after.node.nodeSize : void 0;
-      } else if (typeof args.y === "number") {
-        const hit = view2.posAtCoords({ left: view2.dom.getBoundingClientRect().left + 24, top: args.y });
-        const b = hit ? topBlock(hit.pos) : null;
-        target = b ? args.y > view2.nodeDOM(b.pos).getBoundingClientRect().top + view2.nodeDOM(b.pos).getBoundingClientRect().height / 2 ? b.pos + b.node.nodeSize : b.pos : args.y < 0 ? 0 : view2.state.doc.content.size;
-      }
+      } else if (typeof args.y === "number") target = dropTarget(args)?.pos;
       if (target === void 0 || target >= r2.from && target <= r2.to) return false;
       const content4 = view2.state.doc.slice(r2.from, r2.to).content;
       let tr = view2.state.tr.delete(r2.from, r2.to);
@@ -88511,7 +88539,18 @@
       if (typeof args === "string") args = { value: args };
       if (name2 === "dismissSlash") {
         const p = view2.state.selection.$from;
-        suppressedSlash = p.parent.textBetween(0, p.parentOffset);
+        suppressedSlash = { pos: p.pos, text: p.parent.textBetween(0, p.parentOffset, "\n", "\uFFFC") };
+        schedule();
+        return true;
+      }
+      if (name2 === "contextBlock") {
+        const hit = view2.posAtCoords({ left: args.x, top: args.y });
+        contextRequest = { request: args.request, pos: hit?.pos ?? view2.state.selection.from };
+        ui();
+        return true;
+      }
+      if (name2 === "cancelBlockMove") {
+        dragPreview = null;
         schedule();
         return true;
       }
@@ -88565,6 +88604,11 @@
         return true;
       }
       if (!editable2()) return false;
+      if (name2 === "previewBlockMove") {
+        dragPreview = args;
+        schedule();
+        return true;
+      }
       if (name2 === "slashChoose") return applySlash(args.index);
       if (name2 === "selectBlock") {
         const b = targetBlock(args);
@@ -88727,6 +88771,7 @@
     const plugin = new Plugin({
       key: key4,
       state: { init: () => DecorationSet.empty, apply(tr, old, oldState, newState) {
+        if (tr.selectionSet || tr.docChanged) suppressedSlash = null;
         trackNewParagraph(oldState, !!view2?.hasFocus());
         if (newParagraphPos !== null && tr.docChanged) {
           const mapped = tr.mapping.mapResult(newParagraphPos);
@@ -88754,7 +88799,7 @@
             });
             return base2.add(state.doc, items);
           }
-          if (!editable2() || !empty3 || $from.parent.type.name !== "paragraph" || $from.parent.content.size) return base2;
+          if (!editable2() || !empty3 || !slashParagraph($from) || $from.parent.content.size) return base2;
           const pos = $from.before();
           return base2.add(state.doc, [Decoration.node(
             pos,
@@ -88765,11 +88810,10 @@
         handleKeyDown(v2, event) {
           if (env.busy()) return false;
           const state = slash();
-          if (state && ["ArrowDown", "ArrowUp", "Enter", "Escape"].includes(event.key)) {
+          if (state && (state.items.length || event.key === "Escape") && ["ArrowDown", "ArrowUp", "Enter", "Escape"].includes(event.key)) {
             if (event.key === "Escape") {
-              suppressedSlash = "/" + state.query;
+              run2("dismissSlash");
               lastSlash = "";
-              view2.dispatch(view2.state.tr.setSelection(TextSelection.near(view2.state.doc.resolve(view2.state.selection.to))));
               env.bridge()?.dismissSlash();
               return true;
             }
@@ -88778,7 +88822,7 @@
             schedule();
             return true;
           }
-          if (event.altKey && event.shiftKey && ["ArrowUp", "ArrowDown"].includes(event.key)) return moveBlock({ pos: topBlock(v2.state.selection.from)?.pos, direction: event.key === "ArrowUp" ? "up" : "down", selection: true });
+          if (editable2() && event.altKey && event.shiftKey && ["ArrowUp", "ArrowDown"].includes(event.key)) return moveBlock({ pos: topBlock(v2.state.selection.from)?.pos, direction: event.key === "ArrowUp" ? "up" : "down", selection: true });
           return false;
         },
         handleDOMEvents: {
@@ -88839,6 +88883,10 @@
         blockHandleVisible = false;
         blockSelection = false;
         newParagraphPos = null;
+        dragPreview = null;
+        contextRequest = null;
+        suppressedSlash = null;
+        slashIndex = 0;
         query = "";
         lastUI = "";
         searchIndex = -1;
