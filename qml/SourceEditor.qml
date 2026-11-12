@@ -24,8 +24,7 @@ Item {
     property string notification: ""
     function notify(text) { notification = text; noticeTimer.restart() }
     function action(name, args) { if (webReady) bridge.actionRequested({epoch: session.webDocument().epoch, name: name, args: args || {}}) }
-    function showShortcuts(anchor) { tools.showShortcuts(anchor) }
-    function openTools(anchor) { if (!session.sourceMode) tools.openMenu(anchor) }
+    function openTool(name, originMenu) { if (!session.sourceMode) tools.openTool(name, originMenu) }
     function toggleOutline(anchor) { tools.toggleOutline(anchor) }
     function correctSpelling(word) { web.replaceMisspelledWord(word); editorFacade.forceActiveFocus() }
     function exportBaseName() { return String(root.controller.noteTitle || "笔记").replace(/[\\/:*?"<>|\u0000-\u001f]/g, "-").replace(/[. ]+$/g, "").slice(0,100) || "笔记" }
@@ -46,10 +45,11 @@ Item {
     property bool restoring: false
     readonly property bool readOnly: controller.readOnly || session.protectedContent || session.webLoading || exporting
     function css(color) { return "rgba(" + Math.round(color.r * 255) + "," + Math.round(color.g * 255) + "," + Math.round(color.b * 255) + "," + color.a + ")" }
+    NotesTokens { id: tokens }
     readonly property var theme: ({
         background: css(AppTheme.contentBackground), text: css(AppTheme.text),
         muted: css(AppTheme.mutedText), border: css(AppTheme.border),
-        accent: css(AppTheme.accent), selection: css(AppTheme.accent), selectionText: css(AppTheme.accentText), scheme: AppTheme.dark ? "dark" : "light",
+        accent: css(tokens.primaryYellow), selection: css(tokens.primaryYellow), selectionText: "#222222", scheme: AppTheme.dark ? "dark" : "light",
         size: bodySize + "px", width: readingWidth + "px", inset: inset + "px", font: "'Noto Sans CJK SC', sans-serif"
     })
     property string lastOptions: ""

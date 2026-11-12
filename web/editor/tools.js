@@ -14,7 +14,7 @@ const slashEntries=[
 export function makeTools(env){
  let view,hover=0,blockHandleVisible=false,collapsed=new Set(),query='',caseSensitive=false,searchIndex=-1,slashIndex=0,lastSlash='',uiTimer,lastUI='',layoutToken=0;
  let cachedDoc,cachedText='',cachedStats={},cachedOutline=[],cachedMatchesDoc,cachedMatchesQuery,cachedMatchesCase,cachedMatches=[];
- let suppressedSlash=null,blockSelection=false,newParagraphPos=null,dragPreview=null,contextRequest=null;let pending=0,request=0,clipboardBlock=null;const imports=new Map(),bookmarks=new Map();
+ let suppressedSlash=null,blockSelection=false,newParagraphPos=null,dragPreview=null,dragGhost=null,dragSource=null,contextRequest=null;let pending=0,request=0,clipboardBlock=null;const imports=new Map(),bookmarks=new Map();
  const key=new PluginKey('nextnotesTools');
  const editable=()=>env.canEdit()&&!env.busy();
  const notify=text=>env.bridge()?.notice(text);
@@ -142,6 +142,32 @@ export function makeTools(env){
   if(args.selection&&!view.state.selection.empty){const first=topBlock(view.state.selection.from),last=topBlock(Math.max(view.state.selection.from,view.state.selection.to-1));if(block.pos>=first.pos&&block.pos<=last.pos)return {from:first.pos,to:last.pos+last.node.nodeSize};}
   return {from:block.pos,to:block.pos+block.node.nodeSize};
  }
+ function clearDragGhost(){
+  dragGhost?.remove();dragGhost=null;
+  dragSource?.classList.remove('editor-drag-source');dragSource=null;
+ }
+ function updateDragGhost(args){
+  // Legacy callers can preview a boundary without supplying a pointer position.
+  if(!Number.isFinite(args.x))return;
+  const block=targetBlock(args),dom=block&&view.nodeDOM(block.pos);
+  if(!(dom instanceof Element))return;
+  if(dragSource!==dom){
+   clearDragGhost();
+   const rect=dom.getBoundingClientRect(),clone=dom.cloneNode(true);
+   clone.classList.remove('editor-selected-block','ProseMirror-selectednode','editor-empty-line');
+   for(const el of [clone,...clone.querySelectorAll('*')]){
+    el.removeAttribute('id');el.removeAttribute('contenteditable');el.removeAttribute('data-placeholder');
+    el.classList.remove('editor-selected-block','ProseMirror-selectednode');
+   }
+   dragGhost=document.createElement('div');dragGhost.className='editor-drag-ghost';
+   dragGhost.setAttribute('aria-hidden','true');dragGhost.inert=true;
+   dragGhost.style.width=rect.width+'px';
+   const content=document.createElement('div');content.className='editor-drag-content ProseMirror';content.append(clone);dragGhost.append(content);
+   document.body.append(dragGhost);dragSource=dom;dragSource.classList.add('editor-drag-source');
+  }
+  const rect=dom.getBoundingClientRect(),offset=Math.max(0,Math.min(args.offsetY||0,rect.height));
+  dragGhost.style.transform=`translate3d(${args.x+18}px,${args.y-offset+8}px,0)`;
+ }
  // Preview and release share one calculation: the line marks a real block boundary.
  // Ignore folded nodes, and use the gap between visible blocks rather than pointer y.
  function dropTarget(args){
@@ -163,6 +189,7 @@ export function makeTools(env){
   else if(args.direction==='down'){const after=blocks.find(b=>b.pos>=r.to);target=after?after.pos+after.node.nodeSize:undefined;}
   else if(typeof args.y==='number')target=dropTarget(args)?.pos;
   if(target===undefined||target>=r.from&&target<=r.to)return false;
+  clearDragGhost();dragPreview=null;
   const content=view.state.doc.slice(r.from,r.to).content;let tr=view.state.tr.delete(r.from,r.to);
   const at=tr.mapping.map(target,-1);tr=tr.insert(at,content);
   tr.setMeta('nextnotesMovedBlock',{from:r.from,to:r.to,at});
@@ -214,7 +241,7 @@ export function makeTools(env){
    const hit=view.posAtCoords({left:args.x,top:args.y});
    contextRequest={request:args.request,pos:hit?.pos??view.state.selection.from};ui();return true;
   }
-  if(name==='cancelBlockMove'){dragPreview=null;schedule();return true;}
+  if(name==='cancelBlockMove'){const active=!!dragPreview;dragPreview=null;clearDragGhost();if(active)refresh();else schedule();return true;}
   if(name==='search'){query=args.query||'';caseSensitive=!!args.caseSensitive;searchIndex=-1;refresh();return true;}
   if(name==='findNext')return navigateSearch(args.direction||1);
   if(name==='dragScroll'){window.scrollBy(0,args.delta||0);schedule();return true;}
@@ -229,12 +256,12 @@ export function makeTools(env){
    let tr=view.state.tr;for(const m of [...chosen].reverse())tr=tr.insertText(args.replacement||'',m.from,m.to);commit(tr);notify(`已替换 ${chosen.length} 处`);return true;
   }
   if(!editable())return false;
-  if(name==='previewBlockMove'){dragPreview=args;schedule();return true;}
+  if(name==='previewBlockMove'){const first=!dragPreview;dragPreview=args;updateDragGhost(args);if(first)refresh();else schedule();return true;}
   if(name==='slashChoose')return applySlash(args.index);
   if(name==='selectBlock'){
    const b=targetBlock(args);if(!b)return false;
-   const selection=args.extend?TextSelection.between(view.state.doc.resolve(Math.min(view.state.selection.from,b.pos)),view.state.doc.resolve(Math.max(view.state.selection.to,b.pos+b.node.nodeSize))):NodeSelection.create(view.state.doc,b.pos);
-   view.dispatch(view.state.tr.setSelection(selection).setMeta(key,'block-selection'));view.focus();return true;
+   const selection=args.extend?TextSelection.between(view.state.doc.resolve(Math.min(view.state.selection.from,b.pos)),view.state.doc.resolve(Math.max(view.state.selection.to,b.pos+b.node.nodeSize))):args.focus===false&&b.node.isTextblock?TextSelection.create(view.state.doc,b.pos+1,b.pos+b.node.nodeSize-1):NodeSelection.create(view.state.doc,b.pos);
+   view.dispatch(view.state.tr.setSelection(selection).setMeta(key,'block-selection'));if(args.focus!==false)view.focus();return true;
   }
   if(name==='moveBlock')return moveBlock(args);
   if(name==='duplicateBlock'||name==='deleteBlock'||name==='copyBlock'){
@@ -335,7 +362,8 @@ export function makeTools(env){
   }},
   props:{attributes:()=>blockSelection?{class:'editor-block-selection'}:{},
    decorations(state){
-    const base=key.getState(state),{$from,empty}=state.selection;
+    let base=key.getState(state);const {$from,empty}=state.selection;
+    if(dragPreview){const b=targetBlock(dragPreview);if(b)base=base.add(state.doc,[Decoration.node(b.pos,b.pos+b.node.nodeSize,{class:'editor-drag-source'})]);}
     if(blockSelection&&!empty){
      const items=[];
      state.doc.nodesBetween(state.selection.from,state.selection.to,(node,pos)=>{
@@ -371,10 +399,10 @@ export function makeTools(env){
     }
    }
   },
-  view(v){view=v;const observer=new ResizeObserver(schedule);observer.observe(v.dom);schedule();return {update(){env.refreshToc?.();schedule();},destroy(){observer.disconnect();clearTimeout(uiTimer);uiTimer=null;}};}
+  view(v){view=v;const observer=new ResizeObserver(schedule);observer.observe(v.dom);schedule();return {update(){if(dragSource?.isConnected)dragSource.classList.add('editor-drag-source');env.refreshToc?.();schedule();},destroy(){clearDragGhost();observer.disconnect();clearTimeout(uiTimer);uiTimer=null;}};}
  });
  return {plugin,run,refresh,state:()=>lastUI?JSON.parse(lastUI):{},ui:schedule,uiNow:ui,uploader,importResult,exportReady,hasPending:()=>pending>0,
-  reset(){clearTimeout(uiTimer);uiTimer=null;collapsed.clear();hover=0;blockHandleVisible=false;blockSelection=false;newParagraphPos=null;dragPreview=null;contextRequest=null;suppressedSlash=null;slashIndex=0;query='';lastUI='';searchIndex=-1;lastSlash='';for(const item of imports.values())item.resolve({ok:false});imports.clear();bookmarks.clear();pending=0;},
+  reset(){clearDragGhost();clearTimeout(uiTimer);uiTimer=null;collapsed.clear();hover=0;blockHandleVisible=false;blockSelection=false;newParagraphPos=null;dragPreview=null;contextRequest=null;suppressedSlash=null;slashIndex=0;query='';lastUI='';searchIndex=-1;lastSlash='';for(const item of imports.values())item.resolve({ok:false});imports.clear();bookmarks.clear();pending=0;},
   selectedCode:()=>topBlock(view.state.selection.from),
  };
 }

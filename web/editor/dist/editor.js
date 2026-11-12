@@ -87946,7 +87946,7 @@
         drawSelection(),
         EditorView2.editorAttributes.of({ class: "source-viewport" }),
         EditorView2.contentAttributes.of({ "aria-label": "Markdown \u6E90\u7801\u7F16\u8F91\u5668", spellcheck: "false" }),
-        EditorView2.theme({ "&": { font: "14px/1.65 monospace", backgroundColor: "transparent" }, ".cm-content": { padding: "12px", minHeight: "75vh" }, ".cm-line": { padding: "0" }, "&.cm-focused": { outline: "none" }, ".cm-scroller": { font: "inherit" }, ".cm-selectionBackground": { backgroundColor: "var(--selection) !important" } }),
+        EditorView2.theme({ "&": { font: "14px/1.65 monospace", backgroundColor: "transparent" }, ".cm-content": { padding: "12px", minHeight: "75vh" }, ".cm-line": { padding: "0" }, "&.cm-focused": { outline: "none" }, ".cm-scroller": { font: "inherit" }, ".cm-selectionBackground": { backgroundColor: "color-mix(in srgb,var(--selection) 40%,transparent) !important" } }),
         editable2.of([]),
         search3.of([]),
         keymap5.of([
@@ -88189,7 +88189,7 @@
   function makeTools(env) {
     let view2, hover = 0, blockHandleVisible = false, collapsed = /* @__PURE__ */ new Set(), query = "", caseSensitive = false, searchIndex = -1, slashIndex = 0, lastSlash = "", uiTimer, lastUI = "", layoutToken = 0;
     let cachedDoc, cachedText = "", cachedStats = {}, cachedOutline = [], cachedMatchesDoc, cachedMatchesQuery, cachedMatchesCase, cachedMatches = [];
-    let suppressedSlash = null, blockSelection = false, newParagraphPos = null, dragPreview = null, contextRequest = null;
+    let suppressedSlash = null, blockSelection = false, newParagraphPos = null, dragPreview = null, dragGhost = null, dragSource = null, contextRequest = null;
     let pending = 0, request = 0, clipboardBlock = null;
     const imports = /* @__PURE__ */ new Map(), bookmarks = /* @__PURE__ */ new Map();
     const key4 = new PluginKey("nextnotesTools");
@@ -88421,6 +88421,42 @@
       }
       return { from: block.pos, to: block.pos + block.node.nodeSize };
     }
+    function clearDragGhost() {
+      dragGhost?.remove();
+      dragGhost = null;
+      dragSource?.classList.remove("editor-drag-source");
+      dragSource = null;
+    }
+    function updateDragGhost(args) {
+      if (!Number.isFinite(args.x)) return;
+      const block = targetBlock(args), dom = block && view2.nodeDOM(block.pos);
+      if (!(dom instanceof Element)) return;
+      if (dragSource !== dom) {
+        clearDragGhost();
+        const rect2 = dom.getBoundingClientRect(), clone = dom.cloneNode(true);
+        clone.classList.remove("editor-selected-block", "ProseMirror-selectednode", "editor-empty-line");
+        for (const el of [clone, ...clone.querySelectorAll("*")]) {
+          el.removeAttribute("id");
+          el.removeAttribute("contenteditable");
+          el.removeAttribute("data-placeholder");
+          el.classList.remove("editor-selected-block", "ProseMirror-selectednode");
+        }
+        dragGhost = document.createElement("div");
+        dragGhost.className = "editor-drag-ghost";
+        dragGhost.setAttribute("aria-hidden", "true");
+        dragGhost.inert = true;
+        dragGhost.style.width = rect2.width + "px";
+        const content4 = document.createElement("div");
+        content4.className = "editor-drag-content ProseMirror";
+        content4.append(clone);
+        dragGhost.append(content4);
+        document.body.append(dragGhost);
+        dragSource = dom;
+        dragSource.classList.add("editor-drag-source");
+      }
+      const rect = dom.getBoundingClientRect(), offset = Math.max(0, Math.min(args.offsetY || 0, rect.height));
+      dragGhost.style.transform = `translate3d(${args.x + 18}px,${args.y - offset + 8}px,0)`;
+    }
     function dropTarget(args) {
       const r2 = range(args);
       if (!r2 || !Number.isFinite(args.y)) return null;
@@ -88444,6 +88480,8 @@
         target = after ? after.pos + after.node.nodeSize : void 0;
       } else if (typeof args.y === "number") target = dropTarget(args)?.pos;
       if (target === void 0 || target >= r2.from && target <= r2.to) return false;
+      clearDragGhost();
+      dragPreview = null;
       const content4 = view2.state.doc.slice(r2.from, r2.to).content;
       let tr = view2.state.tr.delete(r2.from, r2.to);
       const at = tr.mapping.map(target, -1);
@@ -88550,8 +88588,11 @@
         return true;
       }
       if (name2 === "cancelBlockMove") {
+        const active3 = !!dragPreview;
         dragPreview = null;
-        schedule();
+        clearDragGhost();
+        if (active3) refresh();
+        else schedule();
         return true;
       }
       if (name2 === "search") {
@@ -88605,17 +88646,20 @@
       }
       if (!editable2()) return false;
       if (name2 === "previewBlockMove") {
+        const first = !dragPreview;
         dragPreview = args;
-        schedule();
+        updateDragGhost(args);
+        if (first) refresh();
+        else schedule();
         return true;
       }
       if (name2 === "slashChoose") return applySlash(args.index);
       if (name2 === "selectBlock") {
         const b = targetBlock(args);
         if (!b) return false;
-        const selection = args.extend ? TextSelection.between(view2.state.doc.resolve(Math.min(view2.state.selection.from, b.pos)), view2.state.doc.resolve(Math.max(view2.state.selection.to, b.pos + b.node.nodeSize))) : NodeSelection.create(view2.state.doc, b.pos);
+        const selection = args.extend ? TextSelection.between(view2.state.doc.resolve(Math.min(view2.state.selection.from, b.pos)), view2.state.doc.resolve(Math.max(view2.state.selection.to, b.pos + b.node.nodeSize))) : args.focus === false && b.node.isTextblock ? TextSelection.create(view2.state.doc, b.pos + 1, b.pos + b.node.nodeSize - 1) : NodeSelection.create(view2.state.doc, b.pos);
         view2.dispatch(view2.state.tr.setSelection(selection).setMeta(key4, "block-selection"));
-        view2.focus();
+        if (args.focus !== false) view2.focus();
         return true;
       }
       if (name2 === "moveBlock") return moveBlock(args);
@@ -88790,7 +88834,12 @@
       props: {
         attributes: () => blockSelection ? { class: "editor-block-selection" } : {},
         decorations(state) {
-          const base2 = key4.getState(state), { $from, empty: empty3 } = state.selection;
+          let base2 = key4.getState(state);
+          const { $from, empty: empty3 } = state.selection;
+          if (dragPreview) {
+            const b = targetBlock(dragPreview);
+            if (b) base2 = base2.add(state.doc, [Decoration.node(b.pos, b.pos + b.node.nodeSize, { class: "editor-drag-source" })]);
+          }
           if (blockSelection && !empty3) {
             const items = [];
             state.doc.nodesBetween(state.selection.from, state.selection.to, (node2, pos2) => {
@@ -88855,9 +88904,11 @@
         observer.observe(v2.dom);
         schedule();
         return { update() {
+          if (dragSource?.isConnected) dragSource.classList.add("editor-drag-source");
           env.refreshToc?.();
           schedule();
         }, destroy() {
+          clearDragGhost();
           observer.disconnect();
           clearTimeout(uiTimer);
           uiTimer = null;
@@ -88876,6 +88927,7 @@
       exportReady,
       hasPending: () => pending > 0,
       reset() {
+        clearDragGhost();
         clearTimeout(uiTimer);
         uiTimer = null;
         collapsed.clear();
