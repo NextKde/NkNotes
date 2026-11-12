@@ -1031,9 +1031,9 @@ ApplicationWindow {
             }
             // Show selection controls only during an explicit multi-selection.
             leftPadding: organizer.noteSelectionMode ? 36 : 12; topPadding: contentTopInset + groupHeight; bottomPadding: 12
+            leftInset: 0; rightInset: 0; topInset: groupHeight; bottomInset: 0
             highlighted: organizer.noteSelectionMode ? bulkSelected : organizer.contextPath ? modelData.path === organizer.contextPath : (modelData.id === controller.selectedId && modelData.path === controller.path)
             background: Rectangle {
-                y: noteRow.groupHeight; height: noteRow.height - y
                 radius: 10; color: noteRow.highlighted ? tokens.notesYellow : (noteRow.card || noteRow.hovered) ? AppTheme.controlBackground : "transparent"
                 border.width: noteRow.card && !noteRow.highlighted ? 1 : 0
                 border.color: AppTheme.border
