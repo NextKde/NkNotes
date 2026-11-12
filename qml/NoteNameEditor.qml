@@ -12,6 +12,7 @@ Item {
     property string savedName: ""
     readonly property bool editing: nameInput.activeFocus
     readonly property bool modified: nameInput.text.trim() !== savedName
+    NotesTokens { id: tokens }
     implicitHeight: nameColumn.implicitHeight
     signal submitted()
 
@@ -53,7 +54,7 @@ Item {
                 leftPadding: 0; rightPadding: 0; topPadding: 4; bottomPadding: 4
                 font.pixelSize: 24; font.weight: Font.DemiBold
                 color: AppTheme.text; placeholderTextColor: AppTheme.mutedText
-                selectionColor: AppTheme.accent; selectedTextColor: AppTheme.accentText
+                selectionColor: tokens.primaryYellow; selectedTextColor: "#222222"
                 background: null
                 placeholderText: "未命名笔记"
                 Accessible.name: "笔记名称"

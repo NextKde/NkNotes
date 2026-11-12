@@ -19,7 +19,7 @@ export function sourceNodeView(env){return (node,outer,getPos,_decorations,inner
   EditorView.lineWrapping,drawSelection(),
   EditorView.editorAttributes.of({class:'source-viewport'}),
   EditorView.contentAttributes.of({'aria-label':'Markdown 源码编辑器',spellcheck:'false'}),
-  EditorView.theme({'&':{font:'14px/1.65 monospace',backgroundColor:'transparent'},'.cm-content':{padding:'12px',minHeight:'75vh'},'.cm-line':{padding:'0'},'&.cm-focused':{outline:'none'},'.cm-scroller':{font:'inherit'},'.cm-selectionBackground':{backgroundColor:'var(--selection) !important'}}),
+  EditorView.theme({'&':{font:'14px/1.65 monospace',backgroundColor:'transparent'},'.cm-content':{padding:'12px',minHeight:'75vh'},'.cm-line':{padding:'0'},'&.cm-focused':{outline:'none'},'.cm-scroller':{font:'inherit'},'.cm-selectionBackground':{backgroundColor:'color-mix(in srgb,var(--selection) 40%,transparent) !important'}}),
   editable.of([]),search.of([]),
   keymap.of([
    {key:'Mod-z',run:()=>env.command('undo')},
