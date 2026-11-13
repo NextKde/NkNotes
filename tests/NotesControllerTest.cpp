@@ -4,6 +4,8 @@
 #include <QSettings>
 #include <QTemporaryDir>
 #include <QFile>
+#include <QDir>
+#include <QCryptographicHash>
 #include <QJSEngine>
 #include "EditorSession.h"
 #include "NotesController.h"
@@ -235,6 +237,46 @@ private slots:
         QVERIFY(exported.open(QIODevice::ReadOnly)); QCOMPARE(exported.readAll(), bytes);
         QVERIFY(f.controller.outputPath(QUrl("https://example.com/export"), "html").isEmpty());
     }
+    void restoredManagedImagesExportFromTheCurrentOwnedCache() {
+        Fixture f;
+        QTemporaryDir library, output;
+        QVERIFY(library.isValid()); QVERIFY(output.isValid());
+        const QByteArray png = QByteArray::fromBase64("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jfN8AAAAASUVORK5CYII=");
+        const QString hash = QString::fromLatin1(QCryptographicHash::hash(png, QCryptographicHash::Sha256).toHex());
+        const QString identity = "assets/" + hash + ".png";
+        QVERIFY(QDir(library.path()).mkdir("assets"));
+        QFile image(library.filePath(identity)); QVERIFY(image.open(QIODevice::WriteOnly)); QCOMPARE(image.write(png), png.size()); image.close();
+        f.controller.openNote("nested/note.md");
+        f.answer("read", {{"path", "nested/note.md"}, {"id", "B"}, {"text", "image"}, {"baseHash", "base"},
+                          {"managedAssets", true}, {"assetManifest", QVariantMap{{identity, hash}}}});
+        f.controller.setProperty("library", library.path());
+        const QUrl old = QUrl::fromLocalFile("/missing/former library/" + identity);
+        QCOMPARE(f.controller.resolveAsset(old).toLocalFile(), image.fileName());
+        f.controller.refresh(); const auto stale = f.take("search"); QVERIFY(!stale.isEmpty());
+        f.controller.setQuery("newer query");
+        f.controller.receive(stale[0].toULongLong(), "search", {{"ok", true}, {"library", library.path()}, {"generation", 1},
+            {"managedAssets", true}, {"assetManifest", QVariantMap{}}});
+        QCOMPARE(f.controller.resolveAsset(old).toLocalFile(), image.fileName());
+        const QString target = output.filePath("restored.html");
+        QVERIFY(f.controller.exportHtml(QUrl::fromLocalFile(target), "<img src=\"" + old.toString() + "\"><img src=\"../" + identity + "\">", "Restored"));
+        QFile exported(target); QVERIFY(exported.open(QIODevice::ReadOnly)); const QByteArray bytes = exported.readAll(); exported.close();
+        QCOMPARE(bytes.count("src=\"data:image/png;base64,"), 2);
+        QVERIFY(image.open(QIODevice::WriteOnly)); image.write("changed bytes"); image.close();
+        QVERIFY(f.controller.resolveAsset(old).isEmpty());
+        QVERIFY(!f.controller.exportHtml(QUrl::fromLocalFile(target), "<img src=\"" + old.toString() + "\">", "Changed"));
+        QVERIFY(exported.open(QIODevice::ReadOnly)); QCOMPARE(exported.readAll(), bytes);
+    }
+    void exportWarningsReachTheResultDialog() {
+        Fixture f;
+        QSignalSpy exported(&f.controller, &NotesController::notesExported);
+        f.controller.exportNotes(QUrl::fromLocalFile("/output"));
+        const QVariantList warnings{QVariantMap{{"path", "a.md"}, {"message", "附件未找到"}}};
+        f.answer("exportNotes", {{"directory", "/output/Notes"}, {"count", 1}, {"warnings", warnings}});
+        QCOMPARE(exported.size(), 1);
+        QCOMPARE(exported.first()[0].toUrl(), QUrl::fromLocalFile("/output/Notes"));
+        QCOMPARE(exported.first()[2].toList(), warnings);
+        QVERIFY(f.controller.property("status").toString().contains("部分链接需检查"));
+    }
     void webCloseWaitsForLatestRendererSnapshot() {
         Fixture f; f.session.enableWeb(); f.session.webConnected(); f.session.loadPrototype("原文");
         const int epoch = f.session.webDocument().value("epoch").toInt();
@@ -259,6 +301,9 @@ private slots:
     void copyImmediatelyBecomesLastDocument() {
         Fixture f; QSignalSpy loaded(&f.controller, &NotesController::documentLoaded);
         f.controller.saveCopy("copy.md");
+        QVariantMap copyArgs;
+        for (const auto &request : f.requests) if (request[1] == "saveAs") copyArgs = request[2].toMap();
+        QCOMPARE(copyArgs.value("sourcePath").toString(), QString("a.md"));
         f.answer("saveAs", {{"path", "copy.md"}, {"text", "copy"}, {"baseHash", "copyhash"}, {"listing", QVariantMap{{"notes", QVariantList{QVariantMap{{"path", "copy.md"}, {"id", "COPY"}}}}}}});
         QCOMPARE(f.controller.preference("lastNote").toMap().value("id").toString(), QString("COPY"));
         QCOMPARE(loaded.size(), 1);
@@ -297,7 +342,7 @@ private slots:
         QVERIFY(controller.readOnly()); QCOMPARE(session.source(), QString("磁盘"));
         QSettings().clear();
     }
-    void missingRestoredLibraryReturnsToPicker() {
+    void failedManagedStartupCanRetry() {
         QTextDocument doc; EditorSession session; session.attachDocument(&doc);
         NotesController controller(&session, nullptr);
         controller.setPreference("lastLibrary", "/missing/previous-library");
@@ -307,18 +352,73 @@ private slots:
         controller.receive(request[0].toULongLong(), "selectLibrary", {{"ok", false}, {"error", "invalidLibrary"}});
         QVERIFY(controller.property("library").toString().isEmpty());
         QVERIFY(!controller.busy());
-        QVERIFY(controller.property("error").toString().contains("重新选择"));
-        controller.selectLibrary(QUrl::fromLocalFile("/valid"));
+        QVERIFY(controller.property("error").toString().contains("重试打开"));
+        controller.restoreWorkspace();
         QCOMPARE(requests.size(), 1);
         QSettings().clear();
     }
-    void failedSwitchStillAllowsSaveAndClose() {
+    void failedImportStillAllowsSaveAndClose() {
         Fixture f; f.controller.selectLibrary(QUrl::fromLocalFile("/missing"));
-        f.answer("selectLibrary", {{"ok", false}, {"error", "invalidLibrary"}});
+        f.answer("importPreview", {{"ok", false}, {"error", "invalidImport"}});
         QCOMPARE(f.controller.property("library").toString(), QString("/virtual/library"));
         f.type("继续"); f.controller.save(); f.answer("save", {{"baseHash", "new"}});
         QSignalSpy closed(&f.controller, &NotesController::closeReady);
         f.controller.requestClose(); QCOMPARE(closed.size(), 1);
+    }
+    void failedManagedStartupRestoresToNewRoot() {
+        QTextDocument document; EditorSession session; session.attachDocument(&document);
+        NotesController controller(&session, nullptr);
+        controller.setPreference("managedStorage", "/broken/library");
+        QSignalSpy requests(&controller, &NotesController::requestSent);
+        controller.restoreWorkspace();
+        auto request = requests.takeFirst();
+        controller.receive(request[0].toULongLong(), "selectLibrary", {{"ok", false}, {"error", "databaseError"}, {"recoveryAvailable", true}, {"library", ""}, {"generation", 0}});
+        QVERIFY(controller.property("recoveryAvailable").toBool()); QVERIFY(!controller.busy());
+        controller.restoreBackup(QUrl::fromLocalFile("/backup.nkbackup"));
+        request = requests.takeFirst(); QCOMPARE(request[1].toString(), QString("restoreBackup"));
+        controller.receive(request[0].toULongLong(), "restoreBackup", {{"ok", true}, {"recoveredInitialization", true}, {"library", "/broken/library-restored"}, {"entryRoot", "/broken/library"}, {"preservedDirectory", "/broken/library"}, {"generation", 1}, {"managedAssets", true}});
+        QCOMPARE(controller.property("library").toString(), QString("/broken/library-restored"));
+        QCOMPARE(controller.preference("lastLibrary").toString(), QString("/broken/library"));
+        QVERIFY(!controller.property("recoveryAvailable").toBool()); QVERIFY(!controller.busy());
+        QVERIFY(!requests.isEmpty());
+        for (const auto &r : requests) {
+            QCOMPARE(r[2].toMap().value("generation").toInt(), 1);
+            QCOMPARE(r[2].toMap().value("library").toString(), QString("/broken/library-restored"));
+        }
+        QSettings().clear();
+    }
+    void conflictCheckpointsNewestInputWithoutAllowingClose() {
+        Fixture f;
+        f.type(" first"); f.controller.save();
+        f.answer("save", {{"ok", false}, {"error", "conflict"}, {"recoveryDurable", true}});
+        f.type(" second");
+        QTRY_COMPARE_WITH_TIMEOUT(f.count("checkpoint"), 1, 2000);
+        const auto earlier = f.take("checkpoint");
+        QCOMPARE(earlier[2].toMap().value("text").toString(), f.session.source());
+        f.type(" newest");
+        f.controller.receive(earlier[0].toULongLong(), "checkpoint", {{"ok", true}, {"library", "/virtual/library"}, {"generation", 1}, {"recoveryDurable", true}});
+        QVERIFY(!f.controller.property("error").toString().contains("本地恢复草稿已保存"));
+        QTRY_COMPARE_WITH_TIMEOUT(f.count("checkpoint"), 1, 2000);
+        f.answer("checkpoint", {{"recoveryDurable", true}});
+        QVERIFY(f.controller.property("error").toString().contains("本地恢复草稿已保存"));
+        QVERIFY(f.controller.dirty()); QCOMPARE(f.count("save"), 0);
+        QSignalSpy closed(&f.controller, &NotesController::closeReady);
+        f.controller.requestClose(); QCOMPARE(closed.size(), 0);
+    }
+    void nondurableCheckpointKeepsExplicitWarning() {
+        Fixture f; f.type(" local"); f.controller.save();
+        f.answer("save", {{"ok", false}, {"error", "conflict"}, {"recoveryDurable", true}});
+        f.controller.save();
+        f.answer("checkpoint", {{"ok", false}, {"error", "recoveryWriteFailed"}, {"recoveryDurable", false}});
+        QVERIFY(f.controller.property("error").toString().contains("未能写入磁盘"));
+        QVERIFY(f.controller.dirty());
+    }
+    void recoveryListDoesNotUpgradeMemoryDraftDurability() {
+        Fixture f; f.controller.inspectRecovery();
+        const QVariantMap draft{{"path", "a.md"}, {"text", "only in memory"}, {"baseHash", "base"}, {"recoveryDurable", false}};
+        f.answer("recovery", {{"drafts", QVariantList{draft}}, {"memoryDrafts", QVariantList{draft}}});
+        const auto drafts = f.controller.property("recovery").toMap().value("drafts").toList();
+        QCOMPARE(drafts.size(), 1); QVERIFY(!drafts.first().toMap().value("durable").toBool());
     }
     void automaticSaveDebounce() {
         Fixture f; f.type("中文自动保存");
@@ -382,14 +482,16 @@ private slots:
         f.controller.receive(99999, "read", {{"ok", true}, {"text", "恶意陈旧"}});
         QCOMPARE(f.session.source(), QString("原文"));
     }
-    void oldLibraryResponseIgnored() {
+    void preRestoreResponseIgnored() {
         Fixture f;
-        f.controller.refresh(); const auto old = f.take("search");
-        f.controller.selectLibrary(QUrl::fromLocalFile("/virtual/other"));
-        const auto selection = f.take("selectLibrary");
-        f.controller.receive(selection[0].toULongLong(), "selectLibrary", {{"ok", true}, {"library", "/virtual/other"}, {"generation", 2}, {"notes", QVariantList{}}});
+        f.controller.refresh(); const auto old = f.take("search"); QVERIFY(!old.isEmpty());
+        f.controller.restoreBackup(QUrl::fromLocalFile("/backup.nkbackup"));
+        const auto restoration = f.take("restoreBackup"); QVERIFY(!restoration.isEmpty());
+        f.controller.receive(restoration[0].toULongLong(), "restoreBackup", {{"ok", true}, {"library", "/virtual/library"}, {"generation", 2}, {"restored", true}});
+        const auto fresh = f.take("search"); QVERIFY(!fresh.isEmpty());
+        f.controller.receive(fresh[0].toULongLong(), "search", {{"ok", true}, {"library", "/virtual/library"}, {"generation", 2}, {"notes", QVariantList{}}});
         f.controller.receive(old[0].toULongLong(), "search", {{"ok", true}, {"library", "/virtual/library"}, {"generation", 1}, {"notes", QVariantList{QVariantMap{{"title", "旧库"}}}}});
-        QCOMPARE(f.controller.property("library").toString(), QString("/virtual/other"));
+        QCOMPARE(f.controller.property("library").toString(), QString("/virtual/library"));
         QVERIFY(f.controller.property("notes").toList().isEmpty());
     }
     void conflictAndReadFailureKeepBuffer() {

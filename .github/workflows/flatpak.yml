@@ -48,9 +48,7 @@ jobs:
       - name: Run targeted regressions inside SDK
         run: |
           repository_test=$(find "$PWD/tmp/state/build" -type f -name notes-repository-test -print -quit)
-          controller_test=$(find "$PWD/tmp/state/build" -type f -name notes-controller-test -print -quit)
           test -n "$repository_test"
-          test -n "$controller_test"
           flatpak-builder --run tmp/build tmp/org.nextks.notes.json "$repository_test" \
             managedSandboxLockRecoversAndRejectsConcurrentWriters \
             managedFolderSummariesTrackNotesAndPreserveCreation managedLegacyFoldersGainOrderWithoutLosingIcons \
@@ -58,10 +56,18 @@ jobs:
             managedDirectNoteDeletionIsPermanentAndScoped managedDirectNoteDeletionPreservesFailedItems \
             managedDirectFolderDeletionIsPermanentAndScoped managedDirectFolderDeletionProtectsRecoveryDrafts \
             2>&1 | tee tmp/evidence/repository-tests.log
-          flatpak-builder --run tmp/build tmp/org.nextks.notes.json env QT_QPA_PLATFORM=offscreen "$controller_test" \
-            directNoteDeletionSavesBeforeRemovingCurrentDocument failedDirectNoteDeletionKeepsCurrentDocument \
-            directFolderDeletionDrainsAndClearsTheOpenDocument failedDirectFolderDeletionKeepsTheOpenDocument \
-            2>&1 | tee tmp/evidence/controller-tests.log
+          for suite in managed-assets managed-recovery managed-portability notes-controller notes-chrome; do
+            binary=$(find "$PWD/tmp/state/build" -type f -name "$suite-test" -print -quit)
+            test -n "$binary"
+            arguments=()
+            if [ "$suite" = notes-chrome ]; then
+              qml_tests=$(find "$PWD/tmp/state/build" -type d -path '*/tests/chrome' -print -quit)
+              test -n "$qml_tests"
+              arguments=(-input "$qml_tests")
+            fi
+            flatpak-builder --run tmp/build tmp/org.nextks.notes.json env QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software "$binary" "${arguments[@]}" \
+              2>&1 | tee "tmp/evidence/$suite-tests.log"
+          done
       - name: Export bundle and exact release plan
         run: |
           /usr/bin/python3 packaging/flatpak/export-release.py --repo tmp/repo --output dist --revision "$(git rev-parse HEAD)"

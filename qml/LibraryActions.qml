@@ -17,6 +17,7 @@ Item {
     property string exportFolder: ""
     property url exportDirectory
     property int exportCount: 0
+    property var exportWarnings: []
     property url restoreSource
     property bool backupWorking: false
     property string operationError: ""
@@ -25,7 +26,7 @@ Item {
     signal browseRequested()
     function openImportMenu(anchor) { menu.openFromButton(anchor) }
     function showImportHistory() { controller.inspectImports(); history.open() }
-    function createBackup() { backupPicker.selectedFile = String(backupPicker.currentFolder) + "/" + encodeURIComponent("笔记备份-" + Qt.formatDateTime(new Date(), "yyyyMMdd-HHmmss") + ".nkbackup"); backupPicker.open() }
+    function createBackup() { backupPicker.selectedFile = String(backupPicker.currentFolder).replace(/\/$/, "") + "/" + encodeURIComponent("笔记备份-" + Qt.formatDateTime(new Date(), "yyyyMMdd-HHmmss") + ".nkbackup"); backupPicker.open() }
     function restoreBackup() { restorePicker.open() }
     function importLegacy() { destination = ""; preview(["file://" + controller.legacyLibrary.split("/").map(encodeURIComponent).join("/")]) }
     function openExternalFile() { externalPicker.open() }
@@ -42,7 +43,7 @@ Item {
             else transfer.close()
         }
         function onLibraryOperationFailed(message) { root.backupWorking = false; transfer.close(); review.close(); root.operationError = message; operationErrorDialog.open() }
-        function onNotesExported(directory, count) { root.exportDirectory = directory; root.exportCount = count; exportDone.open() }
+        function onNotesExported(directory, count, warnings) { root.exportDirectory = directory; root.exportCount = count; root.exportWarnings = warnings || []; exportDone.open() }
         function onBackupFinished() { root.backupWorking = false; transfer.close(); backupInfo.open(); root.browseRequested() }
         function onImportPreviewReady() {
             root.sources = Array.from(root.controller.importPlan.sources || [])
@@ -52,30 +53,42 @@ Item {
         }
         function onImportFinished() { root.report = root.controller.importReport; review.close(); if (root.report.cancelled || (root.report.failed || 0) > 0 || (root.report.skipped || 0) > 0 || (root.report.warnings || []).length) result.open(); root.browseRequested() }
     }
-    LiquidFilePicker {
+    NotesFilePicker {
+        systemFileDialogs: root.controller.systemFileDialogs
+        onFailed: function(message) { root.operationError = message; operationErrorDialog.open() }
         sourceItem: root.sceneItem; acceptText: "选择"; rejectText: "取消"
         locationPlaceholder: "输入文件夹路径"; fileNamePlaceholder: "文件名"; emptyText: "此文件夹中没有可选文件"
         overwriteTitle: "替换这个文件？"; overwriteText: "目标位置已有同名文件，替换后将覆盖原内容。"; overwriteAcceptText: "替换"; unavailableText: "文件夹不存在或无法访问"; id: filePicker; title: "选择要导入的笔记"; mode: "openFiles"; nameFilters: ["*.md", "*.MD"]; onAccepted: root.preview(selectedFiles) }
-    LiquidFilePicker {
+    NotesFilePicker {
+        systemFileDialogs: root.controller.systemFileDialogs
+        onFailed: function(message) { root.operationError = message; operationErrorDialog.open() }
         sourceItem: root.sceneItem; acceptText: "选择"; rejectText: "取消"
         locationPlaceholder: "输入文件夹路径"; fileNamePlaceholder: "文件名"; emptyText: "此文件夹中没有可选文件"
         overwriteTitle: "替换这个文件？"; overwriteText: "目标位置已有同名文件，替换后将覆盖原内容。"; overwriteAcceptText: "替换"; unavailableText: "文件夹不存在或无法访问"; mode: "folder"; id: folderPicker; title: "选择要收集的文件夹"; onAccepted: root.preview([selectedFolder]) }
-    LiquidFilePicker {
+    NotesFilePicker {
+        systemFileDialogs: root.controller.systemFileDialogs
+        onFailed: function(message) { root.operationError = message; operationErrorDialog.open() }
         sourceItem: root.sceneItem; acceptText: "选择"; rejectText: "取消"
         locationPlaceholder: "输入文件夹路径"; fileNamePlaceholder: "文件名"; emptyText: "此文件夹中没有可选文件"
         overwriteTitle: "替换这个文件？"; overwriteText: "目标位置已有同名文件，替换后将覆盖原内容。"; overwriteAcceptText: "替换"; unavailableText: "文件夹不存在或无法访问"; id: externalPicker; title: "打开外部 Markdown"; nameFilters: ["*.md", "*.MD"]; onAccepted: root.controller.openExternal(selectedFile) }
-    LiquidFilePicker {
+    NotesFilePicker {
+        systemFileDialogs: root.controller.systemFileDialogs
+        onFailed: function(message) { root.operationError = message; operationErrorDialog.open() }
         sourceItem: root.sceneItem; acceptText: "选择"; rejectText: "取消"
         locationPlaceholder: "输入文件夹路径"; fileNamePlaceholder: "文件名"; emptyText: "此文件夹中没有可选文件"
         overwriteTitle: "替换这个文件？"; overwriteText: "目标位置已有同名文件，替换后将覆盖原内容。"; overwriteAcceptText: "替换"; unavailableText: "文件夹不存在或无法访问"; mode: "folder"; id: exportPicker; title: "选择导出位置"; onAccepted: root.controller.exportNotes(selectedFolder, root.exportPaths, root.exportFolder) }
-    LiquidFilePicker {
+    NotesFilePicker {
+        systemFileDialogs: root.controller.systemFileDialogs
+        onFailed: function(message) { root.operationError = message; operationErrorDialog.open() }
         id: backupPicker; sourceItem: root.sceneItem; title: "创建完整备份"; mode: "saveFile"
         acceptText: "保存备份"; rejectText: "取消"; defaultSuffix: "nkbackup"; nameFilters: ["*.nkbackup"]
         locationPlaceholder: "输入文件夹路径"; fileNamePlaceholder: "备份名称"; emptyText: "此文件夹中没有备份"
         overwriteTitle: "替换这个备份？"; overwriteText: "同名备份将被替换。"; overwriteAcceptText: "替换"; unavailableText: "文件夹不存在或无法访问"
         onAccepted: { root.backupWorking = true; root.controller.createBackup(selectedFile) }
     }
-    LiquidFilePicker {
+    NotesFilePicker {
+        systemFileDialogs: root.controller.systemFileDialogs
+        onFailed: function(message) { root.operationError = message; operationErrorDialog.open() }
         id: restorePicker; sourceItem: root.sceneItem; title: "选择笔记备份"; mode: "openFile"
         acceptText: "继续"; rejectText: "取消"; nameFilters: ["*.nkbackup"]
         locationPlaceholder: "输入文件夹路径"; emptyText: "此文件夹中没有备份"; unavailableText: "文件夹不存在或无法访问"
@@ -88,7 +101,7 @@ Item {
         acceptEnabled: !root.controller.busy
         contentItem: ScrollView {
             id: restoreReviewScroll; clip: true; contentWidth: availableWidth
-            Label { width: restoreReviewScroll.availableWidth; text: "将用备份替换当前笔记空间，包括附件、历史和最近删除。恢复前会自动保存当前空间的完整副本。外部 Markdown 文件不受影响。\n\n" + decodeURIComponent(String(root.restoreSource).split("/").pop()); textFormat: Text.PlainText; wrapMode: Text.Wrap; color: AppTheme.text }
+            Label { width: restoreReviewScroll.availableWidth; text: (root.controller.recoveryAvailable ? "当前笔记空间无法打开。将先保留原空间目录，再从备份恢复笔记、附件、历史和最近删除。原空间不会被覆盖，外部 Markdown 文件不受影响。" : "将用备份替换当前笔记空间，包括附件、历史和最近删除。恢复前会自动保存当前空间的完整副本。外部 Markdown 文件不受影响。") + "\n\n" + decodeURIComponent(String(root.restoreSource).split("/").pop()); textFormat: Text.PlainText; wrapMode: Text.Wrap; color: AppTheme.text }
         }
         onAccepted: { root.backupWorking = true; root.controller.restoreBackup(root.restoreSource) }
     }
@@ -119,6 +132,11 @@ Item {
                 Label { Layout.fillWidth: true; text: "已导出 " + root.exportCount + " 篇笔记。"; wrapMode: Text.Wrap; color: AppTheme.text }
                 Label { Layout.fillWidth: true; text: "保存位置"; color: AppTheme.mutedText; font.pixelSize: 12 }
                 Label { Layout.fillWidth: true; text: decodeURIComponent(String(root.exportDirectory).replace(/^file:\/\//, "")); textFormat: Text.PlainText; wrapMode: Text.WrapAnywhere; color: AppTheme.mutedText; font.pixelSize: 12 }
+                Label { Layout.fillWidth: true; visible: root.exportWarnings.length > 0; text: "部分链接未能完整导出，原文已保留："; wrapMode: Text.Wrap; color: AppTheme.text }
+                Repeater {
+                    model: root.exportWarnings
+                    Label { required property var modelData; Layout.fillWidth: true; text: (modelData.path ? modelData.path + "：" : "") + modelData.message; textFormat: Text.PlainText; wrapMode: Text.WrapAnywhere; color: AppTheme.mutedText; font.pixelSize: 12 }
+                }
                 LiquidActionButton { text: "查看导出内容"; materialForm: true; onClicked: { Qt.openUrlExternally(root.exportDirectory); exportDone.close() } }
             }
         }
@@ -129,12 +147,14 @@ Item {
         contentItem: Label { text: root.operationError; textFormat: Text.PlainText; wrapMode: Text.Wrap; color: AppTheme.text }
     }
     LiquidDialog {
-        id: backupInfo; sourceItem: root.sceneItem; title: root.controller.backupResult.safetyCopy ? "备份已恢复" : "备份已保存"
+        id: backupInfo; sourceItem: root.sceneItem
+        readonly property bool restored: !!(root.controller.backupResult.safetyCopy || root.controller.backupResult.preservedDirectory)
+        title: restored ? "备份已恢复" : "备份已保存"
         standardButtons: Dialog.Close; closeText: "完成"
         contentItem: ColumnLayout {
             spacing: 12
-            Label { Layout.fillWidth: true; wrapMode: Text.Wrap; text: root.controller.backupResult.safetyCopy ? "已恢复笔记、附件、历史和最近删除。恢复前的内容保存在：" : "完整备份包含笔记、文件夹、标签、附件、历史、导入记录和最近删除。保存位置："; color: AppTheme.text }
-            Label { Layout.fillWidth: true; wrapMode: Text.WrapAnywhere; textFormat: Text.PlainText; text: root.controller.backupResult.safetyCopy || root.controller.backupResult.file || ""; color: AppTheme.mutedText }
+            Label { Layout.fillWidth: true; wrapMode: Text.Wrap; text: root.controller.backupResult.preservedDirectory ? "已恢复笔记、附件、历史和最近删除。原笔记空间的完整目录保留在：" : root.controller.backupResult.safetyCopy ? "已恢复笔记、附件、历史和最近删除。恢复前的内容保存在：" : "完整备份包含笔记、文件夹、标签、附件、历史、导入记录和最近删除。保存位置："; color: AppTheme.text }
+            Label { Layout.fillWidth: true; wrapMode: Text.WrapAnywhere; textFormat: Text.PlainText; text: root.controller.backupResult.preservedDirectory || root.controller.backupResult.safetyCopy || root.controller.backupResult.file || ""; color: AppTheme.mutedText }
             Label { Layout.fillWidth: true; wrapMode: Text.Wrap; visible: (root.controller.backupResult.cacheFailures || 0) > 0; text: "部分附件缓存未能刷新。附件原件仍在备份和数据库中，请检查磁盘空间后重新打开应用。"; color: AppTheme.mutedText }
         }
     }
@@ -174,7 +194,7 @@ Item {
                 }
                 LiquidCheckBox { visible: !!root.controller.importPlan.hasFolders; Layout.fillWidth: true; textWrapMode: Text.WordWrap; text: "保留文件夹结构"; checked: root.preserveStructure; enabled: !root.controller.busy; onClicked: { root.preserveStructure = checked; root.controller.previewImport(root.sources, root.destination, checked) } }
                 LiquidCheckBox { Layout.fillWidth: true; textWrapMode: Text.WordWrap; visible: (root.controller.importPlan.duplicates || 0) > 0; text: "保留重复副本（发现 " + (root.controller.importPlan.duplicates || 0) + " 篇已导入笔记）"; checked: root.keepDuplicates; enabled: !root.controller.busy; onClicked: root.keepDuplicates = checked }
-                Label { Layout.fillWidth: true; text: "关联附件会一并收集。创建独立副本，不修改原文件，也不自动同步后续修改。"; wrapMode: Text.Wrap; color: AppTheme.mutedText; font.pixelSize: 12 }
+                Label { Layout.fillWidth: true; text: "会收集可访问的关联附件。需要一起导入相对路径的附件时，请使用“从文件夹收集”。创建独立副本，不修改原文件，也不自动同步后续修改。"; wrapMode: Text.Wrap; color: AppTheme.mutedText; font.pixelSize: 12 }
                 Label { Layout.fillWidth: true; visible: !!(root.controller.importPlan.problems || []).length; text: (root.controller.importPlan.problems || []).length + " 项无法读取或格式不支持，完成后可查看详情。"; wrapMode: Text.Wrap; color: AppTheme.mutedText; font.pixelSize: 12 }
             }
         }

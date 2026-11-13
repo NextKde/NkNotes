@@ -30,6 +30,8 @@ class NotesController final : public QObject {
     Q_PROPERTY(QVariantList importHistory MEMBER m_importHistory NOTIFY changed)
     Q_PROPERTY(bool externalDocument READ externalDocument NOTIFY changed)
     Q_PROPERTY(QString assetRoot READ assetRoot NOTIFY changed)
+    Q_PROPERTY(bool systemFileDialogs READ systemFileDialogs CONSTANT)
+    Q_PROPERTY(bool recoveryAvailable MEMBER m_recoveryAvailable NOTIFY changed)
     Q_PROPERTY(QUrl documentUrl READ documentUrl NOTIFY changed)
     Q_PROPERTY(QString legacyLibrary READ legacyLibrary NOTIFY changed)
     Q_PROPERTY(QString library MEMBER m_library NOTIFY changed)
@@ -90,6 +92,10 @@ public:
     QString noteTitle() const;
     QString assetRoot() const;
     QUrl documentUrl() const;
+    bool systemFileDialogs() const;
+    bool managedAssets() const { return m_managedAssets && !externalDocument(); }
+    QVariantMap assetManifest() const { return managedAssets() ? m_assetManifest : QVariantMap(); }
+    Q_INVOKABLE QUrl resolveAsset(const QUrl &source) const;
     QString legacyLibrary() const;
     Q_INVOKABLE void openNote(const QString &path, int match = -1);
     Q_INVOKABLE void createNote();
@@ -177,7 +183,7 @@ signals:
     void importPreviewReady();
     void importFinished();
     void backupFinished();
-    void notesExported(const QUrl &directory, int count);
+    void notesExported(const QUrl &directory, int count, const QVariantList &warnings);
     void libraryOperationFailed(const QString &message);
     void missingLinkRequested();
     void tagRenameReady();
@@ -229,6 +235,8 @@ private:
     quint64 m_next = 0, m_generation = 0, m_epoch = 0, m_revision = 0, m_savedRevision = 0, m_searchSerial = 0;
     quint64 m_saving = 0;
     bool m_restoreWorkspace = false, m_exporting = false, m_organizing = false;
+    bool m_recoveryAvailable = false, m_managedAssets = false;
+    QVariantMap m_assetManifest;
     bool m_favorite = false, m_recoveryVisible = false;
     bool m_loading = false, m_transition = false, m_applying = false, m_readOnly = false, m_conflict = false;
     QString m_highlightQuery;

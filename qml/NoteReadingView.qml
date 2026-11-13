@@ -8,6 +8,9 @@ ScrollView {
     required property string source
     required property string noteTitle
     required property string documentPath
+    // The controller applies the same manifest and containment policy as export
+    // and the editor. Without a resolver, image resources remain disabled.
+    property var assetResolver: null
     property string fontFamily: "sans-serif"
     property int titleSize: 24
     property string modified: ""
@@ -17,15 +20,12 @@ ScrollView {
     clip: true
     contentWidth: availableWidth
     function localImage(value) {
-        let path = value.trim().replace(/^<|>$/g, "")
-        // Only filesystem resources. Encoded schemes and network shares are rejected too.
-        try { path = decodeURIComponent(path) } catch (e) { return "" }
-        if (!path || /[\u0000-\u001f]/.test(path) || /^[/\\]{2}/.test(path)) return ""
-        if (/^[a-z][a-z0-9+.-]*:/i.test(path)) return ""
-        if (!path.startsWith("/")) path = documentPath.slice(0, documentPath.lastIndexOf("/") + 1) + path
-        const parts = []
-        path.split("/").forEach(function(part) { if (part === "..") parts.pop(); else if (part && part !== ".") parts.push(encodeURIComponent(part)) })
-        return "file:///" + parts.join("/")
+        const path = value.trim().replace(/^<|>$/g, "")
+        if (!path || !documentPath || typeof assetResolver !== "function") return ""
+        try {
+            const resolved = assetResolver(path)
+            return resolved ? resolved.toString() : ""
+        } catch (e) { return "" }
     }
     readonly property var blocks: {
         let markdown = source.replace(/^\uFEFF/, "")
