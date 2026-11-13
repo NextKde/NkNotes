@@ -1,6 +1,7 @@
 #include "NotesController.h"
 #include "EditorSession.h"
 #include "storage/MarkdownFile.h"
+#include "storage/ManagedAssets.h"
 #include "storage/NotesRepository.h"
 #include <QDir>
 #include <QFileInfo>
@@ -11,6 +12,10 @@ QString NotesController::assetRoot() const {
 QUrl NotesController::documentUrl() const {
     return QUrl::fromLocalFile(externalDocument() ? m_path.mid(9) : m_library + '/' + m_path);
 }
+QUrl NotesController::resolveAsset(const QUrl &source) const {
+    return ManagedAssets::resolveUrl({assetRoot(), documentUrl(), assetManifest(), managedAssets()}, source);
+}
+bool NotesController::systemFileDialogs() const { return QFileInfo::exists("/.flatpak-info"); }
 QString NotesController::legacyLibrary() const { return preference("legacyLibrary").toString(); }
 void NotesController::previewImport(const QList<QUrl> &sources,const QString &folder,bool keepStructure) {
     if (busy() || sources.isEmpty()) return;

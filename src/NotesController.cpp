@@ -1,4 +1,5 @@
 #include "NotesController.h"
+#include "storage/ManagedAssets.h"
 #include "EditorSession.h"
 #include "storage/NotesRepository.h"
 #include <QSettings>
@@ -29,14 +30,14 @@ NotesController::NotesController(EditorSession *session, NotesRepository *reposi
         m_textHistoryReplay=false;
         ++m_revision;
         m_status = m_conflict ? "冲突 · 本地输入仍保留" : "已修改";
-        if (!m_session->composing() && !m_conflict) m_autosave.start();
+        if (!m_session->composing()) m_autosave.start();
         emit changed();
     });
     connect(session, &EditorSession::stateChanged, this, [this] {
         emit changed();
         if (m_session->composing()) m_autosave.stop();
-        else if (dirty() && !m_saving && !m_conflict) {
-            if (m_transition) save(); else m_autosave.start();
+        else if (dirty() && !m_saving) {
+            if (m_transition) advance(); else m_autosave.start();
         } else if (m_transition && !m_session->composing()) advance();
     });
     if (repository) {
@@ -121,7 +122,12 @@ void NotesController::createFolder(const QString &path, const QString &icon) {
 }
 void NotesController::save() {
     if (!dirty() || m_saving || m_path.isEmpty() || m_session->composing() || m_loading) return;
-    if (m_conflict) { m_error = "文件已在外部改变。本地输入仍保留；请另存副本，或明确放弃本地输入后重新读取。"; emit changed(); return; }
+    if (m_conflict) {
+        m_autosave.stop();
+        send("checkpoint", {{"path", m_path}, {"text", m_session->source()}, {"baseHash", m_base}});
+        m_error = "文件已在外部改变。本地输入仍保留，正在保存恢复草稿；请另存副本，或明确放弃本地输入后重新读取。";
+        emit changed(); return;
+    }
     m_autosave.stop(); m_error.clear(); m_status = "保存中…";
     m_saving = send("save", {{"path", m_path}, {"text", m_session->source()}, {"baseHash", m_base}, {"sourceNewlines", m_session->sourceEdited()}}); emit changed();
 }
@@ -158,7 +164,7 @@ void NotesController::recoverDraft(const QString &path, const QString &text, con
 void NotesController::saveCopy(const QString &target) {
     if (m_session->composing() || busy() || m_path.isEmpty() || m_saving) return;
     m_loading = true;
-    send("saveAs", {{"path", target}, {"text", m_session->source()}, {"newIdentity", true}}); emit changed();
+    send("saveAs", {{"path", target}, {"sourcePath", m_path}, {"text", m_session->source()}, {"newIdentity", true}}); emit changed();
 }
 void NotesController::copyRecovery(const QString &text) {
     if (busy()) return;
@@ -202,17 +208,20 @@ void NotesController::openLink(const QString &href) {
             return;
         }
     }
-    if (!resolved.isLocalFile()) return;
-    const QString file = QFileInfo(resolved.toLocalFile()).canonicalFilePath();
+    if (!resolved.isLocalFile() && resolved.scheme() != "nkasset") return;
+    const QUrl target = externalDocument()
+        ? ManagedAssets::resolveExternalLink({assetRoot(), documentUrl(), {}, false}, url)
+        : resolveAsset(url);
+    const QString file = target.toLocalFile();
     const QString root = QFileInfo(assetRoot()).canonicalFilePath();
-    if (file.isEmpty() || root.isEmpty() || !file.startsWith(root + '/')) {
+    if (file.isEmpty()) {
         m_error = "链接目标不存在或不在当前笔记库中"; emit changed(); return;
     }
     if (QFileInfo(file).suffix().compare("md", Qt::CaseInsensitive) == 0) {
         if (busy()) return;
         const QString relative = QDir(root).relativeFilePath(file), fragment = resolved.fragment();
         drain([this, relative, fragment] { m_loading = true; send("read", {{"path", relative}, {"fragment", fragment}}); emit changed(); });
-    } else QDesktopServices::openUrl(QUrl::fromLocalFile(file));
+    } else QDesktopServices::openUrl(target);
 }
 QString NotesController::positionKey() const {
     return "positions/" + QString::fromLatin1(QCryptographicHash::hash((m_library + '/' + (m_selectedId.isEmpty() || m_duplicateIds.contains(m_selectedId) ? m_selectedId + "/" + m_path : m_selectedId)).toUtf8(), QCryptographicHash::Sha256).toHex());
@@ -285,6 +294,9 @@ void NotesController::report(const QVariantMap &r) {
         {"attachmentChanged", "附件回收数据发生变化，已阻止恢复"},
         {"databaseError", "内部笔记数据库无法读取或保存"},
         {"databaseVersion", "笔记数据库版本较新，请升级应用"},
+        {"databaseCorrupt", "笔记数据库未通过完整性检查，请从完整备份恢复"},
+        {"recoveryPointerInvalid", "笔记空间的恢复位置记录无效，原目录仍保留"},
+        {"recoveryActivationUncertain", "恢复位置已写入，但磁盘同步未确认，请关闭应用后重新打开"},
         {"invalidName", "名称无效，请使用普通名称，不要输入路径"},
         {"invalidBackup", "这个文件不是可用的笔记备份，或备份版本不受支持"},
         {"backupFailed", "备份或恢复未能完成，原有数据仍保留"},
@@ -302,10 +314,19 @@ void NotesController::receive(quint64 id, const QString &op, const QVariantMap &
     if (!m_pending.contains(id)) return;
     const Pending p = m_pending.take(id);
     if (p.op != op) return;
-    if (op != "selectLibrary" && (r.value("library").toString() != m_library || r.value("generation").toULongLong() != m_generation || p.generation != m_generation)) return;
+    const bool recoveredLibrary = op == "restoreBackup" && r.value("ok").toBool()
+        && p.library == m_library && p.generation == m_generation
+        && ((!m_library.isEmpty() && r.value("library").toString() == m_library)
+            || (m_recoveryAvailable && m_library.isEmpty() && r.value("recoveredInitialization").toBool()));
+    if (op != "selectLibrary" && !recoveredLibrary && (r.value("library").toString() != m_library || r.value("generation").toULongLong() != m_generation || p.generation != m_generation)) return;
+    if (op == "checkpoint" && (p.epoch != m_epoch || p.path != m_path || p.revision != m_revision)) return;
     if (op == "search" && p.args.value("serial").toULongLong() != m_searchSerial) return;
     const bool documentOp = op == "read" || op == "save" || op == "saveAs" || op == "create" || op == "trash" || op == "rename";
     if (documentOp && !p.args.value("recoveryCopy").toBool() && p.epoch != m_epoch) return;
+    if (r.value("ok").toBool()) {
+        if (r.contains("managedAssets")) m_managedAssets = r.value("managedAssets").toBool();
+        if (r.contains("assetManifest")) m_assetManifest = r.value("assetManifest").toMap();
+    }
     if(r.contains("undoState"))m_undoState=r.value("undoState").toMap();
     if(r.value("historyRecorded").toBool() || op=="undo" || op=="redo")m_organizationHistory=true;
     if(op=="undo" || op=="redo" || op=="editFolder" || op=="createFolder" || op=="moveFolder" || op=="purgeFolder")m_organizing=false;
@@ -314,6 +335,7 @@ void NotesController::receive(quint64 id, const QString &op, const QVariantMap &
     if(op == "importPreview" || op == "importNotes")m_operationProgress.clear();
     if ((documentOp && !p.args.value("recoveryCopy").toBool()) || op == "selectLibrary") m_loading = false;
     if (!r.value("ok").toBool()) {
+        if (op == "selectLibrary" && m_library.isEmpty()) m_recoveryAvailable = r.value("recoveryAvailable").toBool();
         if (op == "createFolder") {
             m_status = r.value("error") == "alreadyExists" ? QStringLiteral("这个位置已有同名文件夹（可能在最近删除中），请修改名称或父级文件夹。") : organizerError(r.value("error").toString());
             emit changed(); emit folderCreationFailed(m_status); return;
@@ -340,10 +362,18 @@ void NotesController::receive(quint64 id, const QString &op, const QVariantMap &
             if(op=="importNotes") { refresh();inspectImports();message+="。已提交的内容仍保留，可从全部笔记查看；再次导入时跳过重复内容继续。"; }
             else if(op=="importPreview")message+="。当前笔记未改变，请检查所选文件或文件夹。";
             else if(op=="exportNotes")message+="。原笔记仍保留，请检查保存位置。";
-            else message+="。当前笔记空间保持不变，请检查备份文件或保存位置后重试。";
+            else if (r.value("activationUncertain").toBool()) {
+                m_recoveryAvailable=false;
+                message="恢复切换已写入，但磁盘同步未能确认。原目录和恢复目录均保留；请关闭应用后重新打开确认当前空间。";
+            } else message+="。当前笔记空间保持不变，请检查备份文件或保存位置后重试。";
             m_status="操作未完成";m_transition=false;m_afterSave={};emit changed();emit libraryOperationFailed(message);return;
         }
-        report(r); if (m_restoreWorkspace) { m_restoreWorkspace = false; m_error.prepend("上次工作区无法恢复，请重新选择笔记库。"); } m_transition = false; m_afterSave = {}; emit changed(); return;
+        auto failure = r;
+        if (op == "save" && p.revision != m_revision && failure.contains("recoveryDurable")) failure.insert("recoveryDurable", false);
+        report(failure);
+        if (op == "save" && p.revision != m_revision && !m_session->composing()) m_autosave.start();
+        if (m_restoreWorkspace) { m_restoreWorkspace = false; m_error.prepend("笔记空间未能打开，请重试打开或从完整备份恢复。"); }
+        m_transition = false; m_afterSave = {}; emit changed(); return;
     }
     if(op=="undo" || op=="redo") {
         QString target;
@@ -379,6 +409,13 @@ void NotesController::receive(quint64 id, const QString &op, const QVariantMap &
     if(op == "backup" || op == "restoreBackup") {
         m_backupResult=r;m_error.clear();
         if(op=="restoreBackup") {
+            if (recoveredLibrary) {
+                m_library = r.value("library").toString(); m_generation = r.value("generation").toULongLong();
+                setPreference("lastLibrary", r.value("entryRoot", m_library));
+            }
+            m_recoveryAvailable=false;m_recovery.clear();m_attachments.clear();m_batchReport.clear();m_undoState.clear();
+            m_tagPlan.clear();m_smartFolders.clear();m_linkCandidates.clear();m_importHistory.clear();
+            setPreference("lastNote", QVariantMap{});
             ++m_epoch;m_path.clear();m_selectedId.clear();m_base.clear();m_revision=m_savedRevision=0;
             m_history.clear();m_historyIndex=-1;m_historyTarget=-1;m_conflict=false;m_readOnly=false;
             m_query.clear();m_filter="all";++m_searchSerial;m_importPlan.clear();m_importReport.clear();
@@ -389,7 +426,12 @@ void NotesController::receive(quint64 id, const QString &op, const QVariantMap &
         emit changed();emit backupFinished();return;
     }
     if (op == "imports") { m_importHistory = r.value("items").toList(); emit changed(); return; }
-    if (op == "exportNotes") { m_status = QString("已导出 %1 篇笔记").arg(r.value("count").toInt()); emit changed();emit notesExported(QUrl::fromLocalFile(r.value("directory").toString()),r.value("count").toInt());return; }
+    if (op == "exportNotes") {
+        const auto warnings = r.value("warnings").toList();
+        m_status = QString("已导出 %1 篇笔记").arg(r.value("count").toInt());
+        if (!warnings.isEmpty()) m_status += " · 部分链接需检查";
+        emit changed(); emit notesExported(QUrl::fromLocalFile(r.value("directory").toString()), r.value("count").toInt(), warnings); return;
+    }
     if(QStringList{"knowledge","history","historyVersion","resolveWiki","createWiki"}.contains(op) && (p.epoch!=m_epoch||p.path!=m_path))return;
     if(op=="templates"||op=="templateSave"||op=="templateDelete"){m_templates=r.value("templates").toMap();emit changed();return;}
     if(op=="fromTemplate"||op=="dailyNote"){m_query.clear();m_filter="all";++m_searchSerial;load(r.value("path").toString());refresh();return;}
@@ -449,6 +491,7 @@ void NotesController::receive(quint64 id, const QString &op, const QVariantMap &
         return;
     }
     if (op == "importAttachment") {
+        emit changed(); // Publish the owned-asset context before the editor requests it.
         emit attachmentReady(p.args.value("request").toString(), p.args.value("webEpoch").toInt(), r);
         if (p.epoch == m_epoch) m_status = "附件已导入笔记库";
         emit changed(); return;
@@ -470,7 +513,9 @@ void NotesController::receive(quint64 id, const QString &op, const QVariantMap &
         m_applying = true; m_session->loadPrototype({}); m_applying = false;
         applyListing(r); m_status = r.value("initializationNotice").toString();
         if (m_status.isEmpty()) m_status = "请选择笔记";
-        setPreference("lastLibrary", m_library);
+        m_recoveryAvailable = false;
+        m_managedAssets = r.value("managedAssets").toBool(); m_assetManifest = r.value("assetManifest").toMap();
+        setPreference("lastLibrary", r.value("entryRoot", m_library));
         // Startup needs draft locks and recovery metadata, not every retained
         // version's full body. Opening recovery explicitly loads those previews.
         send("recovery", {{"includeCommitText", false}}); refresh();
@@ -508,7 +553,7 @@ void NotesController::receive(quint64 id, const QString &op, const QVariantMap &
         QSettings().setValue(positionKey(), position);
         recordActiveDocument();
         m_savedRevision = p.revision; // Never setPlainText here: preserve IME, cursor and undo.
-        m_status = dirty() ? "已修改 · 正在保存后续输入" : "已保存"; m_error.clear();
+        m_status = dirty() ? "已修改 · 正在保存后续输入" : r.value("recoveryCleanupFailed").toBool() ? "已保存 · 旧恢复草稿未能清理，可在恢复中心检查" : "已保存"; m_error.clear();
         if (dirty()) { if (!m_session->composing()) save(); } else { refresh(); send("recovery", {{"includeCommitText", m_recoveryVisible}}); advance(); }
     } else if (op == "read" || op == "create") {
         // A clean reload can race with typing while the response is in flight.
@@ -518,6 +563,7 @@ void NotesController::receive(quint64 id, const QString &op, const QVariantMap &
         m_selectedId = r.value("id").toString(); m_favorite = r.value("favorite").toBool();
         for (const auto &v : m_notes) if (v.toMap().value("path").toString() == m_path) m_selectedId = v.toMap().value("id").toString();
         m_readOnly = r.value("readOnly").toBool(); m_conflict = false; m_error.clear();
+        emit changed(); // Set resource scope before publishing the new document.
         m_applying = true; m_session->loadPrototype(p.args.contains("recoverText") ? p.args.value("recoverText").toString() : r.value("text").toString()); m_applying = false;
         m_revision = m_savedRevision = 0;
         if (p.args.contains("recoverText")) { ++m_revision; m_conflict = p.args.value("recoverBase").toString() != m_base; }
@@ -567,6 +613,7 @@ void NotesController::receive(quint64 id, const QString &op, const QVariantMap &
         // The original recovery remains available. Explicit Save Copy resolves this
         // buffer by explicitly opening the new identity; original draft is retained.
         m_path = r.value("path").toString(); m_base = r.value("baseHash").toString(); ++m_epoch;
+        emit changed(); // Publish the copied document's resource scope first.
         m_applying = true; m_session->loadPrototype(r.value("text").toString()); m_applying = false;
         m_revision = m_savedRevision = 0; m_conflict = false; m_readOnly = false; m_error.clear();
         applyListing(r.value("listing").toMap());
@@ -585,13 +632,13 @@ void NotesController::receive(quint64 id, const QString &op, const QVariantMap &
         if (m_recoveryVisible && !p.args.value("includeCommitText", true).toBool()) { inspectRecovery(); return; }
         m_recovery = r;
         QVariantList drafts;
-        for (const auto &v : r.value("drafts").toList()) { auto d = v.toMap(); d.insert("durable", true); drafts.append(d); }
+        for (const auto &v : r.value("drafts").toList()) { auto d = v.toMap(); d.insert("durable", d.value("recoveryDurable", true)); drafts.append(d); }
         for (const auto &v : r.value("memoryDrafts").toList()) {
             auto d = v.toMap(); bool found = false;
             for (auto &stored : drafts) {
                 auto existing = stored.toMap();
                 if (existing.value("path") != d.value("path")) continue;
-                d.insert("durable", existing.value("text") == d.value("text") && existing.value("baseHash") == d.value("baseHash"));
+                d.insert("durable", existing.value("durable").toBool() && existing.value("text") == d.value("text") && existing.value("baseHash") == d.value("baseHash"));
                 d.insert("matchesBase", existing.value("matchesBase")); stored = d; found = true; break;
             }
             if (!found) { d.insert("durable", false); drafts.append(d); }
@@ -607,7 +654,11 @@ void NotesController::receive(quint64 id, const QString &op, const QVariantMap &
                 }
         }
     }
-    else if (op == "checkpoint") { if (m_conflict) m_error = "外部版本已改变；本地恢复草稿已保存。请另存副本，或在恢复中心保留双方版本。"; }
+    else if (op == "checkpoint") {
+        if (m_conflict) m_error = r.value("recoveryDurable").toBool()
+            ? "外部版本已改变；本地恢复草稿已保存。请另存副本，或在恢复中心保留双方版本。"
+            : "本地输入仍在内存中，恢复草稿尚未落盘。请保持窗口打开并另存或重试。";
+    }
     else if (op == "createFolder") { const auto path=p.args.value("path").toString();m_status="文件夹已创建";selectCategory("folder:"+path);emit folderCreated(path); }
     else if (op == "favorite" || op == "restore" || op == "discardDraft") { if (op == "favorite" && p.path == m_path) m_favorite = p.args.value("favorite").toBool(); refresh(); inspectRecovery(); }
     emit changed();

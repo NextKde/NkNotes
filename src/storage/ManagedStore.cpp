@@ -1,4 +1,7 @@
 #include "ManagedStore.h"
+#include "ManagedLibrary.h"
+#include "ManagedAssets.h"
+#include "RepositoryTestHooks.h"
 #include "MarkdownFile.h"
 #include "KnowledgeIndex.h"
 #include <sqlite3.h>
@@ -15,19 +18,29 @@
 #include <QUrl>
 #include <QUuid>
 #include <QMimeDatabase>
-#include <QLockFile>
 #include <algorithm>
 #include <QTemporaryDir>
 #include <QElapsedTimer>
 #include <QThread>
 #include <QSet>
-#ifdef Q_OS_LINUX
-#include <sys/file.h>
-#include <cerrno>
-#endif
+#include <QMap>
 
 namespace {
-struct StoreError { QString code, detail; };
+using StoreError = ManagedStoreError;
+using Database = std::unique_ptr<sqlite3, decltype(&sqlite3_close)>;
+Database openDatabase(const QString &path, int flags);
+void copyDatabase(sqlite3 *destination, sqlite3 *source);
+void streamCopy(const QString &source, const QString &destination);
+void failAt(const QString &stage) {
+    if (RepositoryTestHooks::managedFailure && RepositoryTestHooks::managedFailure(stage))
+        throw StoreError{"writeFailed", stage};
+}
+void recoveryStage(const QString &stage) {
+    if (RepositoryTestHooks::managedRecoveryStage) RepositoryTestHooks::managedRecoveryStage(stage);
+}
+void externalStage(const QString &stage) {
+    if (RepositoryTestHooks::externalSaveStage) RepositoryTestHooks::externalSaveStage(stage);
+}
 QString uid() { return QUuid::createUuid().toString(QUuid::WithoutBraces); }
 QString utc() { return QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs); }
 QString hashText(const QString &text) { return MarkdownFile::digest(text.toUtf8()); }
@@ -37,9 +50,33 @@ QString parentFolder(const QString &path) { const auto folder = QFileInfo(path).
 QString relativeManagedPath(const QString &source, const QString &target) {
     return QDir("/" + parentFolder(source)).relativeFilePath("/" + target);
 }
+QString relativeManagedUrl(const QString &source, const QString &target, const QUrl &original) {
+    QString result=QString::fromUtf8(QUrl::toPercentEncoding(relativeManagedPath(source,target),"/"));
+    if(original.hasQuery())result+='?'+original.query(QUrl::FullyEncoded);
+    if(original.hasFragment())result+='#'+original.fragment(QUrl::FullyEncoded);
+    return result;
+}
+// Export supports the same Markdown spans as LinkPaths. Hide complete raw HTML
+// opening tags while rewriting those spans, then restore the tags byte-for-byte.
+// HTML resources remain unsupported and are explicitly reported to the caller.
+bool rewriteExportLinks(QString &text, const std::function<QString(const QString &,bool)> &map) {
+    static const QRegularExpression htmlTag(R"rx(<(?:a|img|source)\b(?:[^<>"']|"[^"]*"|'[^']*')*>)rx",QRegularExpression::CaseInsensitiveOption);
+    QString prefix;do {prefix="NKNOTES_HTML_"+uid()+'_';}while(text.contains(prefix));
+    QList<QPair<QString,QString>> hidden;
+    QList<QRegularExpressionMatch> matches;
+    auto found=htmlTag.globalMatch(LinkPaths::masked(text));while(found.hasNext())matches.append(found.next());
+    for(auto it=matches.crbegin();it!=matches.crend();++it) {
+        const auto marker=prefix+QString::number(hidden.size())+'_';
+        hidden.append({marker,text.mid(it->capturedStart(),it->capturedLength())});
+        text.replace(it->capturedStart(),it->capturedLength(),marker);
+    }
+    const bool supported=LinkPaths::rewrite(text,map);
+    for(const auto &entry:hidden)text.replace(entry.first,entry.second);
+    return supported&&hidden.isEmpty();
+}
 bool validPath(const QString &path, bool empty = false) {
     if (path.isEmpty()) return empty;
-    if (QDir::isAbsolutePath(path) || path.contains('\\') || path.contains(QChar::Null)) return false;
+    if (QDir::isAbsolutePath(path) || path.startsWith("external:") || path.contains('\\') || path.contains(QChar::Null)) return false;
     for (const auto &part : path.split('/')) if (part.isEmpty() || part == "." || part == ".." || part == ".nextnotes" || part == ".git") return false;
     return true;
 }
@@ -71,6 +108,7 @@ struct ManagedStore::Impl {
     struct Command { QString label; QList<Change> changes; QString primaryId; };
     QList<Command> undoStack, redoStack;
     QString initializationNotice;
+    int cacheFailures = 0;
     void initializeFolderMetadata() {
         QSet<QString> columns;
         for (const auto &v : query("PRAGMA table_info(folders)"))
@@ -94,12 +132,88 @@ struct ManagedStore::Impl {
     std::shared_ptr<std::atomic_bool> cancelled;
     bool stopping() const { return cancelled && cancelled->load(); }
     void notify(const QString &phase, int done, int total = 0) { if (progress) progress({{"phase",phase},{"completed",done},{"total",total}}); }
-    QString root;
+    QString root, configuredRoot;
+    std::unique_ptr<ManagedLibrary> library;
+    QVariantMap openError;
     Knowledge::Index index;
     QHash<QString, MarkdownFile::Document> external;
-    std::unique_ptr<QLockFile> lock;
-    std::unique_ptr<QFile> instanceLock;
+    // Contains only the newest request for each path, including failed commits.
+    QHash<QString, QVariantMap> memoryDrafts;
+    QVariantMap assetManifest;
+    bool manifestDirty = true;
     ~Impl() { if (db) sqlite3_close(db); }
+    void initializeDatabase();
+    void preflight();
+    void validateDatabase(bool backup, bool legacy = false);
+    void prepareBackup(const QString &source, const QString &snapshot);
+    QVariantMap recoverInitialization(const QVariantMap &a);
+    QVariantMap checkpoint(const QVariantMap &a);
+    QVariantMap discardDraft(const QString &path);
+    QVariantMap saveExternal(const QVariantMap &a);
+    QVariantList recoveryDrafts();
+    bool hasPendingMemoryDrafts() const {
+        for (const auto &draft : memoryDrafts) if (!draft.value("recoveryDurable").toBool()) return true;
+        return false;
+    }
+    QString checkedCachePath(const QString &relative) const {
+        require(validPath(relative) && relative.startsWith("assets/"), "unsafePath", relative);
+        QString current = root;
+        require(QFileInfo(root).canonicalFilePath() == root && !QFileInfo(root).isSymLink(), "unsafePath", root);
+        const auto parts = relative.split('/');
+        for (qsizetype i = 0; i < parts.size(); ++i) {
+            current += '/' + parts[i];
+            const QFileInfo info(current);
+            require(!info.isSymLink() && (!info.exists() || (info.canonicalFilePath() == current
+                && (i + 1 < parts.size() ? info.isDir() : info.isFile()))), "unsafePath", current);
+        }
+        return current;
+    }
+    const QVariantMap &managedManifest() {
+        if (manifestDirty) {
+            QVariantMap next;
+            for (const auto &v : query("SELECT path,data FROM assets WHERE deleted=''")) {
+                const auto row=v.toMap();const auto path=row.value("path").toString(),digest=ManagedAssets::digestForPath(path);
+                require(!digest.isEmpty() && row.value("data").metaType().id()==QMetaType::QByteArray
+                    && row.value("data").toByteArray().size()<=ManagedAssets::MaxBytes
+                    && MarkdownFile::digest(row.value("data").toByteArray())==digest,"databaseCorrupt","Invalid asset identity");
+                next.insert(path,digest);
+            }
+            assetManifest = std::move(next); manifestDirty = false;
+        }
+        return assetManifest;
+    }
+    QString attachmentIdentity(const QString &source, QUrl url) {
+        if(!validPath(source))return {};
+        url.setQuery(QString());url.setFragment(QString());
+        return ManagedAssets::resolveIdentity({root,QUrl::fromLocalFile(root+'/'+source),managedManifest(),true},url);
+    }
+    QStringList attachmentReferenceTexts() {
+        QStringList texts;
+        // Old history/drafts do not record their original document base. Digest
+        // references deliberately over-protect; they never dereference a path.
+        for(const auto &v:query("SELECT text FROM notes UNION ALL SELECT text FROM versions UNION ALL SELECT text FROM drafts"))
+            texts.append(v.toMap().value("text").toString());
+        const auto templates=settings("templates");for(const auto &value:templates)texts.append(value.toString());
+        for(const auto &draft:memoryDrafts)texts.append(draft.value("text").toString());
+        for(const auto *stack:{&undoStack,&redoStack})for(const auto &command:*stack)for(const auto &change:command.changes) {
+            texts.append(change.before.value("text").toString());texts.append(change.after.value("text").toString());
+        }
+        for(auto &text:texts)if(text.contains('%'))text+='\n'+QUrl::fromPercentEncoding(text.toUtf8());
+        return texts;
+    }
+    int attachmentReferences(const QString &path,const QStringList &texts) const {
+        const auto digest=ManagedAssets::digestForPath(path);int count=0;
+        for(const auto &text:texts)if(text.contains(path)||(!digest.isEmpty()&&text.contains(digest)))++count;
+        return count;
+    }
+    void addContext(QVariantMap &result) {
+        result.insert("cacheFailures", cacheFailures);
+        result.insert("assetManifest", managedManifest());
+        result.insert("managedAssets", !result.value("path").toString().startsWith("external:"));
+        if (!result.value("managedAssets").toBool()) result.insert("assetManifest", QVariantMap());
+        result.insert("library", root);
+        result.insert("entryRoot", library ? library->entryRoot() : configuredRoot);
+    }
     QVariantList query(const QString &sql, const QVariantList &args = {}) {
         sqlite3_stmt *raw = nullptr;
         const auto statement = sql.toUtf8();
@@ -220,9 +334,11 @@ struct ManagedStore::Impl {
         for(const auto &v:query("SELECT * FROM notes")) {
             auto n=v.toMap(); const auto old=n["path"].toString(),next=moved.value(old,old);QString text=n["text"].toString();
             const bool rewritable=LinkPaths::rewrite(text,[&](const QString &target,bool wiki){if(wiki){auto paths=index.resolve(old,target,true);if(paths.size()!=1)return target;const auto destination=moved.value(paths[0],paths[0]);if(next==old&&destination==paths[0])return target;return relativeManagedPath(next,destination);}
-                const auto resolved=LinkPaths::resolve(old,target);if(resolved.isEmpty())return target;
+                const QUrl url(target);const auto identity=attachmentIdentity(old,url);
+                if(identity.isEmpty()&&url.path(QUrl::FullyDecoded).split('/').contains("assets"))return target;
+                const auto resolved=identity.isEmpty()?LinkPaths::resolve(old,target):identity;if(resolved.isEmpty())return target;
                 const auto destination=moved.value(resolved,resolved);if(next==old&&destination==resolved)return target;
-                QUrl url(target);const auto fragment=url.fragment(QUrl::FullyEncoded),queryString=url.query(QUrl::FullyEncoded);QString result=relativeManagedPath(next,destination);result=QString::fromUtf8(QUrl::toPercentEncoding(result,"/"));if(!queryString.isEmpty())result+='?'+queryString;if(!fragment.isEmpty())result+='#'+fragment;return result;});
+                return relativeManagedUrl(next,destination,url);});
             require(rewritable,"unsupportedLinks",old);
             if(text!=n["text"].toString())updateText(n,text);
         }
@@ -245,23 +361,33 @@ struct ManagedStore::Impl {
     QString asset(const QByteArray &bytes,const QString &name) {
         QString suffix=QFileInfo(name).suffix().toLower();if(!QRegularExpression("^[a-z0-9]{1,8}$").match(suffix).hasMatch())suffix="bin";
         const auto path="assets/"+MarkdownFile::digest(bytes)+'.'+suffix;
-        query("INSERT OR IGNORE INTO assets(path,data,name,deleted) VALUES(?,?,?,'')",{path,bytes,name});
+        query("INSERT INTO assets(path,data,name,deleted) VALUES(?,?,?,'') ON CONFLICT(path) DO UPDATE SET deleted=''",{path,bytes,name});
+        manifestDirty=true;
         // Materialized attachment cache is disposable; the BLOB is authoritative.
-        if(!QFileInfo::exists(root+'/'+path))writeBytes(root+'/'+path,bytes);return path;
+        const auto target=checkedCachePath(path);
+        if(!QFileInfo::exists(target))writeBytes(target,bytes);return path;
+    }
+    QString rebaseAttachments(QString text,const QString &source,const QString &destination) {
+        if(!validPath(source))return text;
+        rewriteExportLinks(text,[&](const QString &target,bool wiki){
+            if(wiki)return target;const QUrl url(target);const auto owned=attachmentIdentity(source,url);
+            return owned.isEmpty()?target:relativeManagedUrl(destination,owned,url);
+        });
+        return text;
     }
     QString rebaseText(QString text,const QString &source,const QString &destination) {
         refreshIndex();
         require(LinkPaths::rewrite(text,[&](const QString &target,bool wiki){
             QString resolved;
             if(wiki) { const auto choices=index.resolve(source,target,true);if(choices.size()!=1)return target;resolved=choices[0]; }
-            else resolved=LinkPaths::resolve(source,target);
+            else {
+                const QUrl url(target);resolved=attachmentIdentity(source,url);
+                if(resolved.isEmpty()&&url.path(QUrl::FullyDecoded).split('/').contains("assets"))return target;
+                if(resolved.isEmpty())resolved=LinkPaths::resolve(source,target);
+            }
             if(resolved.isEmpty())return target;
-            auto next=relativeManagedPath(destination,resolved);
-            if(wiki)return next;
-            const QUrl url(target);next=QString::fromUtf8(QUrl::toPercentEncoding(next,"/"));
-            if(!url.query().isEmpty())next+='?'+url.query(QUrl::FullyEncoded);
-            if(!url.fragment().isEmpty())next+='#'+url.fragment(QUrl::FullyEncoded);
-            return next;
+            if(wiki)return relativeManagedPath(destination,resolved);
+            return relativeManagedUrl(destination,resolved,QUrl(target));
         }),"unsupportedLinks");
         return text;
     }
@@ -273,44 +399,187 @@ struct ManagedStore::Impl {
     QVariantMap restoreBackup(const QVariantMap &a);
 };
 
-ManagedStore::ManagedStore(const QString &directory) : d(std::make_unique<Impl>()) {
-    d->root=QDir(directory).absolutePath();
-    require(QDir().mkpath(d->root),"metadataUnavailable",d->root);
-#ifdef Q_OS_LINUX
-    {
-        // Flatpak may reuse PID 2 for each launch. A persistent PID lock then
-        // mistakes a crashed predecessor for this live process. flock follows
-        // the open file description, survives namespace boundaries and is
-        // released by the kernel even on SIGKILL. Never unlink this lock inode.
-        d->instanceLock = std::make_unique<QFile>(d->root + "/managed.instance.lock");
-        require(d->instanceLock->open(QIODevice::ReadWrite), "metadataUnavailable");
-        int result;
-        do { result = flock(d->instanceLock->handle(), LOCK_EX | LOCK_NB); } while (result < 0 && errno == EINTR);
-        require(result == 0, "libraryLocked");
+ManagedStore::ManagedStore(const QString &directory, bool retainInitializationFailure) : d(std::make_unique<Impl>()) {
+    d->configuredRoot = QDir(directory).absolutePath();
+    d->root = d->configuredRoot;
+    try {
+        d->library = std::make_unique<ManagedLibrary>(directory);
+        d->root = d->library->activeRoot();
+        d->preflight();
+        d->initializeDatabase();
+    } catch (const StoreError &error) {
+        if (!retainInitializationFailure) throw;
+        if (d->db) { sqlite3_close(d->db); d->db = nullptr; }
+        d->openError = {{"ok", false}, {"error", error.code}, {"detail", error.detail},
+            {"entryRoot", d->configuredRoot}, {"failedDirectory", d->root},
+            {"recoveryAvailable", bool(d->library) && error.code != "libraryLocked"}};
     }
-    // Keep the legacy native lock as well for compatibility with older builds.
-    if (!QFileInfo::exists("/.flatpak-info"))
-#endif
-    {
-        d->lock=std::make_unique<QLockFile>(d->root+"/managed.lock");d->lock->setStaleLockTime(0);require(d->lock->tryLock(),"libraryLocked");
-    }
-    require(sqlite3_open_v2(QFile::encodeName(d->root+"/notes.sqlite3").constData(),&d->db,SQLITE_OPEN_READWRITE|SQLITE_OPEN_CREATE|SQLITE_OPEN_FULLMUTEX,nullptr)==SQLITE_OK,"databaseError");
-    sqlite3_busy_timeout(d->db,5000);
-    d->query("PRAGMA journal_mode=WAL");d->query("PRAGMA synchronous=FULL");d->query("PRAGMA foreign_keys=ON");
-    require(d->one("PRAGMA user_version").value("user_version").toInt()<=1,"databaseVersion","This database was created by a newer version.");
-    d->query("CREATE TABLE IF NOT EXISTS notes(id TEXT PRIMARY KEY,path TEXT NOT NULL UNIQUE,text TEXT NOT NULL,hash TEXT NOT NULL,created TEXT NOT NULL,modified TEXT NOT NULL,pinned INTEGER NOT NULL DEFAULT 0,favorite INTEGER NOT NULL DEFAULT 0,deleted TEXT NOT NULL DEFAULT '',trash_token TEXT NOT NULL DEFAULT '',source TEXT NOT NULL DEFAULT '',source_hash TEXT NOT NULL DEFAULT '',import_batch TEXT NOT NULL DEFAULT '')");
-    d->query("CREATE TABLE IF NOT EXISTS folders(id TEXT PRIMARY KEY,path TEXT NOT NULL UNIQUE,deleted TEXT NOT NULL DEFAULT '',trash_token TEXT NOT NULL DEFAULT '',icon TEXT NOT NULL DEFAULT 'folder')");
-    d->initializeFolderMetadata();
-    d->query("CREATE TABLE IF NOT EXISTS drafts(path TEXT PRIMARY KEY,text TEXT NOT NULL,base_hash TEXT NOT NULL,time TEXT NOT NULL)");
-    d->query("CREATE TABLE IF NOT EXISTS versions(note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,hash TEXT NOT NULL,text TEXT NOT NULL,time TEXT NOT NULL,PRIMARY KEY(note_id,hash))");
-    d->query("CREATE TABLE IF NOT EXISTS assets(path TEXT PRIMARY KEY,data BLOB NOT NULL,name TEXT NOT NULL,deleted TEXT NOT NULL DEFAULT '')");
-    d->query("CREATE TABLE IF NOT EXISTS imports(id TEXT PRIMARY KEY,name TEXT NOT NULL,time TEXT NOT NULL,report BLOB NOT NULL)");
-    d->query("CREATE TABLE IF NOT EXISTS settings(kind TEXT NOT NULL,name TEXT NOT NULL,value BLOB NOT NULL,PRIMARY KEY(kind,name))");
-    d->query("CREATE INDEX IF NOT EXISTS notes_source ON notes(source,source_hash)");d->query("CREATE INDEX IF NOT EXISTS notes_state ON notes(deleted,modified)");d->query("PRAGMA user_version=1");
-    d->initializeFolders();
-    d->initializeUndo();
-    for(const auto &v:d->query("SELECT path FROM assets WHERE deleted=''")){const auto path=v.toMap()["path"].toString();if(!QFileInfo::exists(d->root+'/'+path))writeBytes(d->root+'/'+path,d->one("SELECT data FROM assets WHERE path=?",{path})["data"].toByteArray());}
 }
+void ManagedStore::Impl::initializeDatabase() {
+    require(sqlite3_open_v2(QFile::encodeName(root+"/notes.sqlite3").constData(),&db,SQLITE_OPEN_READWRITE|SQLITE_OPEN_CREATE|SQLITE_OPEN_FULLMUTEX,nullptr)==SQLITE_OK,"databaseError");
+    sqlite3_busy_timeout(db,5000);
+    query("PRAGMA trusted_schema=OFF");
+    query("PRAGMA journal_mode=WAL");query("PRAGMA synchronous=FULL");query("PRAGMA foreign_keys=ON");
+    require(one("PRAGMA user_version").value("user_version").toInt()<=1,"databaseVersion","This database was created by a newer version.");
+    query("CREATE TABLE IF NOT EXISTS notes(id TEXT PRIMARY KEY,path TEXT NOT NULL UNIQUE,text TEXT NOT NULL,hash TEXT NOT NULL,created TEXT NOT NULL,modified TEXT NOT NULL,pinned INTEGER NOT NULL DEFAULT 0,favorite INTEGER NOT NULL DEFAULT 0,deleted TEXT NOT NULL DEFAULT '',trash_token TEXT NOT NULL DEFAULT '',source TEXT NOT NULL DEFAULT '',source_hash TEXT NOT NULL DEFAULT '',import_batch TEXT NOT NULL DEFAULT '')");
+    query("CREATE TABLE IF NOT EXISTS folders(id TEXT PRIMARY KEY,path TEXT NOT NULL UNIQUE,deleted TEXT NOT NULL DEFAULT '',trash_token TEXT NOT NULL DEFAULT '',icon TEXT NOT NULL DEFAULT 'folder')");
+    initializeFolderMetadata();
+    query("CREATE TABLE IF NOT EXISTS drafts(path TEXT PRIMARY KEY,text TEXT NOT NULL,base_hash TEXT NOT NULL,time TEXT NOT NULL)");
+    query("CREATE TABLE IF NOT EXISTS versions(note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,hash TEXT NOT NULL,text TEXT NOT NULL,time TEXT NOT NULL,PRIMARY KEY(note_id,hash))");
+    query("CREATE TABLE IF NOT EXISTS assets(path TEXT PRIMARY KEY,data BLOB NOT NULL,name TEXT NOT NULL,deleted TEXT NOT NULL DEFAULT '')");
+    query("CREATE TABLE IF NOT EXISTS imports(id TEXT PRIMARY KEY,name TEXT NOT NULL,time TEXT NOT NULL,report BLOB NOT NULL)");
+    query("CREATE TABLE IF NOT EXISTS settings(kind TEXT NOT NULL,name TEXT NOT NULL,value BLOB NOT NULL,PRIMARY KEY(kind,name))");
+    query("CREATE INDEX IF NOT EXISTS notes_source ON notes(source,source_hash)");query("CREATE INDEX IF NOT EXISTS notes_state ON notes(deleted,modified)");query("PRAGMA user_version=1");
+    query("PRAGMA application_id=1313558065");
+    initializeFolders();
+    initializeUndo();
+    cacheFailures=0;
+    for(const auto &v:query("SELECT path,data FROM assets WHERE deleted=''")) {
+        const auto row=v.toMap();
+        try {
+            const auto target=checkedCachePath(row["path"].toString());
+            if(!QFileInfo::exists(target)) { failAt("cacheWrite"); writeBytes(target,row["data"].toByteArray()); }
+        } catch(const StoreError &) { ++cacheFailures; }
+    }
+    if(cacheFailures>0) {
+        if(!initializationNotice.isEmpty())initializationNotice+='\n';
+        initializationNotice+="部分附件缓存未能生成，原件仍保留在数据库中。请检查磁盘空间与权限后重新打开。";
+    }
+}
+void ManagedStore::Impl::validateDatabase(bool backup, bool legacy) {
+    query("PRAGMA trusted_schema=OFF");
+    const auto version = one("PRAGMA user_version").value("user_version").toInt();
+    require(version <= 1, backup ? "invalidBackup" : "databaseVersion", "This database was created by a newer version.");
+    require(version == 1 || (legacy && version == 0), backup ? "invalidBackup" : "databaseCorrupt");
+    const auto application = one("PRAGMA application_id").value("application_id").toInt();
+    require(application == 1313558065 || (!backup && application == 0), "databaseCorrupt", "Unrecognized database application ID");
+    const auto check = query("PRAGMA quick_check");
+    require(check.size() == 1 && check.first().toMap().value("quick_check").toString() == "ok", "databaseCorrupt");
+    require(query("PRAGMA foreign_key_check").isEmpty(), "databaseCorrupt");
+    const QMap<QString, QStringList> required{
+        {"notes", QString("id,path,text,hash,created,modified,pinned,favorite,deleted,trash_token,source,source_hash,import_batch").split(',')},
+        {"folders", QString("id,path,deleted,trash_token").split(',')},
+        {"drafts", QString("path,text,base_hash,time").split(',')},
+        {"versions", QString("note_id,hash,text,time").split(',')},
+        {"assets", QString("path,data,name,deleted").split(',')},
+        {"imports", QString("id,name,time,report").split(',')},
+        {"settings", QString("kind,name,value").split(',')}
+    };
+    QSet<QString> tables;
+    for (const auto &v : query("SELECT name,type,tbl_name,sql FROM sqlite_master WHERE name NOT GLOB 'sqlite_*'")) {
+        const auto row = v.toMap(); const auto name = row.value("name").toString();
+        if (row.value("type") == "index") {
+            require(required.contains(row.value("tbl_name").toString()), "databaseCorrupt"); continue;
+        }
+        require(row.value("type") == "table" && required.contains(name)
+                && QRegularExpression("^CREATE\\s+TABLE\\s", QRegularExpression::CaseInsensitiveOption).match(row.value("sql").toString()).hasMatch(), "databaseCorrupt");
+        tables.insert(name);
+    }
+    // Only the documented version-zero, folder-only legacy store is partial.
+    const bool partialLegacy = legacy && version == 0 && (tables.isEmpty() || tables == QSet<QString>{"folders"});
+    require(partialLegacy || tables.size() == required.size(), "databaseCorrupt", "Missing managed tables");
+    const QMap<QString,QStringList> primaryKeys{{"notes",{"id"}},{"folders",{"id"}},{"drafts",{"path"}},
+        {"versions",{"note_id","hash"}},{"assets",{"path"}},{"imports",{"id"}},{"settings",{"kind","name"}}};
+    for (const auto &table : tables) {
+        QSet<QString> columns;
+        QMap<int,QString> keyColumns;
+        const auto optional = table == "folders" ? QStringList{"icon", "sort_order", "created"} : QStringList();
+        for (const auto &v : query("PRAGMA table_xinfo(" + table + ')')) {
+            const auto column = v.toMap(); const auto name = column.value("name").toString();
+            require(column.value("hidden").toInt() == 0 && (required.value(table).contains(name) || optional.contains(name)), "databaseCorrupt", table);
+            columns.insert(name);
+            if(column.value("pk").toInt()>0)keyColumns.insert(column.value("pk").toInt(),name);
+        }
+        require(keyColumns.values()==primaryKeys.value(table),"databaseCorrupt","Invalid primary key: "+table);
+        for (const auto &column : required.value(table)) require(columns.contains(column), "databaseCorrupt", table + '.' + column);
+        query("SELECT " + required.value(table).join(',') + " FROM " + table + " LIMIT 0");
+        if(table=="notes" || table=="folders") {
+            bool uniquePath=false;
+            for(const auto &v:query("PRAGMA index_list("+table+')')) {
+                const auto index=v.toMap();if(!index.value("unique").toBool() || index.value("partial").toBool())continue;
+                const auto fields=query("SELECT name FROM pragma_index_info(?)",{index.value("name")});
+                if(fields.size()==1 && fields.first().toMap().value("name")=="path")uniquePath=true;
+            }
+            require(uniquePath,"databaseCorrupt","Missing unique path: "+table);
+        }
+        if(table=="versions") {
+            query("SELECT rowid FROM versions LIMIT 0");
+            const auto keys=query("PRAGMA foreign_key_list(versions)");
+            require(keys.size()==1 && keys.first().toMap().value("table")=="notes" && keys.first().toMap().value("from")=="note_id"
+                && keys.first().toMap().value("to")=="id" && keys.first().toMap().value("on_delete")=="CASCADE","databaseCorrupt","Invalid version ownership");
+        }
+    }
+    for (const auto &table : {QString("notes"), QString("folders"), QString("drafts")}) {
+        if (!tables.contains(table)) continue;
+        for (const auto &v : query("SELECT path FROM " + table)) {
+            const auto path = v.toMap().value("path").toString();
+            bool valid = validPath(path);
+            if (table == "drafts" && path.startsWith("external:"))
+                valid = QDir::isAbsolutePath(path.mid(9)) && !path.contains(QChar::Null) && !path.contains('\n') && !path.contains('\r');
+            require(valid, "databaseCorrupt", "Invalid stored path");
+        }
+    }
+    if (tables.contains("assets")) {
+        static const QRegularExpression identity("^assets/([0-9a-f]{64})\\.[a-z0-9]{1,8}$");
+        for (const auto &v : query("SELECT path,data FROM assets")) {
+            const auto row = v.toMap(); const auto match = identity.match(row.value("path").toString());
+            require(match.hasMatch() && row.value("data").metaType().id() == QMetaType::QByteArray
+                    && row.value("data").toByteArray().size() <= 32 * 1024 * 1024
+                    && match.captured(1) == MarkdownFile::digest(row.value("data").toByteArray()), "databaseCorrupt", "Invalid asset identity");
+        }
+    }
+}
+void ManagedStore::Impl::preflight() {
+    const auto file = root + "/notes.sqlite3";
+    if (!QFileInfo::exists(file) && !QFileInfo(file).isSymLink()) {
+        require(!QFileInfo::exists(file + "-wal") && !QFileInfo::exists(file + "-shm")
+                && !QFileInfo(file + "-wal").isSymLink() && !QFileInfo(file + "-shm").isSymLink(), "databaseCorrupt", "Database is missing but sidecars remain");
+        return;
+    }
+    // Even SQLITE_OPEN_READONLY can create/write shared-memory sidecars for a
+    // WAL database. Copy under our retained lease, and probe only the private
+    // snapshot. The original database, WAL and SHM are never opened by SQLite.
+    QTemporaryDir temporary; require(temporary.isValid(), "metadataUnavailable");
+    const auto snapshot = temporary.filePath("notes.sqlite3");
+    for (const auto &suffix : {QString(), QString("-wal"), QString("-shm"), QString("-journal")}) {
+        const auto source = file + suffix; const QFileInfo info(source);
+        require(!info.isSymLink() && (!info.exists() || info.isFile()), "unsafePath", source);
+        if (info.exists() && suffix != "-shm") streamCopy(source, snapshot + suffix);
+    }
+    try {
+        Impl inspection;
+        inspection.db = openDatabase(snapshot, SQLITE_OPEN_READWRITE).release();
+        inspection.query("PRAGMA query_only=ON");
+        inspection.validateDatabase(false, true);
+        inspection.query("PRAGMA query_only=OFF");
+        // Exercise legacy migrations before allowing them to touch the original.
+        if (inspection.one("PRAGMA user_version").value("user_version").toInt() == 1) {
+            inspection.initializeFolderMetadata(); inspection.initializeFolders();
+            inspection.listing();
+        }
+        if (!inspection.one("SELECT name FROM sqlite_master WHERE type='table' AND name='assets'").isEmpty())
+            for (const auto &asset : inspection.query("SELECT path FROM assets")) checkedCachePath(asset.toMap().value("path").toString());
+    } catch (const StoreError &error) {
+        if (error.code == "databaseVersion" || error.code == "unsafePath") throw;
+        throw StoreError{"databaseCorrupt", error.detail};
+    }
+}
+void ManagedStore::Impl::prepareBackup(const QString &source, const QString &snapshot) {
+    require(QFileInfo(source).isFile() && !QFileInfo(source).isSymLink(), "invalidBackup");
+    streamCopy(source, snapshot);
+    try {
+        Impl inspection;
+        inspection.db = openDatabase(snapshot, SQLITE_OPEN_READWRITE).release();
+        inspection.validateDatabase(true);
+        inspection.initializeFolderMetadata(); inspection.initializeFolders();
+        inspection.listing();
+        inspection.query("PRAGMA journal_mode=DELETE");
+    } catch (const StoreError &error) {
+        throw StoreError{"invalidBackup", error.detail.isEmpty() ? QStringLiteral("备份内容或结构无法读取") : error.detail};
+    }
+    recoveryStage("snapshotValidated");
+}
+
 void ManagedStore::Impl::initializeFolders() {
     const auto initialized = settings("initialization");
     if (initialized.value("defaultFolderCreated").toBool() && initialized.value("quickNotesFolderCreated").toBool()) return;
@@ -466,11 +735,38 @@ QVariantMap ManagedStore::Impl::applyHistory(bool redo) {
 }
 ManagedStore::~ManagedStore() = default;
 QString ManagedStore::directory() const { return d->root; }
+QString ManagedStore::entryRoot() const { return d->library ? d->library->entryRoot() : d->configuredRoot; }
+bool ManagedStore::hasPendingMemoryDrafts() const { return d->hasPendingMemoryDrafts(); }
+QVariantMap ManagedStore::initializationError() const { return d->openError; }
 QVariantMap ManagedStore::dispatch(const QString &op,const QVariantMap &a, std::function<void(const QVariantMap &)> progress, std::shared_ptr<std::atomic_bool> cancelled) {
     d->progress = std::move(progress); d->cancelled = std::move(cancelled);
+    if (!d->openError.isEmpty()) {
+        if (op == "restoreBackup" && d->openError.value("recoveryAvailable").toBool()) {
+            try { return d->recoverInitialization(a); }
+            catch (const StoreError &error) {
+                const bool uncertain = d->library && d->library->activationUncertain();
+                if (uncertain) d->openError = {{"ok",false},{"error","recoveryActivationUncertain"},{"recoveryAvailable",false},{"activationUncertain",true}};
+                return {{"ok",false},{"error",uncertain ? QString("recoveryActivationUncertain") : error.code},
+                    {"detail",error.detail},{"activationUncertain",uncertain},{"entryRoot",entryRoot()},
+                    {"preservedDirectory",d->root},{"recoveryAvailable",!uncertain}};
+            }
+        }
+        return d->openError;
+    }
     const bool outer=sqlite3_get_autocommit(d->db);
     try {
-        const bool ownTransaction = outer && op != "backup" && op != "restoreBackup" && op != "importNotes";
+        if (op == "restoreBackup" || op == "importNotes" || op == "rename" || op == "renameFolder" || op == "moveFolder" || op == "editFolder"
+                || op == "trash" || op == "trashFolder" || op == "purgeFolder" || op == "undo" || op == "redo"
+                || (op == "batch" && QStringList{"move","trash","purgeNotes"}.contains(a.value("action").toString())))
+            require(!hasPendingMemoryDrafts(), "pendingDrafts", "Persist or discard in-memory drafts before replacing or reorganizing the library.");
+        // These operations own independent draft transactions and must never be
+        // rolled back with the later external-file operation.
+        if (op == "checkpoint" || op == "discardDraft" || (op == "save" && a.value("path").toString().startsWith("external:"))) {
+            auto result = op == "checkpoint" ? d->checkpoint(a) : op == "discardDraft" ? d->discardDraft(a.value("path").toString()) : d->saveExternal(a);
+            result.insert("undoState", d->historyState());
+            result.insert("entryRoot", entryRoot()); return result;
+        }
+        const bool ownTransaction = outer && op != "backup" && op != "restoreBackup" && op != "importNotes" && op != "recovery";
         if(ownTransaction)d->query("BEGIN IMMEDIATE");
         const auto label=d->commandLabel(op,a);
         if(!label.isEmpty())d->beginCapture();
@@ -497,8 +793,105 @@ QVariantMap ManagedStore::dispatch(const QString &op,const QVariantMap &a, std::
         } else if(op=="clearRedo") d->redoStack.clear();
         else if(op=="importNotes" || op=="restoreBackup" || op=="purgeFolder" || (op=="trashBatch"&&a.value("action")=="purge")
                 || (op=="batch" && a.value("action")=="purgeNotes" && result.value("succeeded").toInt()>0)) {d->undoStack.clear();d->redoStack.clear();}
-        result.insert("undoState",d->historyState());return result;
-    }catch(const StoreError &e){if(outer)sqlite3_exec(d->db,"ROLLBACK",nullptr,nullptr,nullptr);d->index=Knowledge::Index();return {{"ok",false},{"error",e.code},{"detail",e.detail}};}
+        if (result.value("ok").toBool() && (op == "save" || op == "trash")) d->memoryDrafts.remove(a.value("path").toString());
+        result.insert("undoState",d->historyState());
+        if (result.value("ok").toBool() && (op=="list" || op=="search" || op=="selectLibrary" || op=="reindex"
+                || op=="read" || op=="restoreBackup" || op=="importNotes" || op=="importAttachment"
+                || op=="quarantineAttachment" || op=="restoreAttachment" || op=="restore" || op=="restoreFolder" || op=="create" || op=="saveAs"
+                || op=="fromTemplate" || op=="dailyNote" || op=="createWiki")) d->addContext(result);
+        return result;
+    }catch(const StoreError &e){if(outer)sqlite3_exec(d->db,"ROLLBACK",nullptr,nullptr,nullptr);d->index=Knowledge::Index();d->manifestDirty=true;return {{"ok",false},{"error",e.code},{"detail",e.detail}};}
+}
+
+QVariantMap ManagedStore::Impl::checkpoint(const QVariantMap &a) {
+    const auto path = a.value("path").toString();
+    require(path.startsWith("external:") ? QDir::isAbsolutePath(path.mid(9)) && !path.contains(QChar::Null) && !path.contains('\n') && !path.contains('\r') : validPath(path), "invalidName");
+    QVariantMap draft{{"path",path},{"text",a.value("text").toString()},{"baseHash",a.value("baseHash").toString()},
+        {"updatedUtc",utc()},{"recoveryDurable",false}};
+    memoryDrafts.insert(path,draft);
+    try {
+        failAt("draftBegin"); query("BEGIN IMMEDIATE");
+        query("INSERT INTO drafts(path,text,base_hash,time) VALUES(?,?,?,?) ON CONFLICT(path) DO UPDATE SET text=excluded.text,base_hash=excluded.base_hash,time=excluded.time",
+              {path,draft.value("text"),draft.value("baseHash"),draft.value("updatedUtc")});
+        failAt("draftCommit"); query("COMMIT");
+        // Once committed, the database is authoritative. Keeping a duplicate
+        // memory entry would become stale after note relocation or deletion.
+        memoryDrafts.remove(path);
+    } catch (const StoreError &error) {
+        sqlite3_exec(db,"ROLLBACK",nullptr,nullptr,nullptr);
+        return {{"ok",false},{"error","recoveryWriteFailed"},{"detail",error.detail},{"draftInMemory",true},{"recoveryDurable",false}};
+    }
+    return {{"ok",true},{"recoveryDurable",true},{"draftInMemory",false}};
+}
+QVariantMap ManagedStore::Impl::discardDraft(const QString &path) {
+    try {
+        query("BEGIN IMMEDIATE"); failAt("draftCleanup");
+        query("DELETE FROM drafts WHERE path=?",{path});
+        failAt("draftCleanupCommit"); query("COMMIT");
+        memoryDrafts.remove(path);
+        return ok();
+    } catch (const StoreError &error) {
+        sqlite3_exec(db,"ROLLBACK",nullptr,nullptr,nullptr);
+        return {{"ok",false},{"error","discardFailed"},{"detail",error.detail},{"draftRetained",true}};
+    }
+}
+QVariantMap ManagedStore::Impl::saveExternal(const QVariantMap &a) {
+    auto draftResult = checkpoint(a);
+    if (!draftResult.value("ok").toBool()) return draftResult;
+    externalStage("draftCommitted");
+    const auto path=a.value("path").toString(), file=path.mid(9), text=a.value("text").toString(), base=a.value("baseHash").toString();
+    try {
+        require(external.contains(path) && external.value(path).hash == base,"unknownBase");
+        auto document=external.value(path);
+        require(document.readOnlyReason.isEmpty(),"readOnly",document.readOnlyReason);
+        require(MarkdownFile::formatError(text).isEmpty(),"unsupportedFormat");
+        require(QFileInfo::exists(file),"notFound",file);
+        const auto current=MarkdownFile::decode(bytesAt(file));
+        if (current.hash != base) return {{"ok",false},{"error","conflict"},{"diskHash",current.hash},{"diskText",current.text},{"draftInMemory",false},{"recoveryDurable",true}};
+        if(a.value("sourceNewlines").toBool())document.trailingNewline=text.endsWith('\n');
+        const auto bytes=MarkdownFile::encode(document,text);
+        failAt("externalWrite");
+        QSaveFile output(file); output.setDirectWriteFallback(false);
+        require(output.open(QIODevice::WriteOnly) && output.write(bytes)==bytes.size() && output.commit(),"writeFailed",output.errorString());
+        external.insert(path,MarkdownFile::decode(bytes));
+        // The disk baseline changes before cleanup. Cleanup failure must never
+        // tell the editor that its successful write failed or kept the old hash.
+        externalStage("externalWritten"); externalStage("beforeDraftCleanup");
+        const auto cleanup=discardDraft(path);
+        QVariantMap result{{"ok",true},{"path",path},{"baseHash",MarkdownFile::digest(bytes)},{"recoveryDurable",true}};
+        if(!cleanup.value("ok").toBool()) {
+            result.insert("draftRetained",true); result.insert("recoveryCleanupFailed",true);
+            result.insert("warning","recoveryCleanupFailed"); result.insert("detail",cleanup.value("detail"));
+        }
+        return result;
+    } catch(const StoreError &error) {
+        return {{"ok",false},{"error",error.code},{"detail",error.detail},{"draftInMemory",false},{"recoveryDurable",true}};
+    }
+}
+QVariantList ManagedStore::Impl::recoveryDrafts() {
+    QMap<QString,QVariantMap> merged;
+    for(const auto &v:query("SELECT * FROM drafts")) {
+        const auto row=v.toMap();
+        merged.insert(row.value("path").toString(),{{"path",row.value("path")},{"text",row.value("text")},
+            {"baseHash",row.value("base_hash")},{"updatedUtc",row.value("time")},{"recoveryDurable",true}});
+    }
+    for(auto it=memoryDrafts.cbegin();it!=memoryDrafts.cend();++it)merged.insert(it.key(),it.value());
+    QVariantList result;
+    for(auto draft:merged) {
+        const auto path=draft.value("path").toString();
+        draft.insert("title",MarkdownFile::title(draft.value("text").toString(),"未命名笔记"));
+        if(path.startsWith("external:")) {
+            // Backup-owned paths are data, never an instruction to read a file.
+            const bool known=external.contains(path);
+            draft.insert("baseUnverified",!known);
+            draft.insert("matchesBase",known && external.value(path).hash==draft.value("baseHash").toString());
+        } else {
+            const auto stored=one("SELECT hash FROM notes WHERE path=?",{path});
+            draft.insert("matchesBase",!stored.isEmpty() && stored.value("hash")==draft.value("baseHash"));
+        }
+        result.append(draft);
+    }
+    return result;
 }
 
 QVariantMap ManagedStore::Impl::run(const QString &op,const QVariantMap &a) {
@@ -514,25 +907,20 @@ QVariantMap ManagedStore::Impl::run(const QString &op,const QVariantMap &a) {
     // External documents are deliberately absent from notes, folders and the index.
     if(path.startsWith("external:")) {
         const auto file=path.mid(9);
-        if(op=="read") {auto d=MarkdownFile::decode(bytesAt(file));external.insert(path,d);return {{"ok",true},{"path",path},{"id",path},{"text",d.text},{"baseHash",d.hash},{"readOnly",!d.readOnlyReason.isEmpty()},{"readOnlyReason",d.readOnlyReason}};}
-        if(op=="save") {
-            require(external.contains(path),"unknownBase");auto d=external.value(path);
-            require(d.readOnlyReason.isEmpty(),"readOnly");require(MarkdownFile::digest(bytesAt(file))==a.value("baseHash").toString(),"conflict");
-            const auto bytes=MarkdownFile::encode(d,a.value("text").toString());writeBytes(file,bytes);external.insert(path,MarkdownFile::decode(bytes));query("DELETE FROM drafts WHERE path=?",{path});return {{"ok",true},{"baseHash",MarkdownFile::digest(bytes)}};
-        }
+        if(op=="read") {require(QDir::isAbsolutePath(file)&&!file.contains(QChar::Null),"unsafePath");auto d=MarkdownFile::decode(bytesAt(file));external.insert(path,d);return {{"ok",true},{"path",path},{"id",path},{"text",d.text},{"baseHash",d.hash},{"readOnly",!d.readOnlyReason.isEmpty()},{"readOnlyReason",d.readOnlyReason}};}
         if(op!="checkpoint"&&op!="discardDraft"&&op!="saveAs")return {{"ok",false},{"error","externalDocument"}};
     }
     if(op=="read")return document(note(path));
     if(op=="create"||op=="saveAs") {
-        auto result=insert(path,a.value("text").toString());result.insert("listing",listing());return result;
+        auto text=a.value("text").toString();const auto source=a.value("sourcePath").toString();
+        if(op=="saveAs")text=rebaseAttachments(text,source.isEmpty()?QStringLiteral("recovery.md"):source,path);
+        auto result=insert(path,text);result.insert("listing",listing());return result;
     }
     if(op=="save") {
         auto n=note(path);require(n["hash"].toString()==a.value("baseHash").toString(),"conflict");
         require(MarkdownFile::formatError(a.value("text").toString()).isEmpty(),"unsupportedFormat");
         updateText(n,a.value("text").toString());query("DELETE FROM drafts WHERE path=?",{path});auto result=document(note(path));result.insert("listing",listing());return result;
     }
-    if(op=="checkpoint") {query("INSERT INTO drafts(path,text,base_hash,time) VALUES(?,?,?,?) ON CONFLICT(path) DO UPDATE SET text=excluded.text,base_hash=excluded.base_hash,time=excluded.time",{path,a.value("text"),a.value("baseHash"),utc()});return {{"ok",true},{"recoveryDurable",true}};}
-    if(op=="discardDraft"){query("DELETE FROM drafts WHERE path=?",{path});return ok();}
     if (op == "createFolder") {
         const auto icon = a.value("icon", QStringLiteral("folder")).toString();
         require(validPath(path), "invalidName");
@@ -614,12 +1002,14 @@ QVariantMap ManagedStore::Impl::run(const QString &op,const QVariantMap &a) {
         for(const auto &v:query("SELECT * FROM notes WHERE deleted<>''")){auto n=v.toMap();if(!one("SELECT id FROM folders WHERE trash_token=?",{n["trash_token"]}).isEmpty())continue;trash.append(QVariantMap{{"kind","note"},{"token",n["trash_token"]},{"source",n["path"]},{"deletedUtc",n["deleted"]},{"fingerprint",n["hash"]},{"title",MarkdownFile::title(n["text"].toString(),QFileInfo(n["path"].toString()).completeBaseName())}});}
         QSet<QString> seen;
         for(const auto &v:query("SELECT * FROM folders WHERE deleted<>'' ORDER BY length(path)")){auto n=v.toMap();const auto token=n["trash_token"].toString();if(seen.contains(token))continue;seen.insert(token);trash.append(QVariantMap{{"kind","folder"},{"token",token},{"source",n["path"]},{"deletedUtc",n["deleted"]},{"fingerprint",token}});}
-        for(const auto &v:query("SELECT * FROM drafts")){auto n=v.toMap();auto stored=one("SELECT hash FROM notes WHERE path=?",{n["path"]});drafts.append(QVariantMap{{"title",MarkdownFile::title(n["text"].toString(),"未命名笔记")},{"path",n["path"]},{"text",n["text"]},{"baseHash",n["base_hash"]},{"updatedUtc",n["time"]},{"matchesBase",stored["hash"]==n["base_hash"]}});}
-        return {{"ok",true},{"trashItems",trash},{"drafts",drafts},{"commits",QVariantList()},{"memoryDrafts",QVariantList()}};
+        drafts=recoveryDrafts();
+        QVariantList memory;
+        for(const auto &draft:memoryDrafts)memory.append(draft);
+        return {{"ok",true},{"trashItems",trash},{"drafts",drafts},{"commits",QVariantList()},{"memoryDrafts",memory}};
     }
     if(op=="restore"||op=="restoreFolder") {
         const auto token=a.value("token").toString(),target=a.value("target").toString();auto n=one("SELECT * FROM notes WHERE trash_token=? AND deleted<>''",{token});
-        if(!target.isEmpty()){require(!n.isEmpty(),"notFound");return insert(target,n["text"].toString());}
+        if(!target.isEmpty()){require(!n.isEmpty(),"notFound");return insert(target,rebaseAttachments(n["text"].toString(),n["path"].toString(),target));}
         require(!n.isEmpty()||!one("SELECT id FROM folders WHERE trash_token=?",{token}).isEmpty(),"notFound");
         const auto rows=query("SELECT path FROM notes WHERE trash_token=?",{token});
         query("UPDATE folders SET deleted='',trash_token='' WHERE trash_token=?",{token});
@@ -699,8 +1089,8 @@ QVariantMap ManagedStore::Impl::run(const QString &op,const QVariantMap &a) {
             const auto resolved=index.resolve(path,target,wiki);const QUrl url(target);
             const bool remote=!wiki&&!url.isRelative()&&!url.isLocalFile();
             const bool anchor=!wiki&&target.startsWith('#');
-            const auto local=LinkPaths::resolve(path,target);
-            const bool attachment=!wiki&&!local.isEmpty()&&!one("SELECT path FROM assets WHERE path=? AND deleted=''",{local}).isEmpty();
+            const auto local=wiki?QString():attachmentIdentity(path,url);
+            const bool attachment=!local.isEmpty();
             l.insert("resolved",resolved.size()==1||remote||anchor||attachment);
             if(resolved.size()==1) {
                 const auto &linked=index.documents[resolved[0]];
@@ -717,21 +1107,23 @@ QVariantMap ManagedStore::Impl::run(const QString &op,const QVariantMap &a) {
     }
     if(op=="importAttachment") {
         note(path);QByteArray bytes;QString name=a.value("name").toString();const QUrl source(a.value("source").toString());if(source.isLocalFile()){name=QFileInfo(source.toLocalFile()).fileName();bytes=bytesAt(source.toLocalFile(),32*1024*1024);}else{auto decoded=QByteArray::fromBase64Encoding(a.value("data").toByteArray(),QByteArray::AbortOnBase64DecodingErrors);require(bool(decoded),"invalidAttachment");bytes=decoded.decoded;}
-        require(!bytes.isEmpty()&&bytes.size()<=32*1024*1024,"attachmentTooLarge");auto rel=asset(bytes,name);return {{"ok",true},{"path",rel},{"name",name},{"url",QUrl::fromLocalFile(root+'/'+rel).toString()},{"mime",QMimeDatabase().mimeTypeForData(bytes).name()},{"image",QMimeDatabase().mimeTypeForData(bytes).name().startsWith("image/")}};
+        require(!bytes.isEmpty()&&bytes.size()<=32*1024*1024,"attachmentTooLarge");auto rel=asset(bytes,name);return {{"ok",true},{"path",rel},{"name",name},{"url",QString::fromUtf8(QUrl::toPercentEncoding(relativeManagedPath(path,rel),"/"))},{"mime",QMimeDatabase().mimeTypeForData(bytes).name()},{"image",QMimeDatabase().mimeTypeForData(bytes).name().startsWith("image/")}};
     }
     if(op=="attachments") {
         QVariantList items,removed;
-        const auto notes=query("SELECT text FROM notes");
+        const auto texts=attachmentReferenceTexts();
         for(const auto &v:query("SELECT path,name,length(data) AS size,deleted FROM assets")) {
-            auto n=v.toMap();const auto p=n["path"].toString();int references=0;
-            for(const auto &doc:notes)if(doc.toMap()["text"].toString().contains(p))++references;
+            auto n=v.toMap();const auto p=n["path"].toString();const int references=attachmentReferences(p,texts);
             n.insert("references",references);n.insert("bytes",n["size"]);n.insert("relative",p);n.insert("token",p);n.insert("removedUtc",n["deleted"]);
             if(n["deleted"].toString().isEmpty())items.append(n);else removed.append(n);
         }
         return {{"ok",true},{"items",items},{"removed",removed}};
     }
     if(op=="quarantineAttachment"||op=="restoreAttachment") {
-        const auto rel=op=="quarantineAttachment"?a.value("relative",a.value("path")).toString():a.value("token").toString();require(!one("SELECT path FROM assets WHERE path=?",{rel}).isEmpty(),"notFound");if(op=="quarantineAttachment")for(const auto &v:query("SELECT text FROM notes"))require(!v.toMap()["text"].toString().contains(rel),"attachmentInUse");query("UPDATE assets SET deleted=? WHERE path=?",{op=="quarantineAttachment"?utc():QString(),rel});return ok();
+        const auto rel=op=="quarantineAttachment"?a.value("relative",a.value("path")).toString():a.value("token").toString();
+        require(!one("SELECT path FROM assets WHERE path=?",{rel}).isEmpty(),"notFound");
+        if(op=="quarantineAttachment")require(attachmentReferences(rel,attachmentReferenceTexts())==0,"attachmentInUse");
+        query("UPDATE assets SET deleted=? WHERE path=?",{op=="quarantineAttachment"?utc():QString(),rel});manifestDirty=true;return ok();
     }
     if(op=="recoverMove")return ok();
     throw StoreError{"unknownOperation",op};
@@ -837,22 +1229,46 @@ QVariantMap ManagedStore::Impl::importItems(const QVariantMap &a) {
 }
 QVariantMap ManagedStore::Impl::exportItems(const QVariantMap &a) {
     const QUrl url(a.value("destination").toString());const auto directory=url.isLocalFile()?url.toLocalFile():a.value("destination").toString();require(QFileInfo(directory).isDir(),"writeFailed");
-    const auto chosen=a.value("paths").toStringList();const auto scope=a.value("folder").toString();QVariantList exported;
+    const auto chosen=a.value("paths").toStringList();const auto scope=a.value("folder").toString();QVariantList exported,warnings;
     auto top=QDir(directory).filePath("笔记导出-"+QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss")+'-'+uid().left(6));require(!QFileInfo::exists(top)&&QDir().mkpath(top),"writeFailed");
-    QSet<QString> assets;const auto allAssets=query("SELECT path,data FROM assets");
+    // Identity lookup is independent of the old absolute path and the disposable
+    // cache. Only the current database's validated BLOBs become exported files.
+    const auto manifest=managedManifest();QSet<QString> assets;
     if(chosen.isEmpty())for(const auto &v:query("SELECT path FROM folders WHERE deleted=''")){const auto p=v.toMap()["path"].toString();if(scope.isEmpty()||p==scope||p.startsWith(scope+'/')){require(validPath(p),"unsafePath");require(QDir().mkpath(top+'/'+p),"writeFailed",p);}}
     for(const auto &v:query("SELECT * FROM notes WHERE deleted=''")) {
         auto n=v.toMap();const auto path=n["path"].toString();if(!chosen.isEmpty()&&!chosen.contains(path))continue;if(!scope.isEmpty()&&!path.startsWith(scope+'/'))continue;
         require(validPath(path),"unsafePath");auto text=n["text"].toString();
-        LinkPaths::rewrite(text,[&](const QString &target,bool wiki){if(wiki)return target;QUrl url(target);QString resolved=url.isLocalFile()?QDir(root).relativeFilePath(url.toLocalFile()):LinkPaths::resolve(path,target);if(resolved.startsWith("assets/")){assets.insert(resolved);auto rel=relativeManagedPath(path,resolved);QString result=QString::fromUtf8(QUrl::toPercentEncoding(rel,"/"));if(!url.fragment().isEmpty())result+='#'+url.fragment(QUrl::FullyEncoded);return result;}return target;});
+        const ManagedAssets::Context context{root,QUrl::fromLocalFile(root+'/'+path),manifest,true};
+        QSet<QString> warned;
+        const bool supported=rewriteExportLinks(text,[&](const QString &target,bool wiki){
+            if(wiki)return target;
+            const QUrl original(target);auto identityUrl=original;identityUrl.setQuery(QString());identityUrl.setFragment(QString());
+            const auto identity=ManagedAssets::resolveIdentity(context,identityUrl);
+            if(!identity.isEmpty()) {assets.insert(identity);return relativeManagedUrl(path,identity,original);}
+            // Unknown local resources remain visible in the Markdown. Never try
+            // their former filesystem location, including for a missing digest.
+            const auto resolved=LinkPaths::resolve(path,target);
+            const bool local=!original.path().isEmpty() && (original.isRelative()||original.isLocalFile()||original.scheme()=="nkasset");
+            if(local && !warned.contains(target) && (resolved.isEmpty()||one("SELECT id FROM notes WHERE path=? AND deleted=''",{resolved}).isEmpty())) {
+                warned.insert(target);warnings.append(QVariantMap{{"path",path},{"target",target},{"code","missingAttachment"},
+                    {"message","附件未包含在当前笔记库中，链接已原样保留："+target}});
+            }
+            return target;
+        });
+        if(!supported)warnings.append(QVariantMap{{"path",path},{"code","unsupportedHtml"},
+            {"message","HTML 链接或图片已原样保留；这类关联资源未自动导出。"}});
         writeBytes(top+'/'+path,text.toUtf8());exported.append(path);
     }
-    for(const auto &v:allAssets){auto n=v.toMap();if(assets.contains(n["path"].toString()))writeBytes(top+'/'+n["path"].toString(),n["data"].toByteArray());}
-    return {{"ok",true},{"directory",top},{"count",exported.size()}};
+    for(const auto &path:assets) {
+        const auto stored=one("SELECT data FROM assets WHERE path=? AND deleted=''",{path});
+        require(!stored.isEmpty() && stored.value("data").metaType().id()==QMetaType::QByteArray
+            && MarkdownFile::digest(stored.value("data").toByteArray())==manifest.value(path).toString(),"databaseCorrupt","Invalid asset identity");
+        writeBytes(top+'/'+path,stored.value("data").toByteArray());
+    }
+    return {{"ok",true},{"directory",top},{"count",exported.size()},{"warnings",warnings}};
 }
 
 namespace {
-using Database = std::unique_ptr<sqlite3, decltype(&sqlite3_close)>;
 Database openDatabase(const QString &path, int flags) {
     sqlite3 *raw = nullptr;
     const int rc = sqlite3_open_v2(QFile::encodeName(path).constData(), &raw, flags, nullptr);
@@ -903,48 +1319,80 @@ QVariantMap ManagedStore::Impl::backup(const QVariantMap &a) {
 }
 QVariantMap ManagedStore::Impl::restoreBackup(const QVariantMap &a) {
     const auto source = QUrl(a.value("source").toString()).toLocalFile();
-    require(QFileInfo(source).isFile() && !QFileInfo(source).isSymLink(), "invalidBackup");
     QTemporaryDir temporary; require(temporary.isValid(), "writeFailed");
     const auto snapshot = temporary.filePath("restore.sqlite3");
-    streamCopy(source,snapshot);
-    auto incoming = openDatabase(snapshot, SQLITE_OPEN_READWRITE);
-    // Validate a private copy, including every schema column used by this app.
-    Impl inspection; inspection.db = incoming.release();
-    try {
-    require(inspection.one("PRAGMA application_id").value("application_id").toInt()==1313558065 &&
-            inspection.one("PRAGMA user_version").value("user_version").toInt()==1, "invalidBackup");
-    require(inspection.one("PRAGMA quick_check").value("quick_check").toString()=="ok" && inspection.query("PRAGMA foreign_key_check").isEmpty(),"invalidBackup");
-    const QStringList columns{
-        "notes:id,path,text,hash,created,modified,pinned,favorite,deleted,trash_token,source,source_hash,import_batch",
-        "folders:id,path,deleted,trash_token", "drafts:path,text,base_hash,time", "versions:note_id,hash,text,time",
-        "assets:path,data,name,deleted", "imports:id,name,time,report", "settings:kind,name,value"};
-    for(const auto &spec:columns)inspection.query("SELECT "+spec.section(':',1)+" FROM "+spec.section(':',0,0)+" LIMIT 0");
-    for(const auto &v:inspection.query("SELECT name,type FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'")) {
-        const auto row=v.toMap();
-        require(row["type"]=="table"||row["type"]=="index","invalidBackup");
+    prepareBackup(source,snapshot);
+    auto incoming = openDatabase(snapshot, SQLITE_OPEN_READONLY);
+    // Prepare metadata and check every cache destination before the restore
+    // commit; no post-commit read can misreport a completed replacement.
+    Impl incomingInspection;incomingInspection.db=openDatabase(snapshot,SQLITE_OPEN_READONLY).release();
+    QVariantMap incomingManifest;
+    const auto incomingAssets=incomingInspection.query("SELECT path,data,deleted FROM assets");
+    for(const auto &v:incomingAssets) {
+        const auto asset=v.toMap();checkedCachePath(asset.value("path").toString());
+        if(asset.value("deleted").toString().isEmpty())incomingManifest.insert(asset.value("path").toString(),MarkdownFile::digest(asset.value("data").toByteArray()));
     }
-    for(const auto &v:inspection.query("SELECT path FROM assets")) {
-        const auto path=v.toMap()["path"].toString();
-        require(validPath(path)&&path.startsWith("assets/")&&!QFileInfo(root+'/'+path).isSymLink(),"invalidBackup");
-    }
-    } catch (const StoreError &) { throw StoreError{"invalidBackup", "备份内容或结构无法读取"}; }
-    // Upgrade the private snapshot before replacing the active library.
-    inspection.initializeFolderMetadata();
-    inspection.initializeFolders();
     // Keep an independent, user-accessible rollback copy before replacing anything.
     const auto safetyFolder=QDir::cleanPath(QDir(root).absoluteFilePath("../Backups"));
     require(QDir().mkpath(safetyFolder),"writeFailed");
     const auto safety=QDir(safetyFolder).filePath("恢复前-"+QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss")+'-'+uid().left(6)+".nkbackup");
     backup({{"destination",QUrl::fromLocalFile(safety).toString()}});
-    copyDatabase(db,inspection.db);
-    initializationNotice = inspection.initializationNotice;
-    index=Knowledge::Index();external.clear();
-    int cacheFailures=0;
+    copyDatabase(db,incoming.get());
+    initializationNotice.clear();
+    index=Knowledge::Index();external.clear();memoryDrafts.clear();assetManifest=std::move(incomingManifest);manifestDirty=false;
+    cacheFailures=0;
     // Cache refresh failures do not undo or misreport a committed database restore.
-    for(const auto &v:query("SELECT path FROM assets WHERE deleted=''")) {
-        const auto asset=one("SELECT path,data FROM assets WHERE path=?",{v.toMap()["path"]});
-        try { writeBytes(root+'/'+asset["path"].toString(),asset["data"].toByteArray()); }
+    for(const auto &v:incomingAssets) {
+        const auto asset=v.toMap();if(!asset.value("deleted").toString().isEmpty())continue;
+        try { writeBytes(checkedCachePath(asset["path"].toString()),asset["data"].toByteArray()); }
         catch(const StoreError &) { ++cacheFailures; }
     }
-    return {{"ok",true},{"safetyCopy",safety},{"cacheFailures",cacheFailures},{"initializationNotice",initializationNotice}};
+    return {{"ok",true},{"safetyCopy",safety},{"cacheFailures",cacheFailures},{"initializationNotice",initializationNotice},{"restored",true}};
+}
+QVariantMap ManagedStore::Impl::recoverInitialization(const QVariantMap &a) {
+    require(library && !library->activationUncertain() && !db, "recoveryUnavailable");
+    require(!hasPendingMemoryDrafts(), "pendingDrafts");
+    QTemporaryDir temporary; require(temporary.isValid(), "writeFailed");
+    const auto snapshot=temporary.filePath("validated.sqlite3");
+    prepareBackup(QUrl(a.value("source").toString()).toLocalFile(),snapshot);
+    const auto preserved=root, recoveryId=uid();
+    const auto replacement=library->createReplacement(recoveryId);
+    const auto lease=ManagedLibrary::lockDirectory(replacement);
+    failAt("replacementDatabase"); streamCopy(snapshot,replacement+"/notes.sqlite3");
+    Impl prepared; prepared.root=replacement; prepared.configuredRoot=configuredRoot;
+    prepared.initializeDatabase();
+    require(prepared.cacheFailures==0,"writeFailed","Replacement attachment cache is incomplete");
+    auto listing=prepared.listing();
+    prepared.addContext(listing);
+    // Complete WAL checkpoint and close all preparation connections before
+    // syncing the replacement; no connection ever touches the failed database.
+    const auto checkpoint=prepared.one("PRAGMA wal_checkpoint(TRUNCATE)");
+    require(checkpoint.value("busy").toInt()==0,"writeFailed","Replacement checkpoint failed");
+    require(prepared.one("PRAGMA journal_mode=DELETE").value("journal_mode").toString()=="delete","writeFailed");
+    require(sqlite3_close(prepared.db)==SQLITE_OK,"writeFailed"); prepared.db=nullptr;
+    QStringList directories{replacement};
+    QDirIterator files(replacement,QDir::Files|QDir::Dirs|QDir::NoDotAndDotDot|QDir::Hidden,QDirIterator::Subdirectories);
+    while(files.hasNext()) {
+        files.next(); const auto info=files.fileInfo();
+        require(!info.isSymLink(),"unsafePath",info.absoluteFilePath());
+        if(info.isDir())directories.append(info.absoluteFilePath());else ManagedLibrary::syncFile(info.absoluteFilePath());
+    }
+    for(auto it=directories.crbegin();it!=directories.crend();++it)ManagedLibrary::syncDirectory(*it);
+    ManagedLibrary::syncDirectory(QFileInfo(replacement).absolutePath());
+    // Reopen and complete the first listing before publication. DELETE mode
+    // avoids creating a new unsynced WAL after the durable preparation step.
+    prepared.db=openDatabase(replacement+"/notes.sqlite3",SQLITE_OPEN_READWRITE).release();
+    prepared.query("PRAGMA trusted_schema=OFF"); prepared.query("PRAGMA synchronous=FULL"); prepared.query("PRAGMA foreign_keys=ON");
+    prepared.initializeUndo(); listing=prepared.listing(); prepared.addContext(listing);
+    recoveryStage("replacementReady");
+    library->publish(replacement,recoveryId,lease);
+    // Pointer publication is the sole commit point. Only infallible state moves
+    // follow it; errors while syncing its directory keep this context blocked.
+    db=prepared.db; prepared.db=nullptr; root=replacement;
+    initializationNotice=prepared.initializationNotice; index=std::move(prepared.index);
+    assetManifest=std::move(prepared.assetManifest); manifestDirty=false;
+    external.clear();memoryDrafts.clear();undoStack.clear();redoStack.clear();openError.clear();
+    listing.insert("ok",true);listing.insert("restored",true);listing.insert("recoveredInitialization",true);
+    listing.insert("entryRoot",library->entryRoot());listing.insert("library",root);listing.insert("preservedDirectory",preserved);
+    listing.insert("undoState",historyState()); return listing;
 }

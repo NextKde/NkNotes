@@ -71,6 +71,8 @@ public:
         currentProgress = {}; currentCancellation.reset();
         result.insert("library", root);
         result.insert("generation", generation);
+        if (managed) result.insert("entryRoot", managed->entryRoot());
+        else if (failedManaged) result.insert("entryRoot", failedManaged->entryRoot());
         emit finished(id, op, result);
     }
 signals:
@@ -79,6 +81,7 @@ signals:
     void changed(const QVariantMap &);
 private:
     std::unique_ptr<ManagedStore> managed;
+    std::unique_ptr<ManagedStore> failedManaged;
     std::function<void(const QVariantMap &)> currentProgress;
     std::shared_ptr<std::atomic_bool> currentCancellation;
     bool editingTags = false;
@@ -231,21 +234,47 @@ QVariantMap RepositoryWorker::dispatch(const QString &op, const QVariantMap &a)
 {
     QString error;
     if (op == "selectLibrary" && a.value("managed").toBool()) {
+        if ((managed && managed->hasPendingMemoryDrafts()) || !memoryDrafts.isEmpty())
+            return failure("pendingDrafts", "Persist or discard in-memory drafts before switching libraries.");
+        const auto selected=QDir(a.value("path").toString()).absolutePath();
+        if (managed && (selected==managed->entryRoot() || selected==managed->directory()))
+            return managed->dispatch("list",{},currentProgress,currentCancellation);
+        // Retrying a failed selection releases only that failed context's leases.
+        failedManaged.reset();
         try {
-            auto next = std::make_unique<ManagedStore>(a.value("path").toString());
+            auto next = std::make_unique<ManagedStore>(a.value("path").toString(),true);
             auto result = next->dispatch("list", {});
-            if (!result.value("ok").toBool()) return result;
+            if (!result.value("ok").toBool()) {
+                // A failed attempt to switch never replaces an already open
+                // library or arms a recovery operation against that library.
+                if (!root.isEmpty()) result.insert("recoveryAvailable",false);
+                else failedManaged=std::move(next);
+                return result;
+            }
             managed = std::move(next); root = managed->directory(); ++generation;
             delete watcher; watcher = nullptr; delete debounce; debounce = nullptr; lock.reset();
+            opened.clear(); fingerprints.clear(); metadata={};
             return result;
-        } catch (...) { return failure("databaseError", "无法打开内部笔记存储；未修改原笔记目录。"); }
+        } catch (const ManagedStoreError &error) {
+            auto result=failure(error.code,error.detail);result.insert("recoveryAvailable",false);return result;
+        }
     }
-    if (managed) {
-        if (a.contains("generation") && a.value("generation").toULongLong() != generation) return failure("staleGeneration");
-        return managed->dispatch(op, a, currentProgress, currentCancellation);
+    if (a.contains("generation") && op != "selectLibrary" && a.value("generation").toULongLong() != generation) return failure("staleGeneration");
+    if (op == "restoreBackup" && failedManaged && !managed) {
+        auto result=failedManaged->dispatch(op,a,currentProgress,currentCancellation);
+        if(result.value("ok").toBool()) {
+            managed=std::move(failedManaged); root=managed->directory(); ++generation;
+            delete watcher; watcher=nullptr; delete debounce; debounce=nullptr; lock.reset();
+        }
+        return result;
+    }
+    if (managed && op != "selectLibrary") {
+        auto result=managed->dispatch(op,a,currentProgress,currentCancellation);
+        if(op=="restoreBackup" && result.value("ok").toBool()) {root=managed->directory();++generation;}
+        return result;
     }
     if (op == "selectLibrary") {
-        if (!memoryDrafts.isEmpty()) return failure("pendingDrafts", "Save or explicitly discard in-memory drafts before switching libraries.");
+        if (!memoryDrafts.isEmpty() || (managed && managed->hasPendingMemoryDrafts())) return failure("pendingDrafts", "Save or explicitly discard in-memory drafts before switching libraries.");
         QFileInfo selected(a.value("path").toString());
         if (!selected.isDir() || selected.isSymLink()) return failure("invalidLibrary");
         QString selectedRoot = selected.canonicalFilePath();
@@ -293,6 +322,7 @@ QVariantMap RepositoryWorker::dispatch(const QString &op, const QVariantMap &a)
         }
         delete oldWatcher; delete oldDebounce;
         lock = std::move(newLock);
+        managed.reset(); failedManaged.reset();
         ++generation;
         return prepared;
     }

@@ -28,7 +28,7 @@ Item {
     function toggleOutline(anchor) { tools.toggleOutline(anchor) }
     function correctSpelling(word) { web.replaceMisspelledWord(word); editorFacade.forceActiveFocus() }
     function exportBaseName() { return String(root.controller.noteTitle || "笔记").replace(/[\\/:*?"<>|\u0000-\u001f]/g, "-").replace(/[. ]+$/g, "").slice(0,100) || "笔记" }
-    function chooseExport(format) { if (!webReady || session.sourceMode || session.composing || exporting) return; exportDialog.format = format; exportDialog.selectedFile = String(exportDialog.currentFolder) + "/" + encodeURIComponent(root.exportBaseName() + "." + format); exportDialog.open() }
+    function chooseExport(format) { if (!webReady || session.sourceMode || session.composing || exporting) return; exportDialog.format = format; exportDialog.selectedFile = String(exportDialog.currentFolder).replace(/\/$/, "") + "/" + encodeURIComponent(root.exportBaseName() + "." + format); exportDialog.open() }
     function beginExport(format, target, printing) {
         if (!webReady || session.sourceMode || session.composing || exporting) return
         const path = printing ? controller.printPreviewPath() : controller.outputPath(target, format)
@@ -170,7 +170,9 @@ Item {
         anchors.fill: parent
         source: root; session: root.session; controller: root.controller; sceneItem: root.sceneItem
     }
-    LiquidFilePicker {
+    NotesFilePicker {
+        systemFileDialogs: root.controller.systemFileDialogs
+        onFailed: function(message) { root.notify(message) }
         sourceItem: root.sceneItem; acceptText: "选择"; rejectText: "取消"
         locationPlaceholder: "输入文件夹路径"; fileNamePlaceholder: "文件名"; emptyText: "此文件夹中没有可选文件"
         overwriteTitle: "替换这个文件？"; overwriteText: "目标位置已有同名文件，替换后将覆盖原内容。"; overwriteAcceptText: "替换"; unavailableText: "文件夹不存在或无法访问";
@@ -182,7 +184,9 @@ Item {
         onAccepted: root.controller.importAttachment(request, generation, selectedFile)
         onRejected: bridge.attachmentResult(request, generation, {ok: false, error: "cancelled"})
     }
-    LiquidFilePicker {
+    NotesFilePicker {
+        systemFileDialogs: root.controller.systemFileDialogs
+        onFailed: function(message) { root.notify(message) }
         sourceItem: root.sceneItem; acceptText: "导出"; rejectText: "取消"
         locationPlaceholder: "输入文件夹路径"; fileNamePlaceholder: "文件名"; emptyText: "此文件夹中没有可选文件"
         overwriteTitle: "替换这个文件？"; overwriteText: "目标位置已有同名文件，替换后将覆盖原内容。"; overwriteAcceptText: "替换"; unavailableText: "文件夹不存在或无法访问";

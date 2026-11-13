@@ -1,4 +1,5 @@
 #include "NotesController.h"
+#include "storage/ManagedAssets.h"
 #include <QFile>
 #include <QFileInfo>
 #include <QDir>
@@ -14,7 +15,10 @@ void NotesController::setEditorExporting(bool value) { if (m_exporting != value)
 QString NotesController::outputPath(const QUrl &target, const QString &extension) const {
     if (!target.isLocalFile() || (extension != "html" && extension != "pdf")) return {};
     QString file = target.toLocalFile();
-    if (!file.endsWith('.' + extension, Qt::CaseInsensitive)) file += '.' + extension;
+    if (!file.endsWith('.' + extension, Qt::CaseInsensitive)) {
+        if (systemFileDialogs()) return {}; // A portal grant covers the exact chosen name.
+        file += '.' + extension;
+    }
     if (QFileInfo(file).isSymLink()) return {};
     return file;
 }
@@ -65,17 +69,20 @@ QString NotesController::exportDocument(const QString &body, const QString &titl
     QString html = body;
     const QRegularExpression images("<img\\b[^>]*\\bsrc=\"([^\"]+)\"[^>]*>", QRegularExpression::CaseInsensitiveOption);
     auto matches = images.globalMatch(body);
-    const QString root = QFileInfo(assetRoot()).canonicalFilePath();
+    const ManagedAssets::Context assets{assetRoot(), documentUrl(), assetManifest(), managedAssets()};
     while (matches.hasNext()) {
         const auto match = matches.next();
         const QString encoded = match.captured(1);
         const QUrl url(QString(encoded).replace("&amp;", "&"));
-        if (url.scheme() == "data") continue;
-        const QString file = url.isLocalFile() ? QFileInfo(url.toLocalFile()).canonicalFilePath() : url.scheme() == "nkasset" ? QFileInfo(url.path()).canonicalFilePath() : QString();
-        if (root.isEmpty() || file.isEmpty() || !file.startsWith(root + '/') || QFileInfo(file).size() > 32 * 1024 * 1024) { return {}; }
-        const QByteArray bytes = read(file);
-        if (bytes.isEmpty()) { return {}; }
-        const QString data = "data:" + QMimeDatabase().mimeTypeForData(bytes).name() + ";base64," + QString::fromLatin1(bytes.toBase64());
+        if (url.scheme() == "data") {
+            if (!url.toString().startsWith("data:image/", Qt::CaseInsensitive)) return {};
+            continue;
+        }
+        QByteArray bytes;
+        if (ManagedAssets::resolvePath(assets, url, &bytes).isEmpty()) return {};
+        const QString mime = QMimeDatabase().mimeTypeForData(bytes).name();
+        if (!mime.startsWith("image/")) return {};
+        const QString data = "data:" + mime + ";base64," + QString::fromLatin1(bytes.toBase64());
         QString image = match.captured(); image.replace("src=\"" + encoded + "\"", "src=\"" + data + "\"");
         html.replace(match.captured(), image);
     }

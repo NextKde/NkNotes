@@ -740,13 +740,24 @@ ApplicationWindow {
     }
     Connections { target: session; function onStateChanged() { if (root.pendingFormat) Qt.callLater(root.deliverFormat) } }
     LiquidBackdrop { id: readingBackdrop; sourceItem: readingScene; registerAsDefault: false }
-    KosEmptyState {
+    Column {
         anchors.centerIn: parent; width: Math.min(420, root.width - 64)
         visible: !root.hasLibrary
-        symbol: ""; title: "让想法有处可归"
-        description: "写下想法，让灵感与日常记录有处可归。"
-        actionText: controller.busy ? "正在准备…" : "开始记录"; actionEnabled: !controller.busy
-        onActionTriggered: controller.restoreWorkspace()
+        spacing: 12
+        KosEmptyState {
+            width: parent.width
+            symbol: ""; title: controller.error ? "笔记空间未能打开" : "让想法有处可归"
+            description: controller.error || "写下想法，让灵感与日常记录有处可归。"
+            actionText: controller.busy ? "正在准备…" : controller.error ? "重试打开" : "开始记录"
+            actionEnabled: !controller.busy
+            onActionTriggered: controller.restoreWorkspace()
+        }
+        Button {
+            anchors.horizontalCenter: parent.horizontalCenter
+            text: "从完整备份恢复"; visible: controller.recoveryAvailable
+            enabled: !controller.busy
+            onClicked: libraryActions.restoreBackup()
+        }
     }
     KosSidebar {
         id: sidebar
